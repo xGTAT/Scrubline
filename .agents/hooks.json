@@ -1,0 +1,23 @@
+{
+  "scrubline-audit": {
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./scripts/hook-recorder.js post-tool",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "node ./scripts/hook-recorder.js stop",
+        "timeout": 10
+      }
+    ]
+  }
+}

@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Builds & Packages
+dist/
+out/
+*.vsix
+
+# Logs & Audit streams
+*.log
+*.jsonl
+.agents/hook-events.jsonl
+
+# OS and Temp files
+.DS_Store
+Thumbs.db
+temp-preview/
+.snapshots/

@@ -1,0 +1,60 @@
+{
+  "name": "scrubline-panel",
+  "displayName": "Scrubline Review Panel",
+  "description": "Feasibility spike: smallest installable TypeScript extension and React webview panel",
+  "version": "0.0.1",
+  "publisher": "scrubline",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:scrubline.historyView",
+    "onCommand:scrubline.openPanel"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "scrubline.openPanel",
+        "title": "Scrubline: Open Timeline Panel",
+        "category": "Scrubline"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "scrubline-container",
+          "title": "Scrubline",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "scrubline-container": [
+        {
+          "type": "webview",
+          "id": "scrubline.historyView",
+          "name": "Scrubline Timeline"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node build.js",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@types/vscode": "^1.80.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.25.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "typescript": "^5.3.3"
+  }
+}

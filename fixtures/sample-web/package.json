@@ -1,0 +1,13 @@
+{
+  "name": "scrubline-sample-web",
+  "version": "1.0.0",
+  "description": "Minimal two-state web app fixture for Scrubline feasibility spikes",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": ["scrubline", "fixture", "sample"],
+  "author": "Scrubline Team",
+  "license": "MIT"
+}
