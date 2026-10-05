@@ -2,7 +2,7 @@
   "name": "scrubline-panel",
   "displayName": "Scrubline Review Panel",
   "description": "Disk checkpoints and a source timeline",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "scrubline",
   "engines": {
     "vscode": "^1.80.0"
@@ -102,6 +102,11 @@
           "type": "string",
           "default": "",
           "description": "Optional installed Chromium executable for checkpoint screenshots. No browser download at runtime."
+        },
+        "scrubline.postApplyCommand": {
+          "type": "string",
+          "default": "",
+          "description": "Trusted build/test command for isolated selective-apply candidate. Required before selective apply."
         }
       }
     }
@@ -148,6 +153,7 @@
     "@modelcontextprotocol/sdk": "1.32.1",
     "@phosphor-icons/react": "2.1.10",
     "ignore": "5.3.2",
+    "parse5": "7.3.0",
     "playwright-core": "1.63.0",
     "zod": "4.6.5"
   }
