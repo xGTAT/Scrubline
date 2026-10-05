@@ -261,4 +261,5 @@ export class HistoryStore {
       await fs.writeFile(target, await this.readBlob(f.hash), { flag: 'wx', mode: f.mode });
     }
   }
-  }
+}
+// Release module boundary.
