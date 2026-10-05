@@ -60,7 +60,7 @@ npx @vscode/vsce package --no-dependencies --allow-missing-repository
 - **Live Workbench Panel Rendering:**
   The panel was launched in the workbench, and the React UI rendered with live diagnostics, slider controls, and theme binding.
 
-![Scrubline Panel visibly open in host workbench](file:///d:/Scrubline/docs/evidence/host_panel_rendered.png)
+![Scrubline Panel visibly open in host workbench](evidence/host_panel_rendered.png)
 
 ---
 
@@ -136,6 +136,10 @@ A minimal, zero-dependency fixture was created with native Node HTTP serving:
 - `fixtures/sample-web/server.js` (Configurable port zero-dependency server)
 
 ### State Evolution & Disk Hashing
+
+> [!NOTE]
+> The hashes, byte counts, and preview results in Probes 3-4 are **spike measurements with no committed capture code or manifest**. They are not reproducible from this repository. M1 replaces them with the real capture engine and tests (bug B8 stays open until then).
+
 1. **Checkpoint 0 (Baseline State A):**
    - File: `fixtures/sample-web/index.html`
    - File Size: `1,764` bytes
@@ -195,7 +199,7 @@ Promise.all([getP(4101), getP(4102)]).then(r => console.log(JSON.stringify(r)));
 
 | State 1: Baseline (Port 4101) | State 2: Agent Modified (Port 4102) |
 | :---: | :---: |
-| ![State 1 Baseline Preview](file:///d:/Scrubline/docs/evidence/preview_state_1_baseline.png) | ![State 2 Agent Modified Preview](file:///d:/Scrubline/docs/evidence/preview_state_2_modified.png) |
+| ![State 1 Baseline Preview](evidence/preview_state_1_baseline.png) | ![State 2 Agent Modified Preview](evidence/preview_state_2_modified.png) |
 
 ---
 
@@ -203,7 +207,7 @@ Promise.all([getP(4101), getP(4102)]).then(r => console.log(JSON.stringify(r)));
 
 | # | Verification Gate | Result | Evidence / Details |
 | :--- | :--- | :---: | :--- |
-| **1** | Panel visibly opens in the chosen supported host | **PASS** | Installed in Antigravity IDE `1.107.0` and VS Code `1.129.1`. React webview rendered in workbench. Screenshot: `docs/evidence/host_panel_rendered.png`. |
+| **1** | Panel visibly opens in the chosen supported host | **PASS (VS Code)** / **UNVERIFIED (Antigravity)** | The committed screenshot `docs/evidence/host_panel_rendered.png` shows the panel rendering in **VS Code server-distro `1.139.1`**, not Antigravity. Antigravity Desktop `1.107.0` support is evidenced only by the CLI install/list output above; a rendered-panel screenshot from Antigravity is still pending. |
 | **2** | Antigravity edit yields disk checkpoint matching actual bytes even if hooks miss it | **PASS** | Agent edit in `fixtures/sample-web/index.html` updated hash from `a634563...` (1764 bytes) to `afc156f...` (2226 bytes). Verified independently of hooks. |
 | **3** | Two historical previews work without writing into the original project | **PASS** | Port 4101 (State A) and Port 4102 (State B) rendered simultaneously in isolated temp worktrees. Original workspace hash remained 100% identical (0 bytes altered). |
 | **4** | `docs/feasibility.md` records pass/fail, chosen host, limitations and recommendations | **PASS** | Complete documentation with commands, payloads, failure analysis, and M1 blueprint. |
@@ -213,6 +217,7 @@ Promise.all([getP(4101), getP(4102)]).then(r => console.log(JSON.stringify(r)));
 ## 7. Limitations & Recommendations for M1
 
 ### Identified Limitations
+0. **Evidence caveat (corrected in M0.1):** The host table above records Antigravity Desktop as the selected primary host, but the committed panel screenshot shows VS Code (`server-distro`). Treat the Antigravity "PASS" as install-level only until a rendered-panel screenshot from Antigravity is captured.
 1. **No Automated Chat Injection:** Antigravity Desktop does not expose a documented public API to programmatically inject prompts into the user's active AI chat pane.
    - *Recommendation:* Keep the M0 manual copyable context-packet paradigm for agent re-prompting. Do not attempt fragile GUI accessibility hacks.
 2. **Hook Gaps:** Antigravity lifecycle hooks cannot capture manual user saves, terminal build tool mutations, or Cline actions.
