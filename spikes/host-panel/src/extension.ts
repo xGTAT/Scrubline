@@ -2,6 +2,11 @@ import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
+import { McpBridge } from './mcp/bridge';
+import { redact } from './targeting/redact';
+import { TargetSession } from './targeting/session';
+import { makePacket } from './targeting/packet';
+import { envValues } from './targeting/redact';
 import { Restore } from './review/restore';
 import { PreviewRunner } from './preview/runner';
 import { Timeline } from './capture/timeline';
@@ -28,11 +33,14 @@ export async function activate(context: vscode.ExtensionContext) {
   let preview: TimelineState['preview'];
   let review: TimelineState['review'];
   let canUndo = false;
+  let mcpBridge: McpBridge | undefined;
+  let targetSession: TargetSession | undefined;
+  let targeting: TimelineState['targeting'] = { status: 'off' };
   let previewView: vscode.Webview | undefined;
   let latestThumbnail: string | undefined;
   let shutdownPreview = false;
   const publish = (next: TimelineState) => {
-    state = { ...next, preview, review, canUndo };
+    state = { ...next, preview, review, canUndo, targeting };
     for (const view of views) void view.postMessage({ type: 'timeline', data: state });
     const newest = next.rows.at(-1)?.id;
     if (
@@ -152,6 +160,7 @@ export async function activate(context: vscode.ExtensionContext) {
         dispose: () => {
           shutdownPreview = true;
           void previewQueue.finally(async () => {
+            await targetSession?.stop();
             await runner?.stop();
             await timeline?.dispose();
           });
@@ -173,6 +182,21 @@ export async function activate(context: vscode.ExtensionContext) {
     await timeline.start();
     dirty();
   };
+  const secrets = async () => {
+    const values: string[] = [];
+    if (!timeline) return values;
+    for (const name of (await fs.readdir(timeline.workspace)).filter((n) => n.startsWith('.env'))) {
+      try {
+        const file = path.join(timeline.workspace, name);
+        const stat = await fs.lstat(file);
+        if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1024 * 1024) continue;
+        values.push(...envValues(await fs.readFile(file, 'utf8')));
+      } catch {
+        /* Optional env redaction. */
+      }
+    }
+    return values;
+  };
   const attach = (view: vscode.Webview) => {
     views.add(view);
     previewView = view;
@@ -188,6 +212,8 @@ export async function activate(context: vscode.ExtensionContext) {
     const showPreview = async (id: string) => {
       const checkpoint = timeline?.store.checkpoints.find((c) => c.id === id);
       if (!checkpoint || !runner || shutdownPreview) return;
+      await targetSession?.stop();
+      targeting = { status: 'off' };
       preview = { status: 'loading', checkpoint: id };
       publish(state);
       try {
@@ -233,6 +259,55 @@ export async function activate(context: vscode.ExtensionContext) {
           review = undefined;
           previewQueue = previewQueue.then(() => showPreview(target.id));
           await previewQueue;
+        }
+        if (message.type === 'start-targeting') {
+          if (!preview?.url || !preview.checkpoint)
+            throw new Error('Select a rendered checkpoint first.');
+          const executable = config.get<string>('chromiumPath');
+          if (!executable) throw new Error('Set Chromium path for targeting.');
+          const cp = timeline.store.checkpoints.find((c) => c.id === preview!.checkpoint);
+          if (!cp) throw new Error('Checkpoint unavailable.');
+          const previous = timeline.store.checkpoints.find((c) => c.id === cp.parentId);
+          const redactions = await secrets();
+          await targetSession?.stop();
+          targetSession = new TargetSession(
+            executable,
+            timeline.store.root,
+            (selection, crop) => {
+              const packet = makePacket(cp, previous, selection, redactions);
+              targeting = {
+                status: 'ready',
+                packet: packet.body,
+                summary: packet.summary,
+                crop: crop ? view.asWebviewUri(vscode.Uri.file(crop)).toString() : undefined
+              };
+              publish(state);
+            },
+            (message) => {
+              targeting = { status: 'off', message };
+              publish(state);
+            }
+          );
+          await targetSession.start(preview.url, redactions);
+          targeting = { status: 'on' };
+          publish(state);
+        }
+        if (message.type === 'stop-targeting') {
+          await targetSession?.stop();
+          targeting = { status: 'off' };
+          publish(state);
+        }
+        if (message.type === 'validate-target' || message.type === 'copy-packet') {
+          if (!targetSession || !(await targetSession.validate())) {
+            targeting = { ...targeting, status: 'stale', message: 'Target changed. Select again.' };
+            publish(state);
+            return;
+          }
+          if (message.type === 'copy-packet' && targeting?.packet) {
+            await vscode.env.clipboard.writeText(targeting.packet);
+            targeting = { ...targeting, message: 'Copied for manual paste.' };
+            publish(state);
+          }
         }
         if (message.type === 'start-preview' && runner) {
           preview = { status: 'loading' };
@@ -326,6 +401,14 @@ export async function activate(context: vscode.ExtensionContext) {
           );
         }
       } catch (e) {
+        if (['start-targeting', 'copy-packet', 'validate-target'].includes(message.type)) {
+          targeting = {
+            status: 'error',
+            message: e instanceof Error ? e.message : 'Targeting failed.'
+          };
+          publish(state);
+          return;
+        }
         previewQueue = Promise.resolve();
         publish({
           ...state,
@@ -349,6 +432,70 @@ export async function activate(context: vscode.ExtensionContext) {
     )
   );
   context.subscriptions.push(
+    vscode.commands.registerCommand('scrubline.startMcp', async () => {
+      if (!timeline || !restore || !vscode.workspace.isTrusted)
+        throw new Error('Open one trusted local workspace first.');
+      await mcpBridge?.stop();
+      mcpBridge = new McpBridge(timeline.store.root, {
+        list: async () => {
+          if (!vscode.workspace.isTrusted) throw new Error('Workspace not trusted.');
+          const values = await secrets();
+          return {
+            checkpoints: state.rows.map((r) => ({
+              id: r.id,
+              createdAt: r.createdAt,
+              changedPaths: r.changedPaths.map((p) => redact(p, values))
+            }))
+          };
+        },
+        review: async (id) => {
+          if (!vscode.workspace.isTrusted) throw new Error('Workspace not trusted.');
+          const redactions = await secrets();
+          const target = timeline!.store.checkpoints.find((c) => c.id === id);
+          if (!target) throw new Error('Unknown checkpoint.');
+          const checked = await timeline!.exclusive(() =>
+            restore!.review(target, timeline!.store.checkpoints.at(-1)!, state.unsaved)
+          );
+          review = {
+            token: checked.token,
+            checkpoint: id,
+            paths: checked.paths,
+            conflicts: checked.conflicts
+          };
+          publish(state);
+          await vscode.commands.executeCommand('scrubline.openPanel');
+          return {
+            status: 'pending_user_confirmation',
+            checkpoint: id,
+            changedPaths: checked.paths.map((p) => redact(p, redactions)),
+            conflicts: checked.conflicts.map((p) => redact(p, redactions)),
+            message: 'Review exact paths and confirm in the Scrubline panel. No files restored.'
+          };
+        }
+      });
+      const connection = await mcpBridge.start();
+      const document = await vscode.workspace.openTextDocument({
+        language: 'json',
+        content: JSON.stringify(
+          {
+            mcpServers: {
+              scrubline: {
+                command: 'node',
+                args: [
+                  path.join(context.extensionPath, 'dist', 'mcp.js'),
+                  '--connection',
+                  connection
+                ]
+              }
+            }
+          },
+          null,
+          2
+        )
+      });
+      await vscode.window.showTextDocument(document);
+      return connection;
+    }),
     vscode.commands.registerCommand('scrubline.openPanel', () => {
       const panel = vscode.window.createWebviewPanel(
         'scrubline.panel',
@@ -365,6 +512,8 @@ export async function activate(context: vscode.ExtensionContext) {
   shutdown = async () => {
     shutdownPreview = true;
     await previewQueue;
+    await targetSession?.stop();
+    await mcpBridge?.stop();
     await runner?.stop();
     await timeline?.dispose();
   };
