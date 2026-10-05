@@ -240,3 +240,50 @@ for (const status of ['on', 'ready', 'stale', 'error'] as const) {
     await page.screenshot({ path: `${evidenceDir}/panel_m3_${status}.png`, fullPage: true });
   });
 }
+test('M4 fork list and two alternatives comparison stay usable at narrow width', async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 280, height: 740 });
+  await page.goto('/');
+  await expect(page.getByText('No checkpoints yet')).toBeVisible();
+  await page.evaluate(() => {
+    const image =
+      'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="140"%3E%3Crect width="200" height="140" fill="%23343a40"/%3E%3C/svg%3E';
+    (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
+      status: 'ready',
+      unsaved: false,
+      rows: [
+        {
+          id: 'a'.repeat(64),
+          createdAt: '2026-10-05T15:00:00Z',
+          changedPaths: ['navbar.html'],
+          attribution: { kind: 'unattributed' }
+        }
+      ],
+      branches: [
+        {
+          id: 'branch',
+          name: 'Navbar',
+          base: 'a',
+          checkpoint: 'b'.repeat(64),
+          directory: 'test-only'
+        }
+      ],
+      comparison: { leftId: 'a', rightId: 'b', left: image, right: image }
+    });
+  });
+  expect((await page.locator('body').innerText()).trim().split(/\s+/).length).toBeLessThanOrEqual(
+    40
+  );
+  await page.getByText('Alternatives (1)').click();
+  await expect(page.getByRole('button', { name: 'Choose files' })).toBeVisible();
+  const bounds = await page.getByRole('button', { name: 'Choose files' }).boundingBox();
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(280);
+  await expect(page.getByRole('button', { name: 'Navbar', exact: true })).toBeVisible();
+  expect(
+    (await new AxeBuilder({ page }).analyze()).violations.filter(
+      (v) => v.impact === 'serious' || v.impact === 'critical'
+    )
+  ).toEqual([]);
+  await page.screenshot({ path: `${evidenceDir}/panel_m4_comparison.png`, fullPage: true });
+});
