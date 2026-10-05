@@ -223,4 +223,6 @@ pre {
   white-space: normal;
   overflow: visible;
   font-family: inherit;
-  }
+}
+
+/* Alternative controls wrap within narrow panels. */
