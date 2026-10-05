@@ -99,6 +99,14 @@ export class Timeline {
     });
     return this.queue;
   }
+  exclusive<T>(action: () => Promise<T>): Promise<T> {
+    const result = this.queue.then(action);
+    this.queue = result.then(
+      () => {},
+      () => {}
+    );
+    return result;
+  }
   private async attribution(files: Checkpoint['files'], changed: string[]): Promise<Attribution> {
     if (!this.hookLog) return { kind: 'unattributed' };
     try {
