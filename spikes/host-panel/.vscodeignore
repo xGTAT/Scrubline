@@ -1,8 +1,6 @@
-.vscode-test/**
-test/**
-node_modules/@phosphor-icons/**
-src/**
-*.config.*
-test-results/**
-playwright-report/**
-out/**
+**
+!dist/**
+!media/**
+!package.json
+!node_modules/playwright-core/**
+!node_modules/ignore/**
