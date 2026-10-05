@@ -148,14 +148,23 @@ export class HistoryStore {
     if (all.filter((c) => c.parentId === null).length > 1)
       throw new Error('History has multiple roots.');
     const ordered: Checkpoint[] = [];
-    const pending = [...all];
-    while (pending.length) {
-      const index = pending.findIndex(
-        (c) => c.parentId === null || ordered.some((p) => p.id === c.parentId)
-      );
-      if (index < 0) throw new Error('History parent graph is inconsistent.');
-      ordered.push(pending.splice(index, 1)[0]);
+    const byId = new Map(all.map((c) => [c.id, c]));
+    const visited = new Set<string>();
+    const visiting = new Set<string>();
+    function visit(c: Checkpoint) {
+      if (visited.has(c.id)) return;
+      if (visiting.has(c.id)) throw new Error('History parent graph is inconsistent.');
+      visiting.add(c.id);
+      if (c.parentId) {
+        const parent = byId.get(c.parentId);
+        if (!parent) throw new Error('History parent graph is inconsistent.');
+        visit(parent);
+      }
+      visiting.delete(c.id);
+      visited.add(c.id);
+      ordered.push(c);
     }
+    for (const c of all) visit(c);
     // Preserve the workspace chain at the end for older consumers; alternatives are independent.
     ordered.sort((a, b) => Number(!a.branch) - Number(!b.branch));
     this.checkpoints = ordered;
@@ -225,6 +234,20 @@ export class HistoryStore {
     );
     return c;
   }
+  async compact() {
+    // Preserve every committed checkpoint; collect only unreachable capture debris.
+    const referenced = new Set(this.checkpoints.flatMap((c) => c.files.map((f) => f.hash)));
+    let removedBytes = 0;
+    for (const name of await fs.readdir(path.join(this.root, 'blobs'))) {
+      if (!HASH.test(name) || referenced.has(name)) continue;
+      const file = path.join(this.root, 'blobs', name);
+      const stat = await fs.lstat(file);
+      if (!stat.isFile() || stat.isSymbolicLink()) continue;
+      removedBytes += stat.size;
+      await fs.unlink(file);
+    }
+    return removedBytes;
+  }
   async materialize(c: Checkpoint, destination: string) {
     // Only isolated, empty destinations. Workspace restore belongs to M2.
     const validated = migrate(c);
@@ -238,4 +261,4 @@ export class HistoryStore {
       await fs.writeFile(target, await this.readBlob(f.hash), { flag: 'wx', mode: f.mode });
     }
   }
-}
+  }
