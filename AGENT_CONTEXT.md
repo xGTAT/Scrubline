@@ -34,3 +34,8 @@
 - Main M0.1-M3 gate PASS: https://github.com/xGTAT/Scrubline/actions/runs/37357088937 @ 3e07c9e.
 - Local M4 snapshot forks, DAG restart, captured side-by-side renders, file three-way merge/review/Undo, candidate+post-build checks and narrow standalone navbar HTML/CSS ownership. No worktrees/hunks/general component mapping.
 - 47 unit tests, 20 UI, host, package pass; publication and Windows gate pending. Read docs/m4-branches-selective.md.
+
+# M6 release status
+- M4 Windows passed #134 at fea3fb2. M5 deferred by owner; no replay command/UI in release.
+- M6 v0.6.0: 1000-row virtualization, theme/icon/motion polish, compaction/delete commands, ignore additions, Vitest4.1.11 audit clean. 50 units/24 UI/host/install checks local PASS. Windows release run pending.
+- Read docs/m6-release.md for benchmark, exact limits and Human checks; no claim of Antigravity support or owner-machine benchmark.
