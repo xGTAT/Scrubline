@@ -29,3 +29,8 @@
 - Opt-in same-origin overlay, unique selector/fingerprint, separate Chromium window, Escape/Stop, sanitized crop, deterministic redacted context and review-before-copy. Optional MCP approved Oct 5 23:09:52 and included as stdio listing/review-only restore.
 - Init-script test caught document.body timing and transpiler helper issues; fixed. Actual session tests cover reload, stale replacement, crop and edit/new checkpoint.
 - Local 38 unit tests, 19 UI tests, host regression, VSIX package pass. Windows result pending publication. Read docs/m3-targeting-context.md for redaction and selection limits.
+
+# M4 progress
+- Main M0.1-M3 gate PASS: https://github.com/xGTAT/Scrubline/actions/runs/37357088937 @ 3e07c9e.
+- Local M4 snapshot forks, DAG restart, captured side-by-side renders, file three-way merge/review/Undo, candidate+post-build checks and narrow standalone navbar HTML/CSS ownership. No worktrees/hunks/general component mapping.
+- 47 unit tests, 20 UI, host, package pass; publication and Windows gate pending. Read docs/m4-branches-selective.md.
