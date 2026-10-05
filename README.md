@@ -1,6 +1,6 @@
 # Scrubline
 
-A source timeline for agent-edited frontends. M3 captures disk states, renders isolated previews, reviews restore/Undo, and builds redacted manual-paste context from visual selections.
+A source timeline for agent-edited frontends. M4 captures disk states, renders isolated previews, reviews restore/Undo, and builds redacted manual-paste context from visual selections.
 
 ## What works
 
@@ -21,9 +21,13 @@ Select a rendered checkpoint, then **Select element** to open an opt-in Chromium
 
 **Scrubline: Start Local MCP** opens client configuration for two tools: list checkpoints and request restore review. MCP never applies files; confirm exact paths in the Scrubline panel. See [M3 notes](docs/m3-targeting-context.md) for setup and local-access limits.
 
+## Alternatives
+
+Fork a checkpoint into an isolated folder, capture edits, compare rendered alternatives, then choose exact files to review. Three-way overlap is blocked. A narrow standalone static navbar prototype is included; shared CSS and embedded/framework ownership are refused. A configured build/test command must pass before and after selective apply. See [M4 notes](docs/m4-branches-selective.md).
+
 ## What does not work yet
 
-Branches and replay export. Preview commands requiring excluded dependencies may not reproduce; labelled screenshots are the fallback. Not lossless capture of every transient edit. Antigravity runtime needs a live check; Windows FS results need Windows CI verification.
+Replay export and general hunk/framework element apply. Preview commands requiring excluded dependencies may not reproduce; labelled screenshots are the fallback. Not lossless capture of every transient edit. Antigravity runtime needs a live check; Windows FS results need Windows CI verification.
 
 ## Build and test
 
