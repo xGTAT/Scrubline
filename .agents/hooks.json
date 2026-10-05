@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ./scripts/hook-recorder.js post-tool",
+            "command": "node ./.agents/scripts/hook-recorder.js post-tool",
             "timeout": 10
           }
         ]
@@ -15,7 +15,7 @@
     "Stop": [
       {
         "type": "command",
-        "command": "node ./scripts/hook-recorder.js stop",
+        "command": "node ./.agents/scripts/hook-recorder.js stop",
         "timeout": 10
       }
     ]
