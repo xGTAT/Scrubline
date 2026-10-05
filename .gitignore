@@ -24,3 +24,5 @@ playwright-report/
 Thumbs.db
 temp-preview/
 .snapshots/
+
+.vscode-test/
