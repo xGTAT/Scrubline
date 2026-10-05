@@ -53,3 +53,7 @@ Windows CI runs these checks. Source and limits: [M1 notes](docs/m1-source-timel
 - fixtures/sample-web: test-only two-state site
 - .agents: sanitised hook recorder; [configuration](docs/hooks.md)
 - docs: limitations and verification
+
+### Local replay
+
+Export a portable masked-layout replay. Original screenshot pixels, text, media, source and private URLs stay out. [Privacy and limits](docs/m5-replay.md).
