@@ -2,7 +2,7 @@
   "name": "scrubline-panel",
   "displayName": "Scrubline Review Panel",
   "description": "Disk checkpoints and a source timeline",
-  "version": "0.4.0",
+  "version": "0.6.0",
   "publisher": "scrubline",
   "engines": {
     "vscode": "^1.80.0"
@@ -27,6 +27,14 @@
       {
         "command": "scrubline.startMcp",
         "title": "Scrubline: Start Local MCP"
+      },
+      {
+        "command": "scrubline.compactHistory",
+        "title": "Scrubline: Compact unused history data"
+      },
+      {
+        "command": "scrubline.deleteHistory",
+        "title": "Scrubline: Delete workspace history"
       }
     ],
     "viewsContainers": {
@@ -107,6 +115,14 @@
           "type": "string",
           "default": "",
           "description": "Trusted build/test command for isolated selective-apply candidate. Required before selective apply."
+        },
+        "scrubline.ignoreAdditions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Additional gitignore-style paths to keep out of checkpoints."
         }
       }
     }
@@ -141,7 +157,7 @@
     "react-dom": "^18.2.0",
     "typescript": "^5.3.3",
     "typescript-eslint": "8.71.0",
-    "vitest": "3.2.7"
+    "vitest": "4.1.11"
   },
   "repository": {
     "url": "https://github.com/xGTAT/Scrubline.git",
