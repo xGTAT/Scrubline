@@ -42,6 +42,13 @@ exports.run = async () => {
     await fs.readFile(path.join(root, 'host-edit.txt'), 'utf8'),
     'saved in extension host\r\n'
   );
+  const fork = await api.fork(baseline, 'Host fork');
+  await fs.writeFile(path.join(fork.directory, 'baseline.txt'), 'branch baseline');
+  const forkCheckpoint = await api.captureBranch(fork.id);
+  assert.equal(await fs.readFile(path.join(root, 'baseline.txt'), 'utf8'), 'baseline');
+  const selective = await api.reviewFiles(forkCheckpoint.id, ['baseline.txt']);
+  assert.equal(selective.review.conflicts.length, 0);
+  assert.equal(selective.review.paths.join(','), 'baseline.txt');
   await vscode.commands.executeCommand('scrubline.openPanel');
   console.log(
     'HOST TEST PASS: activation, storage, edit, timeline, MCP review-only, restore/Undo, panel command'
