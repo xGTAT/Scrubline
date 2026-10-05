@@ -1,0 +1,8 @@
+.vscode-test/**
+test/**
+node_modules/@phosphor-icons/**
+src/**
+*.config.*
+test-results/**
+playwright-report/**
+out/**
