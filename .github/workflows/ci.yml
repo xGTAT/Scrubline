@@ -22,9 +22,9 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run format
+      - run: npx playwright install chromium
       - run: npm test
       - run: npm run build
       - run: npm run check:nomock
-      - run: npx playwright install chromium
       - run: npm run test:ui
       - run: npm run test:host
