@@ -49,6 +49,10 @@ exports.run = async () => {
   const selective = await api.reviewFiles(forkCheckpoint.id, ['baseline.txt']);
   assert.equal(selective.review.conflicts.length, 0);
   assert.equal(selective.review.paths.join(','), 'baseline.txt');
+  const commands = await vscode.commands.getCommands(true);
+  assert.ok(commands.includes('scrubline.deleteHistory'));
+  assert.ok(commands.includes('scrubline.compactHistory'));
+  assert.ok(!commands.includes('scrubline.exportReplay'), 'replay deferred');
   await vscode.commands.executeCommand('scrubline.openPanel');
   console.log(
     'HOST TEST PASS: activation, storage, edit, timeline, MCP review-only, restore/Undo, panel command'
