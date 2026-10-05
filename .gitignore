@@ -1,6 +1,5 @@
 # Dependencies
 node_modules/
-package-lock.json
 
 # Builds & Packages
 dist/
@@ -12,8 +11,18 @@ out/
 *.jsonl
 .agents/hook-events.jsonl
 
+# Secrets
+.env
+.env.*
+
+# Test artifacts
+test-results/
+playwright-report/
+
 # OS and Temp files
 .DS_Store
 Thumbs.db
 temp-preview/
 .snapshots/
+
+.vscode-test/
