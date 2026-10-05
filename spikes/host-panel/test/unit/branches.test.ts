@@ -220,6 +220,10 @@ test('two real branch renders differ without workspace or sibling modification',
     await fs.copyFile(images[0], path.resolve('../../docs/evidence/m4_workspace_render.png'));
     await fs.copyFile(images[1], path.resolve('../../docs/evidence/m4_alternative_render.png'));
   } finally {
+    const previewRoot = path.join(f.store.root, 'previews');
+    for (const r of runners) await r.stop();
+    expect(await fs.readdir(previewRoot)).toEqual([]);
+    // Repeated stop is safe and leaves no stale historical cwd.
     for (const r of runners) await r.stop();
     await fs.rm(f.temp, { recursive: true, force: true });
   }
