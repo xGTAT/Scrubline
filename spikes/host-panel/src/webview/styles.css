@@ -226,3 +226,131 @@ pre {
 }
 
 /* Alternative controls wrap within narrow panels. */
+
+/* Release treatment: calm hierarchy, theme-native surfaces, short feedback. */
+.panel {
+  gap: 14px;
+  padding: 16px;
+  max-width: 1100px;
+  margin: auto;
+  animation: enter 180ms ease-out;
+}
+.header {
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--vscode-widget-border, #3c3c3c);
+}
+.header strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  letter-spacing: -0.2px;
+}
+.status {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground, #b6b6b6);
+}
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 7px;
+  transition:
+    background-color 130ms ease,
+    border-color 130ms ease,
+    transform 100ms ease;
+}
+button:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.row {
+  display: grid;
+  border-radius: 9px;
+  padding: 12px;
+  box-shadow: 0 1px 2px #00000014;
+}
+.row[aria-pressed='true'] {
+  background: var(--vscode-list-activeSelectionBackground, #164c71);
+  color: var(--vscode-list-activeSelectionForeground, #fff);
+  box-shadow: inset 3px 0 var(--vscode-focusBorder, #75beff);
+}
+.row[aria-pressed='true'] small {
+  color: inherit;
+  opacity: 0.85;
+}
+.scrub {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--vscode-widget-border, #3c3c3c);
+}
+.scrub label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: var(--vscode-descriptionForeground, #b6b6b6);
+}
+.scrub nav button {
+  flex: 1;
+  background: var(--vscode-button-secondaryBackground, #353535);
+  color: var(--vscode-button-secondaryForeground, #fff);
+}
+.preview img {
+  border-radius: 9px;
+  background: var(--vscode-editor-background, #181818);
+}
+.empty {
+  border-style: solid;
+  border-radius: 10px;
+  padding: 32px 12px;
+}
+summary {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground, #b6b6b6);
+}
+.failure {
+  padding: 10px;
+  border-radius: 7px;
+  background: var(--vscode-inputValidation-errorBackground, #3b2020);
+  border: 1px solid var(--vscode-inputValidation-errorBorder, #be4c4c);
+}
+@keyframes enter {
+  from {
+    opacity: 0.5;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .panel {
+    animation: none;
+  }
+  button {
+    transition: none;
+  }
+  button:active:not(:disabled) {
+    transform: none;
+  }
+}
+@media (forced-colors: active) {
+  button,
+  .row,
+  .empty {
+    border: 1px solid ButtonText;
+  }
+  .row[aria-pressed='true'] {
+    outline: 2px solid Highlight;
+  }
+}
+@media (max-width: 320px) {
+  .panel {
+    padding: 10px;
+    gap: 10px;
+  }
+}
+/* Motion never interpolates unmatched preview identities. */
