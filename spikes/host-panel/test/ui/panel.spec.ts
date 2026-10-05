@@ -195,3 +195,48 @@ for (const mode of [
     await page.screenshot({ path: `${evidenceDir}/panel_m2_${mode}.png`, fullPage: true });
   });
 }
+for (const status of ['on', 'ready', 'stale', 'error'] as const) {
+  test(`M3 ${status} concise accessible packet review`, async ({ page }) => {
+    await page.setViewportSize({ width: 280, height: 740 });
+    await page.goto('/');
+    await expect(page.getByText('No checkpoints yet')).toBeVisible();
+    await page.evaluate((status) => {
+      (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
+        status: 'ready',
+        rows: [
+          {
+            id: 'a'.repeat(64),
+            createdAt: '2026-10-05T15:00:00Z',
+            changedPaths: ['index.html'],
+            attribution: { kind: 'unattributed' }
+          }
+        ],
+        unsaved: false,
+        targeting: {
+          status,
+          packet:
+            status === 'ready'
+              ? 'Checkpoint: abc\nSelector: #save\nAccessible name: Save [email]\nDOM: <button>Save [redacted]</button>\nFiles: index.html'
+              : undefined
+        }
+      });
+    }, status);
+    expect((await page.locator('body').innerText()).trim().split(/\s+/).length).toBeLessThanOrEqual(
+      40
+    );
+    expect(
+      (await new AxeBuilder({ page }).analyze()).violations.filter(
+        (v) => v.impact === 'serious' || v.impact === 'critical'
+      )
+    ).toEqual([]);
+    if (status === 'ready') {
+      await expect(page.getByRole('button', { name: 'Copy packet' })).toBeDisabled();
+      await page.getByText('Review packet', { exact: true }).click();
+      await expect(page.getByRole('button', { name: 'Copy packet' })).toBeEnabled();
+      await expect(page.locator('pre')).toContainText('Save [redacted]');
+      await page.getByText('Review packet', { exact: true }).click();
+    } else await expect(page.getByRole('button', { name: 'Copy packet' })).toHaveCount(0);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.screenshot({ path: `${evidenceDir}/panel_m3_${status}.png`, fullPage: true });
+  });
+}
