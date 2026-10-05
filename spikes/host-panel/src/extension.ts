@@ -1,88 +1,139 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
-import type { HostInfo, HostInfoMessage, WebviewInboundMessage } from './host-info';
+import * as path from 'node:path';
+import { Timeline } from './capture/timeline';
+import { HistoryStore, hashBytes } from './store/store';
+import type { HostInfo } from './host-info';
+import type { TimelineState, TimelineInbound } from './bridge/timeline';
 
-function collectHostInfo(context: vscode.ExtensionContext): HostInfo {
-  return {
+export async function activate(context: vscode.ExtensionContext) {
+  const hostInfo: HostInfo = {
     vscodeVersion: vscode.version,
     appName: vscode.env.appName,
     appHost: vscode.env.appHost,
     language: vscode.env.language,
-    workspaceFolders: (vscode.workspace.workspaceFolders || []).map((f) => f.uri.fsPath),
+    workspaceFolders: (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath),
     extensionPath: context.extensionPath
   };
-}
-
-export function activate(context: vscode.ExtensionContext) {
-  const hostInfo = collectHostInfo(context);
-  console.log('[Scrubline] Activated in host:', hostInfo);
-
-  // 1. Register Webview View Provider (Sidebar)
-  const provider = new ScrublineViewProvider(context.extensionUri, hostInfo);
+  const views = new Set<vscode.Webview>();
+  let state: TimelineState = {
+    status: 'empty',
+    rows: [],
+    unsaved: false,
+    message: 'Open a folder to begin.'
+  };
+  const publish = (next: TimelineState) => {
+    state = next;
+    for (const view of views) void view.postMessage({ type: 'timeline', data: state });
+  };
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  const config = vscode.workspace.getConfiguration('scrubline');
+  let timeline: Timeline | undefined;
+  const start = async () => {
+    if (timeline || !folders.length) return;
+    if (folders.length !== 1) {
+      publish({ ...state, status: 'error', message: 'Open one workspace folder.' });
+      return;
+    }
+    if (!vscode.workspace.isTrusted) {
+      publish({ ...state, status: 'error', message: 'Trust this folder to capture.' });
+      return;
+    }
+    if (folders[0].uri.scheme !== 'file') {
+      publish({ ...state, status: 'error', message: 'Local folders only.' });
+      return;
+    }
+    const root = folders[0].uri.fsPath;
+    const storeRoot =
+      context.storageUri?.fsPath ?? path.join(context.globalStorageUri.fsPath, hashBytes(root));
+    timeline = new Timeline(
+      root,
+      new HistoryStore(storeRoot, config.get<number>('quotaMB', 512) * 1024 * 1024),
+      publish,
+      {
+        maxFiles: config.get<number>('maxFiles', 10000),
+        maxFileBytes: config.get<number>('maxFileMB', 10) * 1024 * 1024,
+        maxTotalBytes: config.get<number>('maxTotalMB', 100) * 1024 * 1024
+      },
+      config.get<string>('hookLog') || undefined
+    );
+    publish({ status: 'loading', rows: [], unsaved: false });
+    const watcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(folders[0], '**/*')
+    );
+    context.subscriptions.push(
+      watcher,
+      watcher.onDidCreate(() => timeline?.event('watcher')),
+      watcher.onDidChange(() => timeline?.event('watcher')),
+      watcher.onDidDelete(() => timeline?.event('watcher'))
+    );
+    const dirty = () =>
+      timeline?.dirty(
+        vscode.workspace.textDocuments.some(
+          (d) =>
+            d.isDirty &&
+            vscode.workspace.getWorkspaceFolder(d.uri)?.uri.toString() === folders[0].uri.toString()
+        )
+      );
+    context.subscriptions.push(
+      vscode.workspace.onDidSaveTextDocument(() => {
+        dirty();
+        timeline?.event('save');
+      }),
+      vscode.workspace.onDidChangeTextDocument(dirty),
+      vscode.workspace.onDidCloseTextDocument(dirty),
+      {
+        dispose: () => {
+          void timeline?.dispose();
+        }
+      }
+    );
+    await timeline.start();
+    dirty();
+  };
+  const attach = (view: vscode.Webview) => {
+    views.add(view);
+    view.options = { enableScripts: true, localResourceRoots: [context.extensionUri] };
+    view.html = getWebviewHtml(view, context.extensionUri, hostInfo);
+    const listener = view.onDidReceiveMessage((message: TimelineInbound) => {
+      if (message.type === 'request-timeline')
+        void view.postMessage({ type: 'timeline', data: state });
+      if (message.type === 'retry-capture') {
+        if (timeline) void timeline.capture('reconcile');
+        else void start();
+      }
+    });
+    context.subscriptions.push(listener);
+  };
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider('scrubline.historyView', provider, {
-      webviewOptions: { retainContextWhenHidden: true }
-    })
+    vscode.window.registerWebviewViewProvider(
+      'scrubline.historyView',
+      {
+        resolveWebviewView(view) {
+          attach(view.webview);
+          view.onDidDispose(() => views.delete(view.webview));
+        }
+      },
+      { webviewOptions: { retainContextWhenHidden: true } }
+    )
   );
-
-  // 2. Register Command to open Webview Panel (Editor tab)
   context.subscriptions.push(
     vscode.commands.registerCommand('scrubline.openPanel', () => {
       const panel = vscode.window.createWebviewPanel(
         'scrubline.panel',
-        'Scrubline Review Panel',
+        'Scrubline',
         vscode.ViewColumn.Beside,
-        {
-          enableScripts: true,
-          retainContextWhenHidden: true,
-          localResourceRoots: [context.extensionUri]
-        }
+        { enableScripts: true, retainContextWhenHidden: true }
       );
-
-      panel.webview.html = getWebviewHtml(panel.webview, context.extensionUri, hostInfo);
-
-      panel.webview.onDidReceiveMessage((message: WebviewInboundMessage) => {
-        if (message.type === 'request-host-info') {
-          const reply: HostInfoMessage = { type: 'host-info', data: hostInfo };
-          panel.webview.postMessage(reply);
-        }
-      });
-    })
+      attach(panel.webview);
+      panel.onDidDispose(() => views.delete(panel.webview));
+    }),
+    vscode.workspace.onDidGrantWorkspaceTrust(() => void start())
   );
+  await start();
+  return { getTimeline: () => state, capture: () => timeline?.capture('reconcile') };
 }
-
 export function deactivate() {}
-
-class ScrublineViewProvider implements vscode.WebviewViewProvider {
-  constructor(
-    private readonly _extensionUri: vscode.Uri,
-    private readonly _hostInfo: HostInfo
-  ) {}
-
-  public resolveWebviewView(
-    webviewView: vscode.WebviewView,
-    _context: vscode.WebviewViewResolveContext,
-    _token: vscode.CancellationToken
-  ) {
-    webviewView.webview.options = {
-      enableScripts: true,
-      localResourceRoots: [this._extensionUri]
-    };
-
-    webviewView.webview.html = getWebviewHtml(
-      webviewView.webview,
-      this._extensionUri,
-      this._hostInfo
-    );
-
-    webviewView.webview.onDidReceiveMessage((message: WebviewInboundMessage) => {
-      if (message.type === 'request-host-info') {
-        const reply: HostInfoMessage = { type: 'host-info', data: this._hostInfo };
-        webviewView.webview.postMessage(reply);
-      }
-    });
-  }
-}
 
 function getWebviewHtml(
   webview: vscode.Webview,
@@ -115,7 +166,7 @@ function getWebviewHtml(
 <body>
   <div id="root"></div>
   <script nonce="${nonce}">
-    window.__SCRUBLINE_HOST_INFO__ = ${JSON.stringify(hostInfo)};
+    window.__SCRUBLINE_HOST_INFO__ = ${JSON.stringify(hostInfo).replace(/</g, '\\u003c')};
   </script>
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
