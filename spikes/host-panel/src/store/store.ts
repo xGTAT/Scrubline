@@ -33,6 +33,13 @@ export function migrate(value: unknown): Checkpoint {
     !['unattributed', 'hook'].includes(c.attribution.kind)
   )
     throw new Error('Invalid checkpoint.');
+  if (
+    c.branch &&
+    (!/^[a-f0-9-]{36}$/.test(c.branch.id) ||
+      typeof c.branch.name !== 'string' ||
+      c.branch.name.length > 60)
+  )
+    throw new Error('Invalid branch.');
   const paths = new Set<string>();
   for (const f of c.files) {
     if (
@@ -137,15 +144,20 @@ export class HistoryStore {
       }
       all.push(c);
     }
-    // One store writer, one parent chain. No mutable index is needed to recover.
+    // Immutable manifests are a DAG. Reject missing parents and cycles.
+    if (all.filter((c) => c.parentId === null).length > 1)
+      throw new Error('History has multiple roots.');
     const ordered: Checkpoint[] = [];
-    let parent: string | null = null;
-    while (ordered.length < all.length) {
-      const next = all.filter((c) => c.parentId === parent);
-      if (next.length !== 1) throw new Error('History parent chain is inconsistent.');
-      ordered.push(next[0]);
-      parent = next[0].id;
+    const pending = [...all];
+    while (pending.length) {
+      const index = pending.findIndex(
+        (c) => c.parentId === null || ordered.some((p) => p.id === c.parentId)
+      );
+      if (index < 0) throw new Error('History parent graph is inconsistent.');
+      ordered.push(pending.splice(index, 1)[0]);
     }
+    // Preserve the workspace chain at the end for older consumers; alternatives are independent.
+    ordered.sort((a, b) => Number(!a.branch) - Number(!b.branch));
     this.checkpoints = ordered;
     // Rebuildable cache only: manifests are authoritative after an interrupted write.
     await atomicWrite(
@@ -164,7 +176,8 @@ export class HistoryStore {
     files: TrackedFile[],
     contents: Map<string, Buffer>,
     trigger: Checkpoint['trigger'],
-    attribution: Attribution
+    attribution: Attribution,
+    alternative?: { parentId: string; branch: { id: string; name: string } }
   ): Promise<Checkpoint> {
     let used = 0;
     for (const dir of ['blobs', 'manifests'])
@@ -182,9 +195,13 @@ export class HistoryStore {
         additions.set(f.hash, bytes);
       }
     }
+    if (alternative && !this.checkpoints.some((c) => c.id === alternative.parentId))
+      throw new Error('Unknown branch parent.');
     const body: Omit<Checkpoint, 'id'> = {
       schemaVersion: 1,
-      parentId: this.checkpoints.at(-1)?.id ?? null,
+      parentId:
+        alternative?.parentId ?? this.checkpoints.filter((c) => !c.branch).at(-1)?.id ?? null,
+      ...(alternative ? { branch: alternative.branch } : {}),
       createdAt: new Date().toISOString(),
       trigger,
       files,
@@ -201,6 +218,7 @@ export class HistoryStore {
       await atomicWrite(path.join(this.root, 'blobs', hash), bytes);
     await atomicWrite(path.join(this.root, 'manifests', `${c.id}.json`), json);
     this.checkpoints.push(c);
+    this.checkpoints.sort((a, b) => Number(!a.branch) - Number(!b.branch));
     await atomicWrite(
       path.join(this.root, 'index.json'),
       JSON.stringify({ schemaVersion: 1, ids: this.checkpoints.map((item) => item.id) })
