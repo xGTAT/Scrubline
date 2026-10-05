@@ -7,7 +7,7 @@ async function build() {
     entryPoints: [path.join(__dirname, 'src', 'extension.ts')],
     bundle: true,
     outfile: path.join(__dirname, 'dist', 'extension.js'),
-    external: ['vscode', 'playwright-core'],
+    external: ['vscode', 'playwright-core', 'parse5'],
     format: 'cjs',
     platform: 'node',
     sourcemap: false,
