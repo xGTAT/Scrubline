@@ -1,5 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { ClockCounterClockwise } from '@phosphor-icons/react';
+import {
+  ClockCounterClockwise,
+  ArrowLeft,
+  ArrowRight,
+  Play,
+  GitBranch,
+  ShieldCheck
+} from '@phosphor-icons/react';
 import type { HostInfo } from '../host-info';
 import type { TimelineState, TimelineOutbound, TimelineInbound } from '../bridge/timeline';
 declare global {
@@ -39,15 +46,18 @@ export const App: React.FC = () => {
   };
   const row = state.rows.find((r) => r.id === selected);
   const [page, setPage] = useState(0);
-  const visible = state.rows
-    .slice()
-    .reverse()
-    .slice(page * 1, page * 1 + 1);
+  const visible = state.rows.slice(
+    Math.max(0, state.rows.length - 1 - page),
+    state.rows.length - page
+  );
   return (
     <main className="panel">
       <header className="header">
-        <strong>Scrubline</strong>
-        <span className="badge">M4</span>
+        <strong>
+          <ClockCounterClockwise size={18} strokeWidth={1.5} aria-hidden="true" />
+          Scrubline
+        </strong>
+        <span className="badge">Local</span>
       </header>
       <section className="status" aria-live="polite">
         <span>
@@ -107,10 +117,17 @@ export const App: React.FC = () => {
                 choose(state.rows[state.rows.findIndex((r) => r.id === selected) - 1].id)
               }
             >
+              <ArrowLeft size={14} strokeWidth={1.5} aria-hidden="true" />
               Prev
             </button>
             <button
-              disabled={state.rows.findIndex((r) => r.id === selected) >= state.rows.length - 1}
+              disabled={
+                Math.max(
+                  0,
+                  state.rows.findIndex((r) => r.id === selected)
+                ) >=
+                state.rows.length - 1
+              }
               onClick={() =>
                 choose(
                   state.rows[
@@ -123,6 +140,7 @@ export const App: React.FC = () => {
               }
             >
               Next
+              <ArrowRight size={14} strokeWidth={1.5} aria-hidden="true" />
             </button>
           </nav>
         </section>
@@ -156,6 +174,7 @@ export const App: React.FC = () => {
           </>
         ) : state.rows.length > 0 ? (
           <button onClick={() => bridge?.postMessage({ type: 'start-preview' })}>
+            <Play size={14} strokeWidth={1.5} aria-hidden="true" />
             Start preview
           </button>
         ) : null}
@@ -208,6 +227,7 @@ export const App: React.FC = () => {
             disabled={state.unsaved}
             onClick={() => bridge?.postMessage({ type: 'review-checkpoint', id: row.id })}
           >
+            <ShieldCheck size={14} strokeWidth={1.5} aria-hidden="true" />
             Review restore
           </button>
           <details>
@@ -229,6 +249,7 @@ export const App: React.FC = () => {
       )}
       {row && (
         <button onClick={() => bridge?.postMessage({ type: 'fork-checkpoint', id: row.id })}>
+          <GitBranch size={14} strokeWidth={1.5} aria-hidden="true" />
           Fork checkpoint
         </button>
       )}
