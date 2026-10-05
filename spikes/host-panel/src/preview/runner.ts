@@ -156,6 +156,12 @@ export class PreviewRunner {
     this.live = false;
     const child = this.process;
     this.process = undefined;
+    const exited =
+      child && child.exitCode === null && child.signalCode === null
+        ? new Promise<void>((resolve) => {
+            child.once('close', () => resolve());
+          })
+        : Promise.resolve();
     if (child?.pid) {
       if (process.platform === 'win32') {
         await new Promise<void>((resolve) => {
@@ -180,9 +186,18 @@ export class PreviewRunner {
         }
       }
     }
+    await Promise.race([
+      exited,
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 3000);
+        timer.unref();
+      })
+    ]);
     if (this.temp) {
-      await fs.rm(this.temp, { recursive: true, force: true });
+      // Windows may release descendant cwd handles after taskkill itself exits.
+      // Bounded retry handles that OS cleanup lag; a persistent lock is still surfaced.
+      await fs.rm(this.temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
       this.temp = undefined;
     }
   }
-}
+  }
