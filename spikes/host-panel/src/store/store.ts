@@ -110,9 +110,11 @@ export class HistoryStore {
   }
   async releaseWriter() {
     if (!this.lockToken) return;
+    const token = this.lockToken;
+    this.lockToken = undefined;
     const lock = path.join(this.root, 'writer.lock');
     const current = JSON.parse(await fs.readFile(lock, 'utf8'));
-    if (current.token === this.lockToken) await fs.rm(lock);
+    if (current.token === token) await fs.rm(lock);
     this.lockToken = undefined;
   }
   constructor(
@@ -218,4 +220,4 @@ export class HistoryStore {
       await fs.writeFile(target, await this.readBlob(f.hash), { flag: 'wx', mode: f.mode });
     }
   }
-}
+  }
