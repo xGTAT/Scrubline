@@ -136,3 +136,47 @@ nav {
     min-height: 44px;
   }
 }
+.scrub {
+  display: grid;
+  gap: 8px;
+  position: sticky;
+  top: 0;
+  background: var(--vscode-sideBar-background, #1e1e1e);
+  z-index: 1;
+}
+input[type='range'] {
+  width: 100%;
+  accent-color: var(--vscode-focusBorder, #75beff);
+}
+.preview {
+  display: grid;
+  gap: 8px;
+}
+.preview img {
+  width: 100%;
+  aspect-ratio: 8 / 5;
+  object-fit: contain;
+  border: 1px solid var(--vscode-widget-border, #606060);
+}
+summary {
+  cursor: pointer;
+  min-height: 32px;
+  padding-top: 8px;
+}
+.paths button {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: transparent;
+  color: inherit;
+}
+.row,
+.preview {
+  transition: opacity 140ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .row,
+  .preview {
+    transition: none;
+  }
+}
