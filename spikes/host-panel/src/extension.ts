@@ -2,6 +2,10 @@ import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
+import { Alternatives, mergeFiles } from './branches/alternatives';
+import { changedPaths } from './capture/scanner';
+import { applySelective } from './branches/apply';
+import { staticNavbarPaths } from './branches/static-mapping';
 import { McpBridge } from './mcp/bridge';
 import { redact } from './targeting/redact';
 import { TargetSession } from './targeting/session';
@@ -33,6 +37,9 @@ export async function activate(context: vscode.ExtensionContext) {
   let preview: TimelineState['preview'];
   let review: TimelineState['review'];
   let canUndo = false;
+  let alternatives: Alternatives | undefined;
+  let selectiveTarget: import('./bridge/timeline').Checkpoint | undefined;
+  let comparison: TimelineState['comparison'];
   let mcpBridge: McpBridge | undefined;
   let targetSession: TargetSession | undefined;
   let targeting: TimelineState['targeting'] = { status: 'off' };
@@ -40,7 +47,15 @@ export async function activate(context: vscode.ExtensionContext) {
   let latestThumbnail: string | undefined;
   let shutdownPreview = false;
   const publish = (next: TimelineState) => {
-    state = { ...next, preview, review, canUndo, targeting };
+    state = {
+      ...next,
+      preview,
+      review,
+      canUndo,
+      targeting,
+      branches: alternatives?.list(),
+      comparison
+    };
     for (const view of views) void view.postMessage({ type: 'timeline', data: state });
     const newest = next.rows.at(-1)?.id;
     if (
@@ -49,7 +64,8 @@ export async function activate(context: vscode.ExtensionContext) {
       runner &&
       config.get<string>('previewCommand') &&
       previewView &&
-      !shutdownPreview
+      !shutdownPreview &&
+      !selectiveTarget
     ) {
       latestThumbnail = newest;
       const checkpoint = timeline?.store.checkpoints.find((c) => c.id === newest);
@@ -180,6 +196,8 @@ export async function activate(context: vscode.ExtensionContext) {
       return;
     }
     await timeline.start();
+    alternatives = new Alternatives(timeline.store, timeline.limits);
+    publish(state);
     dirty();
   };
   const secrets = async () => {
@@ -257,8 +275,105 @@ export async function activate(context: vscode.ExtensionContext) {
         if (message.type === 'select-checkpoint' && target) {
           selected = target.id;
           review = undefined;
+          selectiveTarget = undefined;
           previewQueue = previewQueue.then(() => showPreview(target.id));
           await previewQueue;
+        }
+        if (message.type === 'fork-checkpoint' && target && alternatives) {
+          const name = await vscode.window.showInputBox({
+            prompt: 'Alternative name',
+            value: 'Alternative'
+          });
+          if (!name) return;
+          const branch = await timeline.exclusive(() => alternatives!.fork(target, name));
+          publish(state);
+          await vscode.commands.executeCommand(
+            'vscode.openFolder',
+            vscode.Uri.file(branch.directory),
+            true
+          );
+        }
+        if (message.type === 'capture-branch' && alternatives) {
+          await timeline.exclusive(() => alternatives!.capture(message.branch));
+          publish(state);
+        }
+        if (message.type === 'compare-branch' && alternatives && runner) {
+          const branch = alternatives.list().find((b) => b.id === message.branch);
+          if (!branch) throw new Error('Branch unavailable.');
+          const right = timeline.store.checkpoints.find((c) => c.id === branch.checkpoint)!;
+          const left = timeline.store.checkpoints.filter((c) => !c.branch).at(-1)!;
+          const a = new PreviewRunner(
+            { ...runner.config, port: runner.config.port + 1 },
+            timeline.store
+          );
+          const b = new PreviewRunner(
+            { ...runner.config, port: runner.config.port + 2 },
+            timeline.store
+          );
+          try {
+            const x = await a.historical(left, true);
+            const y = await b.historical(right, true);
+            comparison = {
+              leftId: left.id,
+              rightId: right.id,
+              left: x.screenshot
+                ? view.asWebviewUri(vscode.Uri.file(x.screenshot)).toString()
+                : undefined,
+              right: y.screenshot
+                ? view.asWebviewUri(vscode.Uri.file(y.screenshot)).toString()
+                : undefined,
+              message:
+                !x.screenshot || !y.screenshot ? 'Comparison screenshot unavailable.' : undefined
+            };
+            publish(state);
+          } finally {
+            await a.stop();
+            await b.stop();
+          }
+        }
+        if (
+          (message.type === 'review-selective' || message.type === 'review-navbar') &&
+          target &&
+          alternatives
+        ) {
+          let document = message.type === 'review-navbar' ? message.document : '';
+          if (message.type === 'review-navbar' && !document) {
+            const picked = await vscode.window.showQuickPick(
+              target.files.filter((f) => f.path.endsWith('.html')).map((f) => f.path),
+              { placeHolder: 'Standalone navbar document' }
+            );
+            if (!picked) return;
+            document = picked;
+          }
+          let paths =
+            message.type === 'review-navbar'
+              ? await staticNavbarPaths(timeline.store, target, document)
+              : message.paths;
+          if (message.type === 'review-selective' && !paths.length) {
+            const base = alternatives.base(target);
+            const changes = changedPaths(base.files, target.files);
+            const picked = await vscode.window.showQuickPick(changes, {
+              canPickMany: true,
+              placeHolder: 'Select exact files to review'
+            });
+            if (!picked?.length) return;
+            paths = picked;
+          }
+          const current = timeline.store.checkpoints.filter((c) => !c.branch).at(-1)!;
+          if (message.type === 'review-navbar') {
+            await staticNavbarPaths(timeline.store, alternatives.base(target), document);
+            await staticNavbarPaths(timeline.store, current, document);
+          }
+          review = undefined;
+          selectiveTarget = undefined;
+          const merged = mergeFiles(alternatives.base(target), current, target, paths);
+          if (merged.conflicts.length)
+            throw new Error('Both sides changed. Selective apply blocked.');
+          selectiveTarget = merged.target;
+          review = await timeline.exclusive(() =>
+            restore!.review(selectiveTarget!, current, state.unsaved)
+          );
+          publish(state);
         }
         if (message.type === 'start-targeting') {
           if (!preview?.url || !preview.checkpoint)
@@ -324,6 +439,7 @@ export async function activate(context: vscode.ExtensionContext) {
         if (message.type === 'open-preview' && preview?.url)
           await vscode.env.openExternal(vscode.Uri.parse(preview.url));
         if (message.type === 'review-checkpoint' && target) {
+          selectiveTarget = undefined;
           await timeline.exclusive(async () => {
             review = await restore!.review(
               target,
@@ -333,11 +449,22 @@ export async function activate(context: vscode.ExtensionContext) {
           });
           publish(state);
         }
-        if (message.type === 'apply-reviewed' && target) {
+        if (message.type === 'apply-reviewed' && (target || selectiveTarget?.id === message.id)) {
+          const applying = selectiveTarget?.id === message.id ? selectiveTarget : target!;
           await timeline.exclusive(async () => {
-            await restore!.apply(message.token, target, state.unsaved);
+            if (selectiveTarget?.id === message.id)
+              await applySelective(
+                restore!,
+                applying,
+                message.token,
+                state.unsaved,
+                config.get<string>('postApplyCommand') ?? '',
+                () => state.unsaved
+              );
+            else await restore!.apply(message.token, applying, state.unsaved);
           });
           review = undefined;
+          selectiveTarget = undefined;
           canUndo = true;
           await timeline.capture('reconcile');
           if (selected) {
@@ -401,6 +528,12 @@ export async function activate(context: vscode.ExtensionContext) {
           );
         }
       } catch (e) {
+        if (message.type === 'apply-reviewed') {
+          review = undefined;
+          selectiveTarget = undefined;
+          canUndo = true;
+          await timeline?.capture('reconcile');
+        }
         if (['start-targeting', 'copy-packet', 'validate-target'].includes(message.type)) {
           targeting = {
             status: 'error',
@@ -519,6 +652,26 @@ export async function activate(context: vscode.ExtensionContext) {
   };
   return {
     getTimeline: () => state,
+    fork: (id: string, name: string) =>
+      timeline!.exclusive(() =>
+        alternatives!.fork(
+          timeline!.store.checkpoints.find((c) => c.id === id)!,
+          name
+        )
+      ),
+    captureBranch: (id: string) => timeline!.exclusive(() => alternatives!.capture(id)),
+    reviewFiles: (id: string, paths: string[]) =>
+      timeline!.exclusive(async () => {
+        const target = timeline!.store.checkpoints.find((c) => c.id === id)!;
+        const current = timeline!.store.checkpoints.filter((c) => !c.branch).at(-1)!;
+        const merged = mergeFiles(alternatives!.base(target), current, target, paths);
+        if (merged.conflicts.length) throw new Error('Conflict');
+        return {
+          target: merged.target,
+          review: await restore!.review(merged.target, current, state.unsaved)
+        };
+      }),
+
     capture: () => timeline?.capture('reconcile'),
     review: (id: string) =>
       timeline?.exclusive(() =>
