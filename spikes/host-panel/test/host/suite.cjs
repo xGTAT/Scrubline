@@ -19,6 +19,15 @@ exports.run = async () => {
   assert.ok(state.rows.length >= 2);
   assert.ok(state.rows.at(-1).changedPaths.includes('host-edit.txt'));
   assert.equal(state.rows.at(-1).attribution.kind, 'unattributed');
+  const baseline = state.rows[0].id;
+  const review = await api.review(baseline);
+  await api.apply(baseline, review.token);
+  await assert.rejects(fs.access(path.join(root, 'host-edit.txt')));
+  await api.undo();
+  assert.equal(
+    await fs.readFile(path.join(root, 'host-edit.txt'), 'utf8'),
+    'saved in extension host\r\n'
+  );
   await vscode.commands.executeCommand('scrubline.openPanel');
-  console.log('HOST TEST PASS: activation, storage, edit, timeline, panel command');
+  console.log('HOST TEST PASS: activation, storage, edit, timeline, restore/Undo, panel command');
 };
