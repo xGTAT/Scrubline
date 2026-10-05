@@ -172,4 +172,5 @@ export class Timeline {
     await this.queue;
     await this.store.releaseWriter();
   }
-      }
+}
+// Release module boundary.
