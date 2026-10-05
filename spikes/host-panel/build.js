@@ -14,6 +14,15 @@ async function build() {
     minify: false
   });
 
+  await esbuild.build({
+    entryPoints: [path.join(__dirname, 'src', 'mcp', 'server.ts')],
+    bundle: true,
+    outfile: path.join(__dirname, 'dist', 'mcp.js'),
+    format: 'cjs',
+    platform: 'node',
+    minify: true
+  });
+
   console.log('[build] Bundling React webview UI...');
   await esbuild.build({
     entryPoints: [path.join(__dirname, 'src', 'webview', 'index.tsx')],
