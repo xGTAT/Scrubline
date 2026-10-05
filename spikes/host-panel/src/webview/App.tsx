@@ -28,17 +28,24 @@ export const App: React.FC = () => {
     bridge?.postMessage({ type: 'request-timeline' });
     return () => window.removeEventListener('message', handler);
   }, []);
+  const choose = (id: string) => {
+    setSelected(id);
+    const index = state.rows.findIndex((r) => r.id === id);
+    setPage(Math.max(0, state.rows.length - 1 - index));
+    bridge?.setState({ selected: id });
+    bridge?.postMessage({ type: 'select-checkpoint', id });
+  };
   const row = state.rows.find((r) => r.id === selected);
   const [page, setPage] = useState(0);
   const visible = state.rows
     .slice()
     .reverse()
-    .slice(page * 3, page * 3 + 3);
+    .slice(page * 1, page * 1 + 1);
   return (
     <main className="panel">
       <header className="header">
         <strong>Scrubline</strong>
-        <span className="badge">M1</span>
+        <span className="badge">M2</span>
       </header>
       <section className="status" aria-live="polite">
         <span>
@@ -71,6 +78,86 @@ export const App: React.FC = () => {
           <button onClick={() => bridge?.postMessage({ type: 'retry-capture' })}>Retry</button>
         </section>
       )}
+      {state.rows.length > 0 && (
+        <section className="scrub" aria-label="Read-only scrub">
+          <label htmlFor="scrub">Checkpoint</label>
+          <input
+            id="scrub"
+            type="range"
+            min={0}
+            max={Math.max(0, state.rows.length - 1)}
+            value={Math.max(
+              0,
+              state.rows.findIndex((r) => r.id === selected)
+            )}
+            aria-valuetext={`Checkpoint ${
+              Math.max(
+                0,
+                state.rows.findIndex((r) => r.id === selected)
+              ) + 1
+            } of ${state.rows.length}, ${row ? new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(new Date(row.createdAt)) : ''}`}
+            onChange={(e) => choose(state.rows[Number(e.target.value)].id)}
+          />
+          <nav>
+            <button
+              disabled={!selected || state.rows.findIndex((r) => r.id === selected) <= 0}
+              onClick={() =>
+                choose(state.rows[state.rows.findIndex((r) => r.id === selected) - 1].id)
+              }
+            >
+              Prev
+            </button>
+            <button
+              disabled={state.rows.findIndex((r) => r.id === selected) >= state.rows.length - 1}
+              onClick={() =>
+                choose(
+                  state.rows[
+                    Math.max(
+                      0,
+                      state.rows.findIndex((r) => r.id === selected)
+                    ) + 1
+                  ].id
+                )
+              }
+            >
+              Next
+            </button>
+          </nav>
+        </section>
+      )}
+      <section className="preview" aria-live="polite">
+        {state.preview?.status === 'loading' ? (
+          <span>Rendering…</span>
+        ) : state.preview?.status === 'error' ? (
+          <>
+            <span title={state.preview.message}>Preview unavailable</span>
+            <button
+              onClick={() =>
+                selected && bridge?.postMessage({ type: 'select-checkpoint', id: selected })
+              }
+            >
+              Retry preview
+            </button>
+          </>
+        ) : state.preview?.status === 'ready' ? (
+          <>
+            <span>{state.preview.label}</span>
+            {state.preview.message && (
+              <span className="preview-message">{state.preview.message}</span>
+            )}
+            {state.preview.image && <img src={state.preview.image} alt="Checkpoint screenshot" />}
+            {state.preview.url && (
+              <button onClick={() => bridge?.postMessage({ type: 'open-preview' })}>
+                Open preview
+              </button>
+            )}
+          </>
+        ) : state.rows.length > 0 ? (
+          <button onClick={() => bridge?.postMessage({ type: 'start-preview' })}>
+            Start preview
+          </button>
+        ) : null}
+      </section>
       {visible.length > 0 && (
         <>
           <ol className="timeline" aria-label="Checkpoints">
@@ -82,6 +169,7 @@ export const App: React.FC = () => {
                   onClick={() => {
                     setSelected(r.id);
                     bridge?.setState({ selected: r.id });
+                    bridge?.postMessage({ type: 'select-checkpoint', id: r.id });
                   }}
                 >
                   <time>
@@ -97,13 +185,13 @@ export const App: React.FC = () => {
               </li>
             ))}
           </ol>
-          {state.rows.length > 3 && (
+          {state.rows.length > 1 && (
             <nav aria-label="Timeline pages">
               <button disabled={page === 0} onClick={() => setPage(page - 1)}>
                 Newer
               </button>
               <button
-                disabled={(page + 1) * 3 >= state.rows.length}
+                disabled={(page + 1) * 1 >= state.rows.length}
                 onClick={() => setPage(page + 1)}
               >
                 Older
@@ -113,16 +201,91 @@ export const App: React.FC = () => {
         </>
       )}
       {row && (
-        <section aria-label="Changed paths">
-          <h2>Changed paths</h2>
-          <ul className="paths">
-            {row.changedPaths.map((p) => (
-              <li key={p} tabIndex={0} title={p}>
-                {p}
-              </li>
-            ))}
-          </ul>
+        <section aria-label="Review">
+          <button
+            disabled={state.unsaved}
+            onClick={() => bridge?.postMessage({ type: 'review-checkpoint', id: row.id })}
+          >
+            Review restore
+          </button>
+          <details>
+            <summary>Changed paths ({row.changedPaths.length})</summary>
+            <ul className="paths">
+              {row.changedPaths.map((p) => (
+                <li key={p}>
+                  <button
+                    title={p}
+                    onClick={() => bridge?.postMessage({ type: 'open-diff', id: row.id, path: p })}
+                  >
+                    {p}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </details>
         </section>
+      )}
+      {state.review && (
+        <section role="region" aria-label="Restore confirmation">
+          {state.review.conflicts.length > 0 ? (
+            <>
+              <span>Workspace drift. Restore blocked.</span>
+              <details>
+                <summary>Three-way conflicts</summary>
+                <ul className="paths">
+                  {state.review.conflicts.map((p) => (
+                    <li key={p}>
+                      <button
+                        title={p}
+                        onClick={() =>
+                          bridge?.postMessage({
+                            type: 'open-diff',
+                            id: state.review!.checkpoint,
+                            path: p
+                          })
+                        }
+                      >
+                        {p}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            </>
+          ) : (
+            <>
+              <span>
+                Restore {state.review.paths.length} file{state.review.paths.length === 1 ? '' : 's'}
+                ?
+              </span>
+              <details>
+                <summary>Confirmed files</summary>
+                <ul className="paths">
+                  {state.review.paths.map((p) => (
+                    <li key={p} title={p}>
+                      {p}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+              <button
+                disabled={state.unsaved || state.review.paths.length === 0}
+                onClick={() =>
+                  bridge?.postMessage({
+                    type: 'apply-reviewed',
+                    id: state.review!.checkpoint,
+                    token: state.review!.token
+                  })
+                }
+              >
+                Confirm restore
+              </button>
+            </>
+          )}
+        </section>
+      )}
+      {state.canUndo && (
+        <button onClick={() => bridge?.postMessage({ type: 'undo-restore' })}>Undo restore</button>
       )}
       <footer className="footer">
         {window.__SCRUBLINE_HOST_INFO__?.appName ?? 'Detecting host…'}
