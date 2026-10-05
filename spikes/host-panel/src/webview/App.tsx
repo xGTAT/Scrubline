@@ -47,7 +47,7 @@ export const App: React.FC = () => {
     <main className="panel">
       <header className="header">
         <strong>Scrubline</strong>
-        <span className="badge">M3</span>
+        <span className="badge">M4</span>
       </header>
       <section className="status" aria-live="polite">
         <span>
@@ -226,6 +226,73 @@ export const App: React.FC = () => {
             </ul>
           </details>
         </section>
+      )}
+      {row && (
+        <button onClick={() => bridge?.postMessage({ type: 'fork-checkpoint', id: row.id })}>
+          Fork checkpoint
+        </button>
+      )}
+      {!!state.branches?.length && (
+        <details>
+          <summary>Alternatives ({state.branches.length})</summary>
+          <ul className="paths">
+            {state.branches.map((b) => (
+              <li key={b.id}>
+                <span title={b.base}>Fork: {b.name}</span>
+                <button
+                  onClick={() =>
+                    bridge?.postMessage({ type: 'review-navbar', id: b.checkpoint, document: '' })
+                  }
+                >
+                  Navbar
+                </button>
+                <button
+                  onClick={() => bridge?.postMessage({ type: 'capture-branch', branch: b.id })}
+                >
+                  Capture
+                </button>
+                <button
+                  onClick={() => bridge?.postMessage({ type: 'compare-branch', branch: b.id })}
+                >
+                  Compare
+                </button>
+                <button
+                  onClick={() => {
+                    setSelected(b.checkpoint);
+                    bridge?.postMessage({ type: 'select-checkpoint', id: b.checkpoint });
+                  }}
+                >
+                  Inspect
+                </button>
+                <button
+                  onClick={() =>
+                    bridge?.postMessage({ type: 'review-selective', id: b.checkpoint, paths: [] })
+                  }
+                >
+                  Choose files
+                </button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {state.comparison && (
+        <details open>
+          <summary>Rendered comparison</summary>
+          <div className="comparison">
+            <figure>
+              <figcaption>Workspace</figcaption>
+              {state.comparison.left && <img src={state.comparison.left} alt="Workspace render" />}
+            </figure>
+            <figure>
+              <figcaption>Alternative</figcaption>
+              {state.comparison.right && (
+                <img src={state.comparison.right} alt="Alternative render" />
+              )}
+            </figure>
+          </div>
+          {state.comparison.message && <small>{state.comparison.message}</small>}
+        </details>
       )}
       {state.review && (
         <section role="region" aria-label="Restore confirmation">
