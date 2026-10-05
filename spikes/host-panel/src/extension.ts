@@ -150,8 +150,11 @@ export async function activate(context: vscode.ExtensionContext) {
       vscode.workspace.onDidCloseTextDocument(dirty),
       {
         dispose: () => {
-          void runner?.stop();
-          void timeline?.dispose();
+          shutdownPreview = true;
+          void previewQueue.finally(async () => {
+            await runner?.stop();
+            await timeline?.dispose();
+          });
         }
       }
     );
@@ -184,7 +187,7 @@ export async function activate(context: vscode.ExtensionContext) {
     view.html = getWebviewHtml(view, context.extensionUri, hostInfo);
     const showPreview = async (id: string) => {
       const checkpoint = timeline?.store.checkpoints.find((c) => c.id === id);
-      if (!checkpoint || !runner) return;
+      if (!checkpoint || !runner || shutdownPreview) return;
       preview = { status: 'loading', checkpoint: id };
       publish(state);
       try {
@@ -429,4 +432,4 @@ function getWebviewHtml(
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
-}
+    }
