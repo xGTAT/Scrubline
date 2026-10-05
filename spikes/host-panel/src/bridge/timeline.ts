@@ -27,8 +27,27 @@ export interface TimelineState {
   rows: TimelineRow[];
   unsaved: boolean;
   message?: string;
+  preview?: {
+    status: 'idle' | 'loading' | 'ready' | 'error';
+    checkpoint?: string;
+    url?: string;
+    image?: string;
+    label?: string;
+    message?: string;
+  };
+  review?: { token: string; checkpoint: string; paths: string[]; conflicts: string[] };
+  canUndo?: boolean;
 }
-export type TimelineInbound = { type: 'request-timeline' } | { type: 'retry-capture' };
+export type TimelineInbound =
+  | { type: 'request-timeline' }
+  | { type: 'retry-capture' }
+  | { type: 'select-checkpoint'; id: string }
+  | { type: 'start-preview' }
+  | { type: 'review-checkpoint'; id: string }
+  | { type: 'apply-reviewed'; id: string; token: string }
+  | { type: 'undo-restore' }
+  | { type: 'open-preview' }
+  | { type: 'open-diff'; id: string; path: string };
 export interface TimelineOutbound {
   type: 'timeline';
   data: TimelineState;
