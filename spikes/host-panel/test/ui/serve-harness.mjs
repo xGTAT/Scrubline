@@ -40,7 +40,9 @@ const SHELL = `<!DOCTYPE html>
 </head>
 <body>
 <div id="root"></div>
-<script>window.__SCRUBLINE_HOST_INFO__ = ${JSON.stringify(HOST_INFO)};</script>
+<script>window.__SCRUBLINE_HOST_INFO__ = ${JSON.stringify(HOST_INFO)};
+window.__sendTimeline = data => window.dispatchEvent(new MessageEvent('message',{data:{type:'timeline',data}}));
+window.acquireVsCodeApi = () => ({getState:()=>({}),setState:()=>{},postMessage:message=>{if(message.type==='request-timeline')setTimeout(()=>window.__sendTimeline({status:'empty',rows:[],unsaved:false,message:'Open a folder to begin.'}),0)}});</script>
 <script src="/dist/webview.js"></script>
 </body>
 </html>`;
