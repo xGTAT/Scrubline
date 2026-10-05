@@ -1,8 +1,8 @@
 {
   "name": "scrubline-panel",
   "displayName": "Scrubline Review Panel",
-  "description": "Feasibility spike: smallest installable TypeScript extension and React webview panel",
-  "version": "0.0.1",
+  "description": "Disk checkpoints and a source timeline",
+  "version": "0.3.0",
   "publisher": "scrubline",
   "engines": {
     "vscode": "^1.80.0"
@@ -12,7 +12,9 @@
   ],
   "activationEvents": [
     "onView:scrubline.historyView",
-    "onCommand:scrubline.openPanel"
+    "onCommand:scrubline.openPanel",
+    "onStartupFinished",
+    "onCommand:scrubline.startMcp"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -21,6 +23,10 @@
         "command": "scrubline.openPanel",
         "title": "Scrubline: Open Timeline Panel",
         "category": "Scrubline"
+      },
+      {
+        "command": "scrubline.startMcp",
+        "title": "Scrubline: Start Local MCP"
       }
     ],
     "viewsContainers": {
@@ -40,21 +46,109 @@
           "name": "Scrubline Timeline"
         }
       ]
+    },
+    "configuration": {
+      "title": "Scrubline",
+      "properties": {
+        "scrubline.maxFiles": {
+          "type": "number",
+          "default": 10000,
+          "minimum": 1,
+          "description": "Tracked file limit."
+        },
+        "scrubline.maxFileMB": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "description": "Maximum tracked file size."
+        },
+        "scrubline.maxTotalMB": {
+          "type": "number",
+          "default": 100,
+          "minimum": 1,
+          "description": "Maximum captured bytes."
+        },
+        "scrubline.quotaMB": {
+          "type": "number",
+          "default": 512,
+          "minimum": 1,
+          "description": "History storage quota."
+        },
+        "scrubline.hookLog": {
+          "type": "string",
+          "default": "",
+          "description": "Optional sanitised hook log outside the workspace."
+        },
+        "scrubline.previewCommand": {
+          "type": "string",
+          "default": "",
+          "description": "Trusted local preview command. Use {port} for the port; runs in isolated historical snapshots when scrubbing."
+        },
+        "scrubline.previewPort": {
+          "type": "number",
+          "default": 4100,
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "Local preview port."
+        },
+        "scrubline.previewTimeoutSeconds": {
+          "type": "number",
+          "default": 15,
+          "minimum": 1,
+          "maximum": 60,
+          "description": "Preview startup timeout."
+        },
+        "scrubline.chromiumPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional installed Chromium executable for checkpoint screenshots. No browser download at runtime."
+        }
+      }
     }
   },
   "scripts": {
     "build": "node build.js",
-    "package": "vsce package --no-dependencies"
+    "package": "vsce package",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --check .",
+    "format:write": "prettier --write .",
+    "test": "vitest run",
+    "test:ui": "playwright test",
+    "check:nomock": "node scripts/check-nomock.js",
+    "test:host": "node test/host/run.cjs"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@eslint/js": "9.39.5",
+    "@playwright/test": "1.63.0",
     "@types/node": "^20.11.0",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@types/vscode": "^1.80.0",
+    "@vscode/test-electron": "2.5.2",
     "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.25.0",
+    "eslint": "9.39.5",
+    "globals": "15.15.0",
+    "prettier": "3.9.9",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "typescript-eslint": "8.71.0",
+    "vitest": "3.2.7"
+  },
+  "repository": {
+    "url": "https://github.com/xGTAT/Scrubline.git",
+    "type": "git"
+  },
+  "license": "UNLICENSED",
+  "private": "true",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "@phosphor-icons/react": "2.1.10",
+    "ignore": "5.3.2",
+    "playwright-core": "1.63.0",
+    "zod": "4.6.5"
   }
 }
