@@ -19,6 +19,8 @@ export const App: React.FC = () => {
     rows: [],
     unsaved: false
   });
+  const [packetReviewed, setPacketReviewed] = useState(false);
+  useEffect(() => setPacketReviewed(false), [state.targeting?.packet]);
   const [selected, setSelected] = useState<string | undefined>(bridge?.getState()?.selected);
   useEffect(() => {
     const handler = (event: MessageEvent<TimelineOutbound>) => {
@@ -45,7 +47,7 @@ export const App: React.FC = () => {
     <main className="panel">
       <header className="header">
         <strong>Scrubline</strong>
-        <span className="badge">M2</span>
+        <span className="badge">M3</span>
       </header>
       <section className="status" aria-live="polite">
         <span>
@@ -282,6 +284,57 @@ export const App: React.FC = () => {
               </button>
             </>
           )}
+        </section>
+      )}
+      {state.preview?.status === 'ready' &&
+        state.preview.url &&
+        state.preview.checkpoint &&
+        (!state.targeting || state.targeting.status === 'off') && (
+          <button onClick={() => bridge?.postMessage({ type: 'start-targeting' })}>
+            Select element
+          </button>
+        )}
+      {state.targeting && state.targeting.status !== 'off' && (
+        <section aria-label="Target context">
+          <span>
+            {state.targeting.status === 'on'
+              ? 'Targeting on'
+              : state.targeting.status === 'stale'
+                ? 'Target changed'
+                : state.targeting.status === 'error'
+                  ? 'Targeting unavailable'
+                  : 'Element selected'}
+          </span>
+          {state.targeting.status === 'ready' && state.targeting.crop && (
+            <img className="target-crop" src={state.targeting.crop} alt="Sanitized element crop" />
+          )}
+          {state.targeting.packet && (
+            <details
+              onToggle={(e) => {
+                if (e.currentTarget.open) setPacketReviewed(true);
+              }}
+            >
+              <summary>Review packet</summary>
+              <pre>{state.targeting.packet}</pre>
+            </details>
+          )}
+          {state.targeting.status === 'ready' && (
+            <button onClick={() => bridge?.postMessage({ type: 'validate-target' })}>
+              Check target
+            </button>
+          )}
+          {state.targeting.message && <small>{state.targeting.message}</small>}
+          {state.targeting.status === 'ready' && (
+            <button
+              disabled={!packetReviewed}
+              onClick={() => bridge?.postMessage({ type: 'copy-packet' })}
+            >
+              Copy packet
+            </button>
+          )}
+          <button onClick={() => bridge?.postMessage({ type: 'stop-targeting' })}>
+            Stop targeting
+          </button>
         </section>
       )}
       {state.canUndo && (
