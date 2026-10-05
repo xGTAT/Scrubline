@@ -65,7 +65,23 @@ function sanitize(eventType, payload) {
   }
   const args = (payload.toolCall && payload.toolCall.args) || {};
   const rel = toWorkspaceRelative(args.TargetFile || args.AbsolutePath, payload.workspacePaths);
-  if (rel) record.targetFile = rel;
+  if (rel) {
+    record.targetFile = rel;
+    // Exact disk-content evidence, never tool arguments or file contents.
+    for (const ws of payload.workspacePaths || []) {
+      try {
+        const root = fs.realpathSync(ws);
+        const absolute = fs.realpathSync(path.resolve(ws, rel));
+        const local = path.relative(root, absolute);
+        if (local.startsWith('..') || path.isAbsolute(local)) continue;
+        const stat = fs.statSync(absolute);
+        if (!stat.isFile() || stat.size > 10 * 1024 * 1024) continue;
+        record.workspace = crypto.createHash('sha256').update(root).digest('hex');
+        record.contentHash = crypto.createHash('sha256').update(fs.readFileSync(absolute)).digest('hex');
+        break;
+      } catch { /* No disk evidence means no attribution match. */ }
+    }
+  }
   if (typeof payload.terminationReason === 'string') {
     record.terminationReason = payload.terminationReason;
   }
