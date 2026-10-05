@@ -180,3 +180,13 @@ summary {
     transition: none;
   }
 }
+.target-crop {
+  width: 100%;
+  max-height: 160px;
+  object-fit: contain;
+}
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
