@@ -84,12 +84,17 @@ export class Timeline {
         }
         this.state = {
           status: 'ready',
-          rows: this.store.checkpoints.map((c, i) => ({
-            id: c.id,
-            createdAt: c.createdAt,
-            attribution: c.attribution,
-            changedPaths: changedPaths(this.store.checkpoints[i - 1]?.files ?? [], c.files)
-          })),
+          rows: this.store.checkpoints
+            .filter((c) => !c.branch)
+            .map((c) => ({
+              id: c.id,
+              createdAt: c.createdAt,
+              attribution: c.attribution,
+              changedPaths: changedPaths(
+                this.store.checkpoints.find((p) => p.id === c.parentId)?.files ?? [],
+                c.files
+              )
+            })),
           unsaved: this.state.unsaved
         };
         this.notify(this.state);
