@@ -13,8 +13,8 @@ test('panel shows an honest empty state', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByText('Scrubline', { exact: true })).toBeVisible();
   await expect(page.getByText('No checkpoints yet')).toBeVisible();
-  await expect(page.getByText('Capture arrives with the M1 timeline.')).toBeVisible();
-  await expect(page.getByText('Scrubline Harness · v1.139.1')).toBeVisible();
+  await expect(page.getByText('Open a folder to begin.')).toBeVisible();
+  await expect(page.getByText('Scrubline Harness')).toBeVisible();
 });
 
 test('panel stays within the UI word budget', async ({ page }) => {
@@ -51,3 +51,61 @@ test('sample-web fixture toggles between its two states', async ({ page }) => {
   await page.getByRole('button', { name: 'Toggle Client State' }).click();
   await expect(page.getByText('State A (Baseline)')).toBeVisible();
 });
+for (const status of ['loading', 'error', 'limit', 'ready'] as const) {
+  test(`${status} state is accessible, concise and screenshot verified`, async ({ page }) => {
+    await page.setViewportSize({ width: 280, height: 640 });
+    await page.goto('/');
+    await expect(page.getByText('No checkpoints yet')).toBeVisible();
+    await page.evaluate((status) => {
+      const send = (window as unknown as { __sendTimeline: (value: unknown) => void })
+        .__sendTimeline;
+      send({
+        status,
+        unsaved: status === 'ready',
+        message:
+          status === 'error'
+            ? 'Files changed during capture. Retry.'
+            : status === 'limit'
+              ? 'Capture limit reached. Increase limits.'
+              : undefined,
+        rows:
+          status === 'ready'
+            ? [
+                {
+                  id: 'a'.repeat(64),
+                  createdAt: '2026-10-05T15:00:00Z',
+                  changedPaths: ['src/index.html', 'src/style.css'],
+                  attribution: { kind: 'unattributed' }
+                }
+              ]
+            : []
+      });
+    }, status);
+    await expect(
+      page.getByText(
+        status === 'loading'
+          ? 'Capturing…'
+          : status === 'error'
+            ? 'Capture failed'
+            : status === 'limit'
+              ? 'Limit reached'
+              : '1 checkpoint',
+        { exact: true }
+      )
+    ).toBeVisible();
+    expect((await page.locator('body').innerText()).trim().split(/\s+/).length).toBeLessThanOrEqual(
+      40
+    );
+    expect(
+      (await new AxeBuilder({ page }).analyze()).violations.filter(
+        (v) => v.impact === 'serious' || v.impact === 'critical'
+      )
+    ).toEqual([]);
+    if (status === 'ready') {
+      await page.getByRole('button', { name: /files changed/ }).click();
+      await expect(page.getByText('src/index.html')).toBeVisible();
+      await expect(page.getByText('Unsaved changes not captured')).toBeVisible();
+    }
+    await page.screenshot({ path: `${evidenceDir}/panel_m1_${status}.png`, fullPage: true });
+  });
+}
