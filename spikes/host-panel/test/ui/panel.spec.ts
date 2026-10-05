@@ -287,3 +287,85 @@ test('M4 fork list and two alternatives comparison stay usable at narrow width',
   ).toEqual([]);
   await page.screenshot({ path: `${evidenceDir}/panel_m4_comparison.png`, fullPage: true });
 });
+
+for (const theme of ['dark', 'light', 'contrast'] as const) {
+  test(`M6 ${theme} 1000 checkpoints responsive keyboard and motion`, async ({ page }) => {
+    await page.setViewportSize({ width: 300, height: 800 });
+    await page.goto('/');
+    await expect(page.getByText('No checkpoints yet')).toBeVisible();
+    await page.evaluate((theme) => {
+      if (theme === 'light')
+        document.documentElement.style.cssText =
+          '--vscode-foreground:#202020;--vscode-descriptionForeground:#565656;--vscode-sideBar-background:#f6f6f6;--vscode-editor-background:#ffffff;--vscode-widget-border:#c2c2c2;--vscode-list-inactiveSelectionBackground:#ededed;--vscode-button-secondaryBackground:#e4e4e4;--vscode-button-secondaryForeground:#222222';
+      if (theme === 'contrast')
+        document.documentElement.style.cssText =
+          '--vscode-foreground:#ffffff;--vscode-descriptionForeground:#ffffff;--vscode-sideBar-background:#000000;--vscode-widget-border:#ffffff;--vscode-focusBorder:#ffff00;--vscode-button-background:#000000;--vscode-list-inactiveSelectionBackground:#000000';
+      const w = window as unknown as { __sendTimeline: (v: unknown) => void };
+      w.__sendTimeline({
+        status: 'ready',
+        rows: Array.from({ length: 1000 }, (_, i) => ({
+          id: String(i),
+          createdAt: '2026-10-05T15:00:00Z',
+          changedPaths: ['index.html'],
+          attribution: { kind: 'unattributed' }
+        })),
+        unsaved: false
+      });
+    }, theme);
+    await expect(page.locator('.row')).toHaveCount(1);
+    expect(await page.locator('main *').count()).toBeLessThan(65);
+    await page.locator('#scrub').focus();
+    await page.keyboard.press('End');
+    await expect(page.locator('#scrub')).toHaveValue('999');
+    await expect(page.getByRole('button', { name: 'Fork checkpoint' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Next', exact: true })).toBeDisabled();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true
+    );
+    const violations = (await new AxeBuilder({ page }).analyze()).violations;
+    expect(violations.filter((v) => v.impact === 'critical' || v.impact === 'serious')).toEqual([]);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    expect(await page.locator('.panel').evaluate((e) => getComputedStyle(e).animationName)).toBe(
+      'none'
+    );
+    await page.screenshot({ path: resolve(evidenceDir, `panel_m6_${theme}.png`), fullPage: true });
+  });
+}
+
+test('M6 motion actual frames are stable and reduced-motion disables entry', async ({
+  browser
+}) => {
+  const context = await browser.newContext({
+    viewport: { width: 360, height: 740 },
+    recordVideo: { dir: resolve(evidenceDir, 'motion'), size: { width: 360, height: 740 } }
+  });
+  const page = await context.newPage();
+  await page.goto('/');
+  await expect(page.getByText('No checkpoints yet')).toBeVisible();
+  await page.locator('.panel').evaluate((e) => {
+    e.animate(
+      [
+        { opacity: 0.5, transform: 'translateY(3px)' },
+        { opacity: 1, transform: 'translateY(0)' }
+      ],
+      { duration: 180, fill: 'both' }
+    ).pause();
+  });
+  await page.locator('.panel').evaluate((e) => {
+    e.getAnimations().at(-1)!.currentTime = 0;
+  });
+  await page.screenshot({ path: resolve(evidenceDir, 'm6_motion_start.png') });
+  await page.locator('.panel').evaluate((e) => {
+    e.getAnimations().at(-1)!.currentTime = 90;
+  });
+  await page.screenshot({ path: resolve(evidenceDir, 'm6_motion_mid.png') });
+  await page.locator('.panel').evaluate((e) => {
+    e.getAnimations().at(-1)!.currentTime = 180;
+  });
+  await page.screenshot({ path: resolve(evidenceDir, 'm6_motion_end.png') });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  expect(await page.locator('.panel').evaluate((e) => getComputedStyle(e).animationName)).toBe(
+    'none'
+  );
+  await context.close();
+});
