@@ -1,368 +1,348 @@
-import React, { useState, useEffect } from 'react';
-
+import React, { useEffect, useState } from 'react';
+import { ClockCounterClockwise } from '@phosphor-icons/react';
+import type { HostInfo } from '../host-info';
+import type { TimelineState, TimelineOutbound, TimelineInbound } from '../bridge/timeline';
 declare global {
   interface Window {
-    __SCRUBLINE_HOST_INFO__?: {
-      vscodeVersion: string;
-      appName: string;
-      appHost: string;
-      language: string;
-      workspaceFolders: string[];
-      extensionPath: string;
-    };
+    __SCRUBLINE_HOST_INFO__?: HostInfo;
     acquireVsCodeApi?: () => {
-      postMessage: (msg: any) => void;
-      setState: (state: any) => void;
-      getState: () => any;
+      postMessage: (m: TimelineInbound) => void;
+      getState: () => { selected?: string } | undefined;
+      setState: (s: { selected?: string }) => void;
     };
   }
 }
-
-interface Checkpoint {
-  id: string;
-  name: string;
-  timestamp: string;
-  hash: string;
-  source: string;
-  port: number;
-}
-
-const SAMPLE_CHECKPOINTS: Checkpoint[] = [
-  {
-    id: 'chk_001',
-    name: 'State A: Baseline Fixture',
-    timestamp: '2026-09-25 17:30:00',
-    hash: 'sha256-4f8a29...',
-    source: 'Initial Repo Fixture',
-    port: 4101
-  },
-  {
-    id: 'chk_002',
-    name: 'State B: Agent Feature Edit',
-    timestamp: '2026-09-25 17:35:00',
-    hash: 'sha256-9b1c73...',
-    source: 'Antigravity IDE Agent Edit',
-    port: 4102
-  }
-];
-
+const bridge = window.acquireVsCodeApi?.();
 export const App: React.FC = () => {
-  const [hostInfo, setHostInfo] = useState<any>(null);
-  const [selectedIdx, setSelectedIdx] = useState<number>(1);
-  const [copied, setCopied] = useState<boolean>(false);
-
+  const [state, setState] = useState<TimelineState>({
+    status: 'loading',
+    rows: [],
+    unsaved: false
+  });
+  const [packetReviewed, setPacketReviewed] = useState(false);
+  useEffect(() => setPacketReviewed(false), [state.targeting?.packet]);
+  const [selected, setSelected] = useState<string | undefined>(bridge?.getState()?.selected);
   useEffect(() => {
-    if (window.__SCRUBLINE_HOST_INFO__) {
-      setHostInfo(window.__SCRUBLINE_HOST_INFO__);
-    }
+    const handler = (event: MessageEvent<TimelineOutbound>) => {
+      if (event.data.type === 'timeline') setState(event.data.data);
+    };
+    window.addEventListener('message', handler);
+    bridge?.postMessage({ type: 'request-timeline' });
+    return () => window.removeEventListener('message', handler);
   }, []);
-
-  const activeCheckpoint = SAMPLE_CHECKPOINTS[selectedIdx];
-
-  const copyPromptPacket = () => {
-    const packet = `[Scrubline Context Packet]\nCheckpoint: ${activeCheckpoint.id} (${activeCheckpoint.name})\nTarget: fixtures/sample-web/index.html\nState Hash: ${activeCheckpoint.hash}`;
-    navigator.clipboard?.writeText(packet);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const choose = (id: string) => {
+    setSelected(id);
+    const index = state.rows.findIndex((r) => r.id === id);
+    setPage(Math.max(0, state.rows.length - 1 - index));
+    bridge?.setState({ selected: id });
+    bridge?.postMessage({ type: 'select-checkpoint', id });
   };
-
+  const row = state.rows.find((r) => r.id === selected);
+  const [page, setPage] = useState(0);
+  const visible = state.rows
+    .slice()
+    .reverse()
+    .slice(page * 1, page * 1 + 1);
   return (
-    <div style={styles.container}>
-      <header style={styles.header}>
-        <div style={styles.headerTop}>
-          <div style={styles.brand}>
-            <span style={styles.brandDot}></span>
-            <strong style={styles.brandTitle}>Scrubline Panel</strong>
-          </div>
-          <span style={styles.badge}>M0 Spike</span>
-        </div>
-        <p style={styles.subtitle}>Frontend Change Review & Checkpoint Timeline Layer</p>
+    <main className="panel">
+      <header className="header">
+        <strong>Scrubline</strong>
+        <span className="badge">M3</span>
       </header>
-
-      {/* Host Diagnostics */}
-      <section style={styles.card}>
-        <div style={styles.cardHeader}>
-          <span style={styles.cardTitle}>Host Environment Diagnostics</span>
-          <span style={styles.tagSuccess}>Active</span>
-        </div>
-        <div style={styles.diagGrid}>
-          <div style={styles.diagItem}>
-            <span style={styles.diagLabel}>Host Name:</span>
-            <span style={styles.diagValue}>{hostInfo?.appName || 'Detecting...'}</span>
-          </div>
-          <div style={styles.diagItem}>
-            <span style={styles.diagLabel}>VS Code API:</span>
-            <span style={styles.diagValue}>v{hostInfo?.vscodeVersion || '1.107.0'}</span>
-          </div>
-          <div style={styles.diagItem}>
-            <span style={styles.diagLabel}>App Host:</span>
-            <span style={styles.diagValue}>{hostInfo?.appHost || 'desktop'}</span>
-          </div>
-          <div style={styles.diagItem}>
-            <span style={styles.diagLabel}>Language:</span>
-            <span style={styles.diagValue}>{hostInfo?.language || 'en'}</span>
-          </div>
-        </div>
+      <section className="status" aria-live="polite">
+        <span>
+          {state.status === 'loading'
+            ? 'Capturing…'
+            : state.status === 'empty'
+              ? 'No checkpoints yet'
+              : state.status === 'error'
+                ? 'Capture failed'
+                : state.status === 'limit'
+                  ? 'Limit reached'
+                  : `${state.rows.length} checkpoint${state.rows.length === 1 ? '' : 's'}`}
+        </span>
+        {state.unsaved && <span>Unsaved changes not captured</span>}
       </section>
-
-      {/* Timeline Scrubber */}
-      <section style={styles.card}>
-        <div style={styles.cardHeader}>
-          <span style={styles.cardTitle}>Historical Checkpoint Scrub</span>
-          <span style={styles.tagInfo}>Isolated Previews</span>
-        </div>
-
-        <div style={styles.timelineScrubber}>
+      {(state.status === 'empty' || state.status === 'loading') && (
+        <section className="empty">
+          <ClockCounterClockwise size={28} strokeWidth={1.5} aria-hidden="true" />
+          <p>{state.message ?? 'Watching this folder'}</p>
+          <button onClick={() => bridge?.postMessage({ type: 'retry-capture' })}>
+            Capture now
+          </button>
+        </section>
+      )}
+      {(state.status === 'error' || state.status === 'limit') && (
+        <section role="alert">
+          <p className="failure" title={state.message}>
+            {state.message}
+          </p>
+          <button onClick={() => bridge?.postMessage({ type: 'retry-capture' })}>Retry</button>
+        </section>
+      )}
+      {state.rows.length > 0 && (
+        <section className="scrub" aria-label="Read-only scrub">
+          <label htmlFor="scrub">Checkpoint</label>
           <input
+            id="scrub"
             type="range"
             min={0}
-            max={SAMPLE_CHECKPOINTS.length - 1}
-            value={selectedIdx}
-            onChange={(e) => setSelectedIdx(parseInt(e.target.value, 10))}
-            style={styles.slider}
+            max={Math.max(0, state.rows.length - 1)}
+            value={Math.max(
+              0,
+              state.rows.findIndex((r) => r.id === selected)
+            )}
+            aria-valuetext={`Checkpoint ${
+              Math.max(
+                0,
+                state.rows.findIndex((r) => r.id === selected)
+              ) + 1
+            } of ${state.rows.length}, ${row ? new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(new Date(row.createdAt)) : ''}`}
+            onChange={(e) => choose(state.rows[Number(e.target.value)].id)}
           />
-          <div style={styles.stepLabels}>
-            {SAMPLE_CHECKPOINTS.map((chk, idx) => (
-              <button
-                key={chk.id}
-                onClick={() => setSelectedIdx(idx)}
-                style={{
-                  ...styles.stepBtn,
-                  ...(selectedIdx === idx ? styles.stepBtnActive : {})
-                }}
-              >
-                {chk.name.split(':')[0]}
+          <nav>
+            <button
+              disabled={!selected || state.rows.findIndex((r) => r.id === selected) <= 0}
+              onClick={() =>
+                choose(state.rows[state.rows.findIndex((r) => r.id === selected) - 1].id)
+              }
+            >
+              Prev
+            </button>
+            <button
+              disabled={state.rows.findIndex((r) => r.id === selected) >= state.rows.length - 1}
+              onClick={() =>
+                choose(
+                  state.rows[
+                    Math.max(
+                      0,
+                      state.rows.findIndex((r) => r.id === selected)
+                    ) + 1
+                  ].id
+                )
+              }
+            >
+              Next
+            </button>
+          </nav>
+        </section>
+      )}
+      <section className="preview" aria-live="polite">
+        {state.preview?.status === 'loading' ? (
+          <span>Rendering…</span>
+        ) : state.preview?.status === 'error' ? (
+          <>
+            <span title={state.preview.message}>Preview unavailable</span>
+            <button
+              onClick={() =>
+                selected && bridge?.postMessage({ type: 'select-checkpoint', id: selected })
+              }
+            >
+              Retry preview
+            </button>
+          </>
+        ) : state.preview?.status === 'ready' ? (
+          <>
+            <span>{state.preview.label}</span>
+            {state.preview.message && (
+              <span className="preview-message">{state.preview.message}</span>
+            )}
+            {state.preview.image && <img src={state.preview.image} alt="Checkpoint screenshot" />}
+            {state.preview.url && (
+              <button onClick={() => bridge?.postMessage({ type: 'open-preview' })}>
+                Open preview
               </button>
+            )}
+          </>
+        ) : state.rows.length > 0 ? (
+          <button onClick={() => bridge?.postMessage({ type: 'start-preview' })}>
+            Start preview
+          </button>
+        ) : null}
+      </section>
+      {visible.length > 0 && (
+        <>
+          <ol className="timeline" aria-label="Checkpoints">
+            {visible.map((r) => (
+              <li key={r.id}>
+                <button
+                  className="row"
+                  aria-pressed={selected === r.id}
+                  onClick={() => {
+                    setSelected(r.id);
+                    bridge?.setState({ selected: r.id });
+                    bridge?.postMessage({ type: 'select-checkpoint', id: r.id });
+                  }}
+                >
+                  <time>
+                    {new Intl.DateTimeFormat(undefined, {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit'
+                    }).format(new Date(r.createdAt))}
+                  </time>
+                  <span>{r.changedPaths.length} files changed</span>
+                  <small>{r.attribution.kind === 'hook' ? 'Hook matched' : 'Unattributed'}</small>
+                </button>
+              </li>
             ))}
-          </div>
-        </div>
-
-        {/* Selected Checkpoint Card */}
-        <div style={styles.checkpointDetail}>
-          <div style={styles.checkpointHeader}>
-            <strong>{activeCheckpoint.name}</strong>
-            <span style={styles.hashTag}>{activeCheckpoint.hash}</span>
-          </div>
-          <p style={styles.metaText}>
-            Source: <strong>{activeCheckpoint.source}</strong> &bull; {activeCheckpoint.timestamp}
-          </p>
-          <div style={styles.isolationNotice}>
-            <span>Isolated Process Port: <code>http://localhost:{activeCheckpoint.port}</code></span>
-            <span style={styles.safeTag}>Read-Only Snapshot</span>
-          </div>
-        </div>
-      </section>
-
-      {/* Context Packet Export */}
-      <section style={styles.card}>
-        <div style={styles.cardHeader}>
-          <span style={styles.cardTitle}>Agent Handoff Packet</span>
-        </div>
-        <p style={styles.metaText}>
-          Non-automated, manual prompt packet generation with verified disk checkpoint metadata:
-        </p>
-        <button style={styles.copyBtn} onClick={copyPromptPacket}>
-          {copied ? '✓ Copied to Clipboard!' : 'Copy Element Context Packet'}
-        </button>
-      </section>
-
-      <footer style={styles.footer}>
-        <small>Scrubline Host Boundary Feasibility Test &bull; M0</small>
+          </ol>
+          {state.rows.length > 1 && (
+            <nav aria-label="Timeline pages">
+              <button disabled={page === 0} onClick={() => setPage(page - 1)}>
+                Newer
+              </button>
+              <button
+                disabled={(page + 1) * 1 >= state.rows.length}
+                onClick={() => setPage(page + 1)}
+              >
+                Older
+              </button>
+            </nav>
+          )}
+        </>
+      )}
+      {row && (
+        <section aria-label="Review">
+          <button
+            disabled={state.unsaved}
+            onClick={() => bridge?.postMessage({ type: 'review-checkpoint', id: row.id })}
+          >
+            Review restore
+          </button>
+          <details>
+            <summary>Changed paths ({row.changedPaths.length})</summary>
+            <ul className="paths">
+              {row.changedPaths.map((p) => (
+                <li key={p}>
+                  <button
+                    title={p}
+                    onClick={() => bridge?.postMessage({ type: 'open-diff', id: row.id, path: p })}
+                  >
+                    {p}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </details>
+        </section>
+      )}
+      {state.review && (
+        <section role="region" aria-label="Restore confirmation">
+          {state.review.conflicts.length > 0 ? (
+            <>
+              <span>Workspace drift. Restore blocked.</span>
+              <details>
+                <summary>Three-way conflicts</summary>
+                <ul className="paths">
+                  {state.review.conflicts.map((p) => (
+                    <li key={p}>
+                      <button
+                        title={p}
+                        onClick={() =>
+                          bridge?.postMessage({
+                            type: 'open-diff',
+                            id: state.review!.checkpoint,
+                            path: p
+                          })
+                        }
+                      >
+                        {p}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            </>
+          ) : (
+            <>
+              <span>
+                Restore {state.review.paths.length} file{state.review.paths.length === 1 ? '' : 's'}
+                ?
+              </span>
+              <details>
+                <summary>Confirmed files</summary>
+                <ul className="paths">
+                  {state.review.paths.map((p) => (
+                    <li key={p} title={p}>
+                      {p}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+              <button
+                disabled={state.unsaved || state.review.paths.length === 0}
+                onClick={() =>
+                  bridge?.postMessage({
+                    type: 'apply-reviewed',
+                    id: state.review!.checkpoint,
+                    token: state.review!.token
+                  })
+                }
+              >
+                Confirm restore
+              </button>
+            </>
+          )}
+        </section>
+      )}
+      {state.preview?.status === 'ready' &&
+        state.preview.url &&
+        state.preview.checkpoint &&
+        (!state.targeting || state.targeting.status === 'off') && (
+          <button onClick={() => bridge?.postMessage({ type: 'start-targeting' })}>
+            Select element
+          </button>
+        )}
+      {state.targeting && state.targeting.status !== 'off' && (
+        <section aria-label="Target context">
+          <span>
+            {state.targeting.status === 'on'
+              ? 'Targeting on'
+              : state.targeting.status === 'stale'
+                ? 'Target changed'
+                : state.targeting.status === 'error'
+                  ? 'Targeting unavailable'
+                  : 'Element selected'}
+          </span>
+          {state.targeting.status === 'ready' && state.targeting.crop && (
+            <img className="target-crop" src={state.targeting.crop} alt="Sanitized element crop" />
+          )}
+          {state.targeting.packet && (
+            <details
+              onToggle={(e) => {
+                if (e.currentTarget.open) setPacketReviewed(true);
+              }}
+            >
+              <summary>Review packet</summary>
+              <pre>{state.targeting.packet}</pre>
+            </details>
+          )}
+          {state.targeting.status === 'ready' && (
+            <button onClick={() => bridge?.postMessage({ type: 'validate-target' })}>
+              Check target
+            </button>
+          )}
+          {state.targeting.message && <small>{state.targeting.message}</small>}
+          {state.targeting.status === 'ready' && (
+            <button
+              disabled={!packetReviewed}
+              onClick={() => bridge?.postMessage({ type: 'copy-packet' })}
+            >
+              Copy packet
+            </button>
+          )}
+          <button onClick={() => bridge?.postMessage({ type: 'stop-targeting' })}>
+            Stop targeting
+          </button>
+        </section>
+      )}
+      {state.canUndo && (
+        <button onClick={() => bridge?.postMessage({ type: 'undo-restore' })}>Undo restore</button>
+      )}
+      <footer className="footer">
+        {window.__SCRUBLINE_HOST_INFO__?.appName ?? 'Detecting host…'}
       </footer>
-    </div>
+    </main>
   );
-};
-
-const styles: { [key: string]: React.CSSProperties } = {
-  container: {
-    padding: '16px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '14px',
-    maxWidth: '480px',
-    margin: '0 auto'
-  },
-  header: {
-    borderBottom: '1px solid var(--vscode-sideBarSectionHeader-border, #333)',
-    paddingBottom: '10px'
-  },
-  headerTop: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center'
-  },
-  brand: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px'
-  },
-  brandDot: {
-    width: '10px',
-    height: '10px',
-    borderRadius: '50%',
-    backgroundColor: '#38bdf8',
-    display: 'inline-block'
-  },
-  brandTitle: {
-    fontSize: '15px',
-    color: 'var(--vscode-foreground, #eee)'
-  },
-  badge: {
-    fontSize: '11px',
-    fontWeight: 600,
-    backgroundColor: 'rgba(56, 189, 248, 0.15)',
-    color: '#38bdf8',
-    padding: '2px 8px',
-    borderRadius: '12px',
-    border: '1px solid rgba(56, 189, 248, 0.3)'
-  },
-  subtitle: {
-    fontSize: '12px',
-    color: 'var(--vscode-descriptionForeground, #888)',
-    marginTop: '4px',
-    margin: 0
-  },
-  card: {
-    backgroundColor: 'var(--vscode-editor-inactiveSelectionBackground, rgba(255, 255, 255, 0.04))',
-    border: '1px solid var(--vscode-widget-border, #333)',
-    borderRadius: '8px',
-    padding: '12px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '10px'
-  },
-  cardHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center'
-  },
-  cardTitle: {
-    fontSize: '12px',
-    fontWeight: 600,
-    textTransform: 'uppercase',
-    letterSpacing: '0.04em',
-    color: 'var(--vscode-foreground, #ccc)'
-  },
-  tagSuccess: {
-    fontSize: '10px',
-    padding: '1px 6px',
-    borderRadius: '4px',
-    backgroundColor: 'rgba(34, 197, 94, 0.2)',
-    color: '#22c55e',
-    fontWeight: 600
-  },
-  tagInfo: {
-    fontSize: '10px',
-    padding: '1px 6px',
-    borderRadius: '4px',
-    backgroundColor: 'rgba(56, 189, 248, 0.15)',
-    color: '#38bdf8',
-    fontWeight: 600
-  },
-  diagGrid: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: '6px 12px',
-    fontSize: '12px'
-  },
-  diagItem: {
-    display: 'flex',
-    flexDirection: 'column'
-  },
-  diagLabel: {
-    color: 'var(--vscode-descriptionForeground, #777)',
-    fontSize: '11px'
-  },
-  diagValue: {
-    color: 'var(--vscode-foreground, #eee)',
-    fontWeight: 500,
-    fontFamily: 'monospace'
-  },
-  timelineScrubber: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px'
-  },
-  slider: {
-    width: '100%',
-    cursor: 'pointer',
-    accentColor: '#38bdf8'
-  },
-  stepLabels: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    gap: '8px'
-  },
-  stepBtn: {
-    flex: 1,
-    padding: '5px 8px',
-    fontSize: '11px',
-    backgroundColor: 'var(--vscode-button-secondaryBackground, #2a2a2a)',
-    color: 'var(--vscode-button-secondaryForeground, #ddd)',
-    border: '1px solid transparent',
-    borderRadius: '4px',
-    cursor: 'pointer'
-  },
-  stepBtnActive: {
-    backgroundColor: '#0284c7',
-    color: '#ffffff',
-    fontWeight: 600,
-    borderColor: '#38bdf8'
-  },
-  checkpointDetail: {
-    backgroundColor: 'var(--vscode-editor-background, #1e1e1e)',
-    border: '1px solid var(--vscode-widget-border, #444)',
-    borderRadius: '6px',
-    padding: '10px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '6px'
-  },
-  checkpointHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    fontSize: '12px'
-  },
-  hashTag: {
-    fontFamily: 'monospace',
-    fontSize: '11px',
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    padding: '2px 5px',
-    borderRadius: '3px'
-  },
-  metaText: {
-    fontSize: '11px',
-    color: 'var(--vscode-descriptionForeground, #888)',
-    margin: 0
-  },
-  isolationNotice: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    fontSize: '11px',
-    paddingTop: '6px',
-    borderTop: '1px dashed var(--vscode-widget-border, #333)'
-  },
-  safeTag: {
-    color: '#22c55e',
-    fontSize: '10px',
-    fontWeight: 600
-  },
-  copyBtn: {
-    padding: '8px 12px',
-    backgroundColor: 'var(--vscode-button-background, #0e639c)',
-    color: 'var(--vscode-button-foreground, #ffffff)',
-    border: 'none',
-    borderRadius: '4px',
-    fontSize: '12px',
-    fontWeight: 500,
-    cursor: 'pointer',
-    transition: 'background-color 0.15s'
-  },
-  footer: {
-    textAlign: 'center',
-    color: 'var(--vscode-descriptionForeground, #666)',
-    marginTop: '8px'
-  }
 };
