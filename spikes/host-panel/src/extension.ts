@@ -1,19 +1,21 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
-import * as fs from 'fs';
+import { randomBytes } from 'crypto';
+import type { HostInfo, HostInfoMessage, WebviewInboundMessage } from './host-info';
 
-export function activate(context: vscode.ExtensionContext) {
-  const hostInfo = {
+function collectHostInfo(context: vscode.ExtensionContext): HostInfo {
+  return {
     vscodeVersion: vscode.version,
     appName: vscode.env.appName,
     appHost: vscode.env.appHost,
     language: vscode.env.language,
-    shell: vscode.env.shell,
-    workspaceFolders: (vscode.workspace.workspaceFolders || []).map(f => f.uri.fsPath),
+    workspaceFolders: (vscode.workspace.workspaceFolders || []).map((f) => f.uri.fsPath),
     extensionPath: context.extensionPath
   };
+}
 
-  console.log('[Scrubline Host Panel] Activated in host:', hostInfo);
+export function activate(context: vscode.ExtensionContext) {
+  const hostInfo = collectHostInfo(context);
+  console.log('[Scrubline] Activated in host:', hostInfo);
 
   // 1. Register Webview View Provider (Sidebar)
   const provider = new ScrublineViewProvider(context.extensionUri, hostInfo);
@@ -39,12 +41,10 @@ export function activate(context: vscode.ExtensionContext) {
 
       panel.webview.html = getWebviewHtml(panel.webview, context.extensionUri, hostInfo);
 
-      panel.webview.onDidReceiveMessage(message => {
+      panel.webview.onDidReceiveMessage((message: WebviewInboundMessage) => {
         if (message.type === 'request-host-info') {
-          panel.webview.postMessage({
-            type: 'host-info',
-            data: hostInfo
-          });
+          const reply: HostInfoMessage = { type: 'host-info', data: hostInfo };
+          panel.webview.postMessage(reply);
         }
       });
     })
@@ -56,7 +56,7 @@ export function deactivate() {}
 class ScrublineViewProvider implements vscode.WebviewViewProvider {
   constructor(
     private readonly _extensionUri: vscode.Uri,
-    private readonly _hostInfo: any
+    private readonly _hostInfo: HostInfo
   ) {}
 
   public resolveWebviewView(
@@ -69,22 +69,29 @@ class ScrublineViewProvider implements vscode.WebviewViewProvider {
       localResourceRoots: [this._extensionUri]
     };
 
-    webviewView.webview.html = getWebviewHtml(webviewView.webview, this._extensionUri, this._hostInfo);
+    webviewView.webview.html = getWebviewHtml(
+      webviewView.webview,
+      this._extensionUri,
+      this._hostInfo
+    );
 
-    webviewView.webview.onDidReceiveMessage(message => {
+    webviewView.webview.onDidReceiveMessage((message: WebviewInboundMessage) => {
       if (message.type === 'request-host-info') {
-        webviewView.webview.postMessage({
-          type: 'host-info',
-          data: this._hostInfo
-        });
+        const reply: HostInfoMessage = { type: 'host-info', data: this._hostInfo };
+        webviewView.webview.postMessage(reply);
       }
     });
   }
 }
 
-function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, hostInfo: any): string {
+function getWebviewHtml(
+  webview: vscode.Webview,
+  extensionUri: vscode.Uri,
+  hostInfo: HostInfo
+): string {
   const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'dist', 'webview.js'));
-  const nonce = getNonce();
+  const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'dist', 'webview.css'));
+  const nonce = randomBytes(16).toString('base64');
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -92,6 +99,7 @@ function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, hostI
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${webview.cspSource}; script-src 'nonce-${nonce}' ${webview.cspSource};">
+  <link rel="stylesheet" href="${styleUri}">
   <title>Scrubline Panel</title>
   <style>
     body {
@@ -99,7 +107,7 @@ function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, hostI
       margin: 0;
       font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif);
       color: var(--vscode-foreground, #cccccc);
-      background-color: var(--vscode-editor-background, #1e1e1e);
+      background-color: var(--vscode-sideBar-background, var(--vscode-editor-background, #1e1e1e));
       font-size: var(--vscode-font-size, 13px);
     }
   </style>
@@ -112,13 +120,4 @@ function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, hostI
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
-}
-
-function getNonce(): string {
-  let text = '';
-  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  for (let i = 0; i < 32; i++) {
-    text += possible.charAt(Math.floor(Math.random() * possible.length));
-  }
-  return text;
 }
