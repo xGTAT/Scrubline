@@ -1,7 +1,7 @@
 {
   "name": "scrubline-panel",
   "displayName": "Scrubline Review Panel",
-  "description": "Feasibility spike: smallest installable TypeScript extension and React webview panel",
+  "description": "Scrubline review panel extension (stabilised M0 spike)",
   "version": "0.0.1",
   "publisher": "scrubline",
   "engines": {
@@ -44,17 +44,41 @@
   },
   "scripts": {
     "build": "node build.js",
-    "package": "vsce package --no-dependencies"
+    "package": "vsce package --no-dependencies",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --check .",
+    "format:write": "prettier --write .",
+    "test": "vitest run",
+    "test:ui": "playwright test",
+    "check:nomock": "node scripts/check-nomock.js"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@eslint/js": "9.39.5",
+    "@playwright/test": "1.63.0",
     "@types/node": "^20.11.0",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@types/vscode": "^1.80.0",
     "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.25.0",
+    "eslint": "9.39.5",
+    "globals": "15.15.0",
+    "prettier": "3.9.9",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "typescript-eslint": "8.71.0",
+    "vitest": "3.2.7"
+  },
+  "repository": {
+    "url": "https://github.com/xGTAT/Scrubline.git",
+    "type": "git"
+  },
+  "license": "UNLICENSED",
+  "private": "true",
+  "dependencies": {
+    "@phosphor-icons/react": "2.1.10"
   }
 }
