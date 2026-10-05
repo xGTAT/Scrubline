@@ -103,9 +103,95 @@ for (const status of ['loading', 'error', 'limit', 'ready'] as const) {
     ).toEqual([]);
     if (status === 'ready') {
       await page.getByRole('button', { name: /files changed/ }).click();
+      await page.getByText('Changed paths (2)').click();
       await expect(page.getByText('src/index.html')).toBeVisible();
       await expect(page.getByText('Unsaved changes not captured')).toBeVisible();
     }
     await page.screenshot({ path: `${evidenceDir}/panel_m1_${status}.png`, fullPage: true });
+  });
+}
+for (const mode of [
+  'preview',
+  'rendering',
+  'preview-error',
+  'review',
+  'conflict',
+  'undo'
+] as const) {
+  test(`M2 ${mode} state and keyboard scrub`, async ({ page }) => {
+    await page.setViewportSize({ width: 280, height: 740 });
+    await page.goto('/');
+    await expect(page.getByText('No checkpoints yet')).toBeVisible();
+    await page.evaluate((mode) => {
+      const send = (window as unknown as { __sendTimeline: (value: unknown) => void })
+        .__sendTimeline;
+      const rows = [
+        {
+          id: 'a'.repeat(64),
+          createdAt: '2026-10-05T15:00:00Z',
+          changedPaths: ['src/index.html'],
+          attribution: { kind: 'unattributed' }
+        },
+        {
+          id: 'b'.repeat(64),
+          createdAt: '2026-10-05T15:01:00Z',
+          changedPaths: ['src/index.html'],
+          attribution: { kind: 'unattributed' }
+        }
+      ];
+      send({
+        status: 'ready',
+        rows,
+        unsaved: false,
+        canUndo: mode === 'undo',
+        preview:
+          mode === 'preview'
+            ? {
+                status: 'ready',
+                checkpoint: rows[0].id,
+                label: 'Screenshot',
+                image:
+                  'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="960" height="600"%3E%3Crect width="960" height="600" fill="%23303030"/%3E%3C/svg%3E'
+              }
+            : mode === 'rendering'
+              ? { status: 'loading' }
+              : mode === 'preview-error'
+                ? { status: 'error', message: 'Port busy.' }
+                : undefined,
+        review:
+          mode === 'review' || mode === 'conflict'
+            ? {
+                token: 'review-token',
+                checkpoint: rows[0].id,
+                paths: ['src/index.html'],
+                conflicts: mode === 'conflict' ? ['src/index.html'] : []
+              }
+            : undefined
+      });
+    }, mode);
+    await expect(page.getByText('2 checkpoints', { exact: true })).toBeVisible();
+    const slider = page.getByRole('slider');
+    await slider.focus();
+    await page.keyboard.press('End');
+    await expect(slider).toHaveValue('1');
+    await page.keyboard.press('Home');
+    await expect(slider).toHaveValue('0');
+    expect((await page.locator('body').innerText()).trim().split(/\s+/).length).toBeLessThanOrEqual(
+      40
+    );
+    expect(
+      (await new AxeBuilder({ page }).analyze()).violations.filter(
+        (v) => v.impact === 'serious' || v.impact === 'critical'
+      )
+    ).toEqual([]);
+    if (mode === 'review')
+      await expect(page.getByRole('button', { name: 'Confirm restore' })).toBeVisible();
+    if (mode === 'conflict')
+      await expect(page.getByRole('button', { name: 'Confirm restore' })).toHaveCount(0);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    expect(
+      await page.locator('.preview').evaluate((el) => getComputedStyle(el).transitionDuration)
+    ).toBe('0s');
+    await page.screenshot({ path: `${evidenceDir}/panel_m2_${mode}.png`, fullPage: true });
   });
 }
