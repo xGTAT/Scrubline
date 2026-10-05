@@ -2,7 +2,7 @@
   "name": "scrubline-panel",
   "displayName": "Scrubline Review Panel",
   "description": "Disk checkpoints and a source timeline",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "scrubline",
   "engines": {
     "vscode": "^1.80.0"
@@ -13,7 +13,8 @@
   "activationEvents": [
     "onView:scrubline.historyView",
     "onCommand:scrubline.openPanel",
-    "onStartupFinished"
+    "onStartupFinished",
+    "onCommand:scrubline.startMcp"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -22,6 +23,10 @@
         "command": "scrubline.openPanel",
         "title": "Scrubline: Open Timeline Panel",
         "category": "Scrubline"
+      },
+      {
+        "command": "scrubline.startMcp",
+        "title": "Scrubline: Start Local MCP"
       }
     ],
     "viewsContainers": {
@@ -140,8 +145,10 @@
   "license": "UNLICENSED",
   "private": "true",
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
     "@phosphor-icons/react": "2.1.10",
     "ignore": "5.3.2",
-    "playwright-core": "1.63.0"
+    "playwright-core": "1.63.0",
+    "zod": "4.6.5"
   }
 }
