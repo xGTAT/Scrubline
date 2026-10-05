@@ -97,18 +97,21 @@ export class PreviewRunner {
       const url = await this.start(temp, trusted);
       this.temp = temp;
       let screenshot: string | undefined;
+      let screenshotError: string | undefined;
       try {
         await this.screenshot(url, image);
         screenshot = image;
-      } catch {
-        /* Rendering works even if optional browser is unavailable. */
+      } catch (error) {
+        screenshotError = error instanceof Error ? error.message : String(error);
       }
       return {
         checkpoint: c.id,
         url,
         screenshot,
         label: 'Isolated preview',
-        ...(!screenshot ? { error: 'Screenshot unavailable. Configure Chromium.' } : {})
+        ...(!screenshot
+          ? { error: `Screenshot unavailable: ${screenshotError ?? 'Configure Chromium.'}` }
+          : {})
       };
     } catch (e) {
       await fs.rm(temp, { recursive: true, force: true });
@@ -135,8 +138,11 @@ export class PreviewRunner {
     });
     try {
       const page = await browser.newPage({ viewport: { width: 960, height: 600 } });
-      await page.goto(url, { waitUntil: 'networkidle', timeout: this.config.timeoutMs });
-      await atomicWrite(destination, await page.screenshot());
+      // Server startup and browser rendering have separate budgets.
+      const renderTimeout = Math.max(this.config.timeoutMs, 15000);
+      await page.goto(url, { waitUntil: 'networkidle', timeout: renderTimeout });
+      await page.evaluate(() => document.fonts.ready);
+      await atomicWrite(destination, await page.screenshot({ timeout: renderTimeout }));
     } finally {
       await browser.close();
     }
