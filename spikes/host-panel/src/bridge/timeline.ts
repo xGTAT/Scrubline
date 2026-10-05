@@ -37,8 +37,19 @@ export interface TimelineState {
   };
   review?: { token: string; checkpoint: string; paths: string[]; conflicts: string[] };
   canUndo?: boolean;
+  targeting?: {
+    status: 'off' | 'on' | 'ready' | 'stale' | 'error';
+    message?: string;
+    packet?: string;
+    crop?: string;
+    summary?: string;
+  };
 }
 export type TimelineInbound =
+  | { type: 'start-targeting' }
+  | { type: 'stop-targeting' }
+  | { type: 'copy-packet' }
+  | { type: 'validate-target' }
   | { type: 'request-timeline' }
   | { type: 'retry-capture' }
   | { type: 'select-checkpoint'; id: string }
