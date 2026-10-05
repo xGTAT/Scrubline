@@ -7,11 +7,20 @@ async function build() {
     entryPoints: [path.join(__dirname, 'src', 'extension.ts')],
     bundle: true,
     outfile: path.join(__dirname, 'dist', 'extension.js'),
-    external: ['vscode'],
+    external: ['vscode', 'playwright-core'],
     format: 'cjs',
     platform: 'node',
     sourcemap: false,
     minify: false
+  });
+
+  await esbuild.build({
+    entryPoints: [path.join(__dirname, 'src', 'mcp', 'server.ts')],
+    bundle: true,
+    outfile: path.join(__dirname, 'dist', 'mcp.js'),
+    format: 'cjs',
+    platform: 'node',
+    minify: true
   });
 
   console.log('[build] Bundling React webview UI...');
@@ -31,7 +40,7 @@ async function build() {
   console.log('[build] Build completed successfully into dist/');
 }
 
-build().catch(err => {
+build().catch((err) => {
   console.error('[build] Failed:', err);
   process.exit(1);
 });
