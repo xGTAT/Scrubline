@@ -31,7 +31,7 @@ async function build() {
   console.log('[build] Build completed successfully into dist/');
 }
 
-build().catch(err => {
+build().catch((err) => {
   console.error('[build] Failed:', err);
   process.exit(1);
 });
