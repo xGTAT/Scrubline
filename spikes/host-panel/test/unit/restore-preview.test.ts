@@ -143,6 +143,7 @@ test('isolated historical states render differently and never mutate workspace; 
     const first = await runner.historical(a, true);
     await page.goto(first.url!);
     expect(await page.locator('body').innerText()).toContain('State B (Agent Modified)');
+    expect(first.screenshot, first.error).toBeDefined();
     expect(first.screenshot).toContain(a.id);
     await fs.mkdir(path.resolve('../../docs/evidence'), { recursive: true });
     await fs.copyFile(
@@ -152,6 +153,7 @@ test('isolated historical states render differently and never mutate workspace; 
     const second = await runner.historical(b, true);
     await page.goto(second.url!);
     expect(await page.locator('body').innerText()).toContain('Historical second state');
+    expect(second.screenshot, second.error).toBeDefined();
     expect(second.screenshot).toContain(b.id);
     await fs.copyFile(
       second.screenshot!,
