@@ -54,6 +54,12 @@ Windows CI runs these checks. Source and limits: [M1 notes](docs/m1-source-timel
 - .agents: sanitised hook recorder; [configuration](docs/hooks.md)
 - docs: limitations and verification
 
-### Local replay
+## Release 0.6.0
 
-Export a portable masked-layout replay. Original screenshot pixels, text, media, source and private URLs stay out. [Privacy and limits](docs/m5-replay.md).
+Install the unsigned VSIX locally. Run Scrubline: Open Panel in a trusted single-folder workspace. Configure previewCommand and optional chromiumPath in Settings for rendered history. [Release gates and Human checks](docs/m6-release.md).
+
+Shipped-build dark/light/high-contrast screenshots are included in the release evidence patch; binary publication through GitHub upload is unavailable in this session.
+
+Retention keeps every checkpoint until explicit deletion. Run Compact unused history data to remove orphan blobs, or Delete workspace history to erase this workspace's store after confirmation. Additional exclusions: scrubline.ignoreAdditions. No telemetry; no runtime browser download.
+
+Replay sharing is on hold. M5 files are an inert prototype, not a shipped feature. The release is private/UNLICENSED; Open VSX publication and licence selection remain the owner's decision.
