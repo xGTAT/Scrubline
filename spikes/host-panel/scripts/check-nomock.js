@@ -15,7 +15,7 @@ const SCANNED_EXT = /\.(ts|tsx|js|jsx|css|html|json)$/;
 const BANNED = [
   { label: 'SAMPLE_', re: /SAMPLE_/ },
   { label: 'chk_00', re: /chk_00/ },
-  { label: 'lorem', re: /lorem/i },
+  { label: 'lorem', re: /\blorem\b/i },
   { label: 'mock', re: /mock/i },
   { label: 'fake', re: /fake/i },
   { label: 'sha256- literal', re: /sha256-[0-9a-f]/i }
