@@ -138,7 +138,7 @@ A minimal, zero-dependency fixture was created with native Node HTTP serving:
 ### State Evolution & Disk Hashing
 
 > [!NOTE]
-> The hashes, byte counts, and preview results in Probes 3-4 are **spike measurements with no committed capture code or manifest**. They are not reproducible from this repository. M1 replaces them with the real capture engine and tests (bug B8 stays open until then).
+> The hashes, byte counts, and preview results in Probes 3-4 are **spike measurements with no committed capture code or manifest**. They are not reproducible from this repository. M1 now supplies real capture, crash/restart and reconstruction tests. See [M1 notes](m1-source-timeline.md); B8 is closed. These old measurements remain historical only.
 
 1. **Checkpoint 0 (Baseline State A):**
    - File: `fixtures/sample-web/index.html`
@@ -225,8 +225,10 @@ Promise.all([getP(4101), getP(4102)]).then(r => console.log(JSON.stringify(r)));
 3. **Heavy Dependency Overhead in Isolated Previews:** Full Node.js projects with heavy `node_modules` take time to copy between isolated snapshot directories.
    - *Recommendation:* In M1/M2, use lightweight Git worktrees or content-addressed symlinked stores for dependencies, copying only modified source and public asset files.
 
-### Next Step Recommendation
+### Historical M0 Next Step Recommendation (superseded by M1)
 Proceed to **Milestone 1 (MVP A: Reliable Source Timeline)**:
 - Scaffold the extension event watcher and debouncer.
 - Implement content-addressed local blob storage (`~/.scrubline/blobs/`) and SQLite metadata storage (`~/.scrubline/metadata.db`).
 - Build checkpoint cards displaying relative timestamps, changed paths, and verifiable source hashes.
+
+M1 storage is now versioned JSON manifests and content-addressed files in extension storage, not the SQLite/path proposal above. See [M1 notes](m1-source-timeline.md).
