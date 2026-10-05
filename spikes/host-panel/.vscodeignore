@@ -1,0 +1,6 @@
+**
+!dist/**
+!media/**
+!package.json
+!node_modules/playwright-core/**
+!node_modules/ignore/**
