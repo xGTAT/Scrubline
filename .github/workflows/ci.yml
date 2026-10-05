@@ -27,3 +27,4 @@ jobs:
       - run: npm run check:nomock
       - run: npx playwright install chromium
       - run: npm run test:ui
+      - run: npm run test:host
