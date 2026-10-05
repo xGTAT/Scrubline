@@ -1,3 +1,7 @@
+# DEFERRED: replay sharing
+
+Owner placed replay sharing on hold. No command, panel UI or playback export is shipped. The code below describes an inert preliminary prototype, not current functionality.
+
 # M5: local masked replay
 
 Run **Scrubline: Export masked replay** in a trusted workspace or expand Replay in the panel. Review the privacy notice, then choose a destination folder. Scrubline makes a new folder containing index.html, metadata.json and PNG frames. Copy that whole folder to another device and open index.html. No server, uploads, telemetry or project code is in the playback page.
