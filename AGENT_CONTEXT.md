@@ -1,5 +1,5 @@
 # Active State
-- Focus: M1 source timeline implemented. Next: M2 preview, read-only scrub, safe restore.
+- Focus: M3 targeting/context implemented locally. Next: branch publication and Windows gate, then M4 selective apply.
 - Disk SHA-256 is capture authority. Hooks add only exact-content-matched metadata.
 - One trusted local workspace folder, store outside repo, no native modules.
 
@@ -12,7 +12,7 @@
 - B8 closed by real capture and reconstruction tests; B12-B14 found and fixed with regressions.
 - Windows CI storage/FS results must be checked. Live Antigravity hooks and rendered-panel evidence remain human checks (B1/B2/B7/B9).
 - M2 must add safety/drift/transaction checks before any workspace restore. Current materialize only accepts empty isolated destinations.
-- Publication follow-up: latest M1 Windows CI run https://github.com/xGTAT/Scrubline/actions/runs/37336794990 was in progress. Do not begin M2 execution until checked.
+- M1/M2 Windows gates passed. M3 gate must be checked after publication.
 - B15/B16: remote malformed-path debris removed, full text tree verified; LF checkout/Prettier fixed Windows format gate. Original PNGs recovered and included in patch but remote upload HTTP 400 prevents restoration; parent has original-image attachments.
 - Dev-only Vitest moderate advisory remains documented, revisit M6.
 
@@ -23,4 +23,9 @@
 # M2 progress
 - M1 Windows gate PASS: https://github.com/xGTAT/Scrubline/actions/runs/37337350515 (latest 90072f3).
 - M2 local implementation: preview runner, historical copies/screenshots, keyboard scrub, native diff, reviewed restore/Undo and journal recovery. Read docs/m2-preview-restore.md for exact limits.
-- B17-B19 fixed with tests. Local 30 unit/FS/crash/preview tests, 15 UI tests, real VS Code host restore/Undo pass. Remote M2 publication/Windows CI still required before closeout.
+- B17-B19 fixed with tests. Local 30 unit/FS/crash/preview tests, 15 UI tests, real VS Code host restore/Undo pass. M2 Windows PASS: https://github.com/xGTAT/Scrubline/actions/runs/37342736022 (7ec0766).
+
+# M3 progress
+- Opt-in same-origin overlay, unique selector/fingerprint, separate Chromium window, Escape/Stop, sanitized crop, deterministic redacted context and review-before-copy. Optional MCP approved Oct 5 23:09:52 and included as stdio listing/review-only restore.
+- Init-script test caught document.body timing and transpiler helper issues; fixed. Actual session tests cover reload, stale replacement, crop and edit/new checkpoint.
+- Local 38 unit tests, 19 UI tests, host regression, VSIX package pass. Windows result pending publication. Read docs/m3-targeting-context.md for redaction and selection limits.
