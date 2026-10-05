@@ -200,4 +200,5 @@ export class PreviewRunner {
       this.temp = undefined;
     }
   }
-  }
+}
+// Preview lifecycle ends only after bounded process and directory cleanup.
