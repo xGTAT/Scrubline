@@ -190,3 +190,37 @@ pre {
   overflow-wrap: anywhere;
   font-size: 11px;
 }
+.comparison {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.comparison figure {
+  margin: 0;
+  min-width: 0;
+}
+.comparison img {
+  width: 100%;
+  height: auto;
+}
+.comparison figcaption {
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.paths li {
+  min-width: 0;
+}
+.paths li:has(> span) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 0;
+}
+.paths li:has(> span) > span {
+  flex-basis: 100%;
+}
+.paths li:has(> span) {
+  white-space: normal;
+  overflow: visible;
+  font-family: inherit;
+  }
