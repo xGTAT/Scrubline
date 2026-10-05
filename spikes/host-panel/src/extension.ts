@@ -129,7 +129,8 @@ export async function activate(context: vscode.ExtensionContext) {
       {
         maxFiles: config.get<number>('maxFiles', 10000),
         maxFileBytes: config.get<number>('maxFileMB', 10) * 1024 * 1024,
-        maxTotalBytes: config.get<number>('maxTotalMB', 100) * 1024 * 1024
+        maxTotalBytes: config.get<number>('maxTotalMB', 100) * 1024 * 1024,
+        ignoreAdditions: config.get<string[]>('ignoreAdditions', [])
       },
       config.get<string>('hookLog') || undefined
     );
@@ -629,6 +630,40 @@ export async function activate(context: vscode.ExtensionContext) {
       await vscode.window.showTextDocument(document);
       return connection;
     }),
+    vscode.commands.registerCommand('scrubline.compactHistory', async () => {
+      if (!timeline) return;
+      const bytes = await timeline.exclusive(() => timeline!.store.compact());
+      await vscode.window.showInformationMessage(
+        `Removed ${bytes} unused bytes. All checkpoints kept.`
+      );
+    }),
+    vscode.commands.registerCommand('scrubline.deleteHistory', async () => {
+      if (!timeline) return;
+      const root = timeline.store.root;
+      const answer = await vscode.window.showWarningMessage(
+        'Delete all Scrubline history for this workspace? Source files stay unchanged. This cannot be undone.',
+        { modal: true },
+        'Delete history'
+      );
+      if (answer !== 'Delete history') return;
+      shutdownPreview = true;
+      await previewQueue;
+      await targetSession?.stop();
+      await mcpBridge?.stop();
+      await runner?.stop();
+      await timeline.dispose();
+      await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      timeline = undefined;
+      restore = undefined;
+      alternatives = undefined;
+      runner = undefined;
+      publish({
+        status: 'empty',
+        rows: [],
+        unsaved: false,
+        message: 'History deleted. Reload to start again.'
+      });
+    }),
     vscode.commands.registerCommand('scrubline.openPanel', () => {
       const panel = vscode.window.createWebviewPanel(
         'scrubline.panel',
@@ -734,4 +769,4 @@ function getWebviewHtml(
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
-}
+              }
