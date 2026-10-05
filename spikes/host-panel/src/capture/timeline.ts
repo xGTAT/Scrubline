@@ -82,6 +82,7 @@ export class Timeline {
           const attribution = await this.attribution(current.files, changed);
           await this.store.commit(current.files, current.contents, trigger, attribution);
         }
+        const parents = new Map(this.store.checkpoints.map((c) => [c.id, c]));
         this.state = {
           status: 'ready',
           rows: this.store.checkpoints
@@ -90,10 +91,7 @@ export class Timeline {
               id: c.id,
               createdAt: c.createdAt,
               attribution: c.attribution,
-              changedPaths: changedPaths(
-                this.store.checkpoints.find((p) => p.id === c.parentId)?.files ?? [],
-                c.files
-              )
+              changedPaths: changedPaths(parents.get(c.parentId ?? '')?.files ?? [], c.files)
             })),
           unsaved: this.state.unsaved
         };
@@ -174,4 +172,4 @@ export class Timeline {
     await this.queue;
     await this.store.releaseWriter();
   }
-}
+      }
