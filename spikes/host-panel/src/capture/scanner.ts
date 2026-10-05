@@ -7,6 +7,7 @@ export interface ScanLimits {
   maxFiles: number;
   maxFileBytes: number;
   maxTotalBytes: number;
+  ignoreAdditions?: string[];
 }
 export const defaultLimits: ScanLimits = {
   maxFiles: 10000,
@@ -34,6 +35,7 @@ export async function scan(root: string, storeRoot: string, limits = defaultLimi
   const files: TrackedFile[] = [];
   const contents = new Map<string, Buffer>();
   const seen = new Set<string>();
+  const additions = ignore().add(limits.ignoreAdditions ?? []);
   let total = 0;
   type Rule = { base: string; matcher: ReturnType<typeof ignore> };
   async function walk(dir: string, rules: Rule[]) {
@@ -51,6 +53,7 @@ export async function scan(root: string, storeRoot: string, limits = defaultLimi
       const absolute = path.join(dir, entry.name);
       const rel = path.relative(realRoot, absolute).split(path.sep).join('/');
       if (
+        additions.ignores(rel + (entry.isDirectory() ? '/' : '')) ||
         excluded.has(entry.name) ||
         entry.name.startsWith('.env') ||
         entry.name === 'hook-events.jsonl' ||
