@@ -432,4 +432,4 @@ function getWebviewHtml(
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
-    }
+}
