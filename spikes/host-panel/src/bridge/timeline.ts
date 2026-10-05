@@ -11,6 +11,7 @@ export interface Checkpoint {
   schemaVersion: 1;
   id: string;
   parentId: string | null;
+  branch?: { id: string; name: string };
   createdAt: string;
   trigger: 'baseline' | 'watcher' | 'save' | 'reconcile';
   files: TrackedFile[];
@@ -37,6 +38,8 @@ export interface TimelineState {
   };
   review?: { token: string; checkpoint: string; paths: string[]; conflicts: string[] };
   canUndo?: boolean;
+  branches?: { id: string; name: string; checkpoint: string; base: string; directory: string }[];
+  comparison?: { left?: string; right?: string; leftId: string; rightId: string; message?: string };
   targeting?: {
     status: 'off' | 'on' | 'ready' | 'stale' | 'error';
     message?: string;
@@ -46,6 +49,11 @@ export interface TimelineState {
   };
 }
 export type TimelineInbound =
+  | { type: 'fork-checkpoint'; id: string }
+  | { type: 'capture-branch'; branch: string }
+  | { type: 'compare-branch'; branch: string }
+  | { type: 'review-navbar'; id: string; document: string }
+  | { type: 'review-selective'; id: string; paths: string[] }
   | { type: 'start-targeting' }
   | { type: 'stop-targeting' }
   | { type: 'copy-packet' }
