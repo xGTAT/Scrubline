@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
+import { RenderCache, renderKey, prepareHistory } from './preview/cache';
+import { scopedStore } from './store/identity';
 import { Alternatives, mergeFiles } from './branches/alternatives';
 import { changedPaths } from './capture/scanner';
 import { applySelective } from './branches/apply';
@@ -14,7 +16,7 @@ import { envValues } from './targeting/redact';
 import { Restore } from './review/restore';
 import { PreviewRunner } from './preview/runner';
 import { Timeline } from './capture/timeline';
-import { HistoryStore, hashBytes, safePath } from './store/store';
+import { HistoryStore, safePath } from './store/store';
 import type { HostInfo } from './host-info';
 import type { TimelineState, TimelineInbound } from './bridge/timeline';
 
@@ -43,12 +45,22 @@ export async function activate(context: vscode.ExtensionContext) {
   let mcpBridge: McpBridge | undefined;
   let targetSession: TargetSession | undefined;
   let targeting: TimelineState['targeting'] = { status: 'off' };
-  let previewView: vscode.Webview | undefined;
-  let latestThumbnail: string | undefined;
+  let cache: RenderCache | undefined;
+  let rendered: string[] = [];
+  let rendering: TimelineState['rendering'];
+  let cancelRender = false;
+  let renderJob: Promise<void> | undefined;
+  let generation = 0;
+  let refreshing = false;
+  const diagnostics = vscode.window.createOutputChannel('Scrubline');
+  context.subscriptions.push(diagnostics);
   let shutdownPreview = false;
   const publish = (next: TimelineState) => {
     state = {
       ...next,
+      selected,
+      rendered,
+      rendering,
       preview,
       review,
       canUndo,
@@ -57,49 +69,9 @@ export async function activate(context: vscode.ExtensionContext) {
       comparison
     };
     for (const view of views) void view.postMessage({ type: 'timeline', data: state });
-    const newest = next.rows.at(-1)?.id;
-    if (
-      newest &&
-      newest !== latestThumbnail &&
-      runner &&
-      config.get<string>('previewCommand') &&
-      previewView &&
-      !shutdownPreview &&
-      !selectiveTarget
-    ) {
-      latestThumbnail = newest;
-      const checkpoint = timeline?.store.checkpoints.find((c) => c.id === newest);
-      if (checkpoint)
-        previewQueue = previewQueue.then(async () => {
-          preview = { status: 'loading', checkpoint: newest };
-          for (const view of views)
-            void view.postMessage({ type: 'timeline', data: { ...state, preview } });
-          try {
-            const result = await runner!.historical(checkpoint, vscode.workspace.isTrusted);
-            preview = {
-              status: 'ready',
-              checkpoint: newest,
-              url: result.url,
-              label: result.label,
-              message: result.error,
-              image: result.screenshot
-                ? previewView!.asWebviewUri(vscode.Uri.file(result.screenshot)).toString()
-                : undefined
-            };
-          } catch (e) {
-            preview = {
-              status: 'error',
-              checkpoint: newest,
-              message: e instanceof Error ? e.message : 'Preview failed.'
-            };
-          }
-          state = { ...state, preview };
-          for (const view of views) void view.postMessage({ type: 'timeline', data: state });
-        });
-    }
   };
   const folders = vscode.workspace.workspaceFolders ?? [];
-  const config = vscode.workspace.getConfiguration('scrubline');
+  let config = vscode.workspace.getConfiguration('scrubline', folders[0]?.uri);
   let timeline: Timeline | undefined;
   let restore: Restore | undefined;
   let runner: PreviewRunner | undefined;
@@ -120,8 +92,10 @@ export async function activate(context: vscode.ExtensionContext) {
       return;
     }
     const root = folders[0].uri.fsPath;
-    const storeRoot =
-      context.storageUri?.fsPath ?? path.join(context.globalStorageUri.fsPath, hashBytes(root));
+    const storeRoot = await scopedStore(
+      context.storageUri?.fsPath ?? context.globalStorageUri.fsPath,
+      root
+    );
     timeline = new Timeline(
       root,
       new HistoryStore(storeRoot, config.get<number>('quotaMB', 512) * 1024 * 1024),
@@ -148,6 +122,7 @@ export async function activate(context: vscode.ExtensionContext) {
         publish(state);
       }
     );
+    cache = new RenderCache(storeRoot, renderKey(runner.config));
     publish({ status: 'loading', rows: [], unsaved: false });
     const watcher = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(folders[0], '**/*')
@@ -176,11 +151,14 @@ export async function activate(context: vscode.ExtensionContext) {
       {
         dispose: () => {
           shutdownPreview = true;
-          void previewQueue.finally(async () => {
-            await targetSession?.stop();
-            await runner?.stop();
-            await timeline?.dispose();
-          });
+          cancelRender = true;
+          void Promise.all([renderJob?.catch(() => {}), previewQueue.catch(() => {})]).then(
+            async () => {
+              await targetSession?.stop();
+              await runner?.stop();
+              await timeline?.dispose();
+            }
+          );
         }
       }
     );
@@ -196,7 +174,25 @@ export async function activate(context: vscode.ExtensionContext) {
       });
       return;
     }
+    if (
+      await fs
+        .access(
+          path.join(context.storageUri?.fsPath ?? context.globalStorageUri.fsPath, 'manifests')
+        )
+        .then(
+          () => true,
+          () => false
+        )
+    ) {
+      diagnostics.appendLine(
+        'Legacy unbound history preserved at previous storage location. New folder-bound history started; no automatic migration.'
+      );
+      void vscode.window.showInformationMessage(
+        'Older unbound Scrubline history is preserved. New folder-bound history starts here. See Scrubline Output.'
+      );
+    }
     await timeline.start();
+    rendered = await cache!.available(timeline.store.checkpoints);
     alternatives = new Alternatives(timeline.store, timeline.limits);
     publish(state);
     dirty();
@@ -216,9 +212,58 @@ export async function activate(context: vscode.ExtensionContext) {
     }
     return values;
   };
+  const beginRender = () => {
+    if (renderJob || !cache || !runner || !timeline || shutdownPreview || refreshing) return;
+    cancelRender = false;
+    const checkpoints = timeline!.store.checkpoints.filter((c) => !c.branch);
+    const activeCache = cache!;
+    const background = new PreviewRunner(
+      { ...runner!.config, port: runner!.config.port + 3 },
+      timeline!.store
+    );
+    renderJob = (async () => {
+      try {
+        await prepareHistory(
+          checkpoints,
+          activeCache,
+          async (c) => {
+            const r = await background.historical(c, true, 'prerender-screenshots');
+            if (!r.screenshot || !r.url) throw new Error(r.error ?? 'Screenshot unavailable.');
+            return r.screenshot;
+          },
+          () => cancelRender || shutdownPreview,
+          (p) => {
+            rendering = p;
+            publish(state);
+          }
+        );
+        rendered = await activeCache.available(timeline!.store.checkpoints);
+        publish(state);
+      } finally {
+        await background.stop();
+        await fs.rm(path.join(timeline!.store.root, 'prerender-screenshots'), {
+          recursive: true,
+          force: true,
+          maxRetries: 5,
+          retryDelay: 100
+        });
+        renderJob = undefined;
+      }
+    })();
+    void renderJob.catch((e) => {
+      diagnostics.appendLine(String(e));
+      rendering = {
+        running: false,
+        done: 0,
+        total: checkpoints.length,
+        failed: 1,
+        message: String(e)
+      };
+      publish(state);
+    });
+  };
   const attach = (view: vscode.Webview) => {
     views.add(view);
-    previewView = view;
     view.options = {
       enableScripts: true,
       localResourceRoots: [
@@ -228,34 +273,77 @@ export async function activate(context: vscode.ExtensionContext) {
       ]
     };
     view.html = getWebviewHtml(view, context.extensionUri, hostInfo);
-    const showPreview = async (id: string) => {
+    const showPreview = async (id: string, interactive = false) => {
       const checkpoint = timeline?.store.checkpoints.find((c) => c.id === id);
-      if (!checkpoint || !runner || shutdownPreview) return;
+      if (!checkpoint || !runner || !cache || shutdownPreview || refreshing || selected !== id)
+        return;
+      const token = generation;
+      const activeRunner = runner;
+      const activeCache = cache;
       await targetSession?.stop();
       targeting = { status: 'off' };
-      preview = { status: 'loading', checkpoint: id };
-      publish(state);
+      const hit = !interactive ? await activeCache.get(id) : undefined;
+      if (hit) {
+        await activeRunner.stop();
+        if (selected === id && token === generation) {
+          preview = {
+            status: 'ready',
+            checkpoint: id,
+            image: view.asWebviewUri(vscode.Uri.file(hit)).toString(),
+            label: 'Cached screenshot'
+          };
+          const next =
+            timeline?.store.checkpoints[
+              timeline.store.checkpoints.findIndex((c) => c.id === id) + 1
+            ];
+          const nextImage = next ? await activeCache.get(next.id) : undefined;
+          if (nextImage) preview.preload = view.asWebviewUri(vscode.Uri.file(nextImage)).toString();
+          publish(state);
+        }
+        return;
+      }
+      if (selected === id) {
+        preview = { status: 'loading', checkpoint: id };
+        publish(state);
+      }
       try {
-        const result = await runner.historical(checkpoint, vscode.workspace.isTrusted);
+        const result = await activeRunner.historical(checkpoint, vscode.workspace.isTrusted);
+        let image = result.url ? result.screenshot : undefined;
+        if (token !== generation) {
+          await activeRunner.stop();
+          return;
+        }
+        if (image) {
+          image = await activeCache.put(id, image);
+          if (!rendered.includes(id)) rendered.push(id);
+        }
+        if (!interactive) await activeRunner.stop();
+        if (selected !== id || token !== generation) return;
         preview = {
-          status: 'ready',
+          status: image || (interactive && result.url) ? 'ready' : 'error',
           checkpoint: id,
-          url: result.url,
-          label: result.label,
-          message: result.error,
-          image: result.screenshot
-            ? view.asWebviewUri(vscode.Uri.file(result.screenshot)).toString()
-            : undefined
+          url: interactive ? result.url : undefined,
+          label: interactive ? result.label : 'Cached screenshot',
+          image: image ? view.asWebviewUri(vscode.Uri.file(image)).toString() : undefined,
+          message: result.error
         };
         publish(state);
       } catch (e) {
-        preview = {
-          status: 'error',
-          checkpoint: id,
-          message: e instanceof Error ? e.message : 'Preview failed.'
-        };
-        publish(state);
+        if (selected === id && token === generation) {
+          preview = {
+            status: 'error',
+            checkpoint: id,
+            message: e instanceof Error ? e.message : 'Preview failed.'
+          };
+          diagnostics.appendLine(preview.message!);
+          publish(state);
+        }
       }
+    };
+    const enqueuePreview = (id: string, interactive = false) => {
+      const work = previewQueue.catch(() => {}).then(() => showPreview(id, interactive));
+      previewQueue = work.catch(() => {});
+      return work;
     };
     const listener = view.onDidReceiveMessage(async (message: TimelineInbound) => {
       try {
@@ -273,12 +361,30 @@ export async function activate(context: vscode.ExtensionContext) {
         if (!timeline || !restore || !vscode.workspace.isTrusted) return;
         const target =
           'id' in message ? timeline.store.checkpoints.find((c) => c.id === message.id) : undefined;
+        if (message.type === 'cancel-render') {
+          cancelRender = true;
+          return;
+        }
+        if (message.type === 'render-history') {
+          beginRender();
+          return;
+        }
+        if (message.type === 'refresh-renders' && cache) {
+          if (renderJob || refreshing) return;
+          generation++;
+          await previewQueue.catch(() => {});
+          await cache.clear();
+          rendered = [];
+          preview = undefined;
+          publish(state);
+          return;
+        }
         if (message.type === 'select-checkpoint' && target) {
           selected = target.id;
           review = undefined;
           selectiveTarget = undefined;
-          previewQueue = previewQueue.then(() => showPreview(target.id));
-          await previewQueue;
+          publish(state);
+          await enqueuePreview(target.id);
         }
         if (message.type === 'fork-checkpoint' && target && alternatives) {
           const name = await vscode.window.showInputBox({
@@ -425,20 +531,14 @@ export async function activate(context: vscode.ExtensionContext) {
             publish(state);
           }
         }
-        if (message.type === 'start-preview' && runner) {
-          preview = { status: 'loading' };
-          publish(state);
-          let url: string | undefined;
-          previewQueue = previewQueue.then(async () => {
-            url = await runner!.start(timeline!.workspace, true);
-          });
-          await previewQueue;
-          previewQueue = Promise.resolve();
-          preview = { status: 'ready', url, label: 'Live preview' };
-          publish(state);
+        if (message.type === 'start-preview' || message.type === 'open-preview') {
+          const id = selected ?? timeline.store.checkpoints.filter((c) => !c.branch).at(-1)?.id;
+          if (id) {
+            selected = id;
+            await enqueuePreview(id, true);
+            if (preview?.url) await vscode.env.openExternal(vscode.Uri.parse(preview.url));
+          }
         }
-        if (message.type === 'open-preview' && preview?.url)
-          await vscode.env.openExternal(vscode.Uri.parse(preview.url));
         if (message.type === 'review-checkpoint' && target) {
           selectiveTarget = undefined;
           await timeline.exclusive(async () => {
@@ -469,8 +569,7 @@ export async function activate(context: vscode.ExtensionContext) {
           canUndo = true;
           await timeline.capture('reconcile');
           if (selected) {
-            previewQueue = previewQueue.then(() => showPreview(selected!));
-            await previewQueue;
+            await enqueuePreview(selected!);
           }
         }
         if (message.type === 'undo-restore') {
@@ -481,8 +580,7 @@ export async function activate(context: vscode.ExtensionContext) {
           review = undefined;
           await timeline.capture('reconcile');
           if (selected) {
-            previewQueue = previewQueue.then(() => showPreview(selected!));
-            await previewQueue;
+            await enqueuePreview(selected!);
           }
         }
         if (message.type === 'open-diff' && target && safePath(message.path)) {
@@ -647,7 +745,9 @@ export async function activate(context: vscode.ExtensionContext) {
       );
       if (answer !== 'Delete history') return;
       shutdownPreview = true;
-      await previewQueue;
+      cancelRender = true;
+      await renderJob?.catch(() => {});
+      await previewQueue.catch(() => {});
       await targetSession?.stop();
       await mcpBridge?.stop();
       await runner?.stop();
@@ -674,12 +774,44 @@ export async function activate(context: vscode.ExtensionContext) {
       attach(panel.webview);
       panel.onDidDispose(() => views.delete(panel.webview));
     }),
+    vscode.workspace.onDidChangeConfiguration(async (event) => {
+      if (!event.affectsConfiguration('scrubline', folders[0]?.uri) || !runner || !timeline) return;
+      refreshing = true;
+      generation++;
+      cancelRender = true;
+      await renderJob?.catch(() => {});
+      await previewQueue.catch(() => {});
+      await runner.stop();
+      await targetSession?.stop();
+      config = vscode.workspace.getConfiguration('scrubline', folders[0]?.uri);
+      runner = new PreviewRunner(
+        {
+          command: config.get<string>('previewCommand', ''),
+          port: config.get<number>('previewPort', 4100),
+          timeoutMs: config.get<number>('previewTimeoutSeconds', 15) * 1000,
+          browserPath: config.get<string>('chromiumPath') || undefined
+        },
+        timeline.store
+      );
+      cache = new RenderCache(timeline.store.root, renderKey(runner.config));
+      rendered = await cache.available(timeline.store.checkpoints);
+      preview = undefined;
+      rendering = undefined;
+      refreshing = false;
+      targeting = { status: 'off' };
+      publish(state);
+      diagnostics.appendLine(
+        'Preview configuration refreshed. History rendering uses the current folder settings.'
+      );
+    }),
     vscode.workspace.onDidGrantWorkspaceTrust(() => void start())
   );
   await start();
   shutdown = async () => {
     shutdownPreview = true;
-    await previewQueue;
+    cancelRender = true;
+    await renderJob?.catch(() => {});
+    await previewQueue.catch(() => {});
     await targetSession?.stop();
     await mcpBridge?.stop();
     await runner?.stop();
@@ -687,6 +819,15 @@ export async function activate(context: vscode.ExtensionContext) {
   };
   return {
     getTimeline: () => state,
+    getStoreRoot: () => timeline?.store.root,
+    prepareRenders: async () => {
+      beginRender();
+      await renderJob;
+    },
+    cancelRenders: () => {
+      cancelRender = true;
+    },
+    readCached: async (id: string) => cache?.get(id),
     fork: (id: string, name: string) =>
       timeline!.exclusive(() =>
         alternatives!.fork(
