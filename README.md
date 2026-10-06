@@ -1,6 +1,6 @@
 # Scrubline
 
-A source timeline for agent-edited frontends. M4 captures disk states, renders isolated previews, reviews restore/Undo, and builds redacted manual-paste context from visual selections.
+A source timeline for agent-edited frontends. v0.7 captures disk states, renders isolated previews, reviews restore/Undo, and builds redacted manual-paste context from visual selections.
 
 ## What works
 
@@ -11,7 +11,7 @@ A source timeline for agent-edited frontends. M4 captures disk states, renders i
 
 ## Preview and restore
 
-Configure `scrubline.previewCommand` (workspace-relative command, `{port}` placeholder) and `scrubline.previewPort`. Optional `scrubline.chromiumPath` points to installed Chromium for screenshots, with no runtime browser download. Select a checkpoint to render an isolated copy, open preview, then Review restore and confirm the exact paths. Drift or unsaved buffers block restore. Undo refuses later edits. See [M2 notes](docs/m2-preview-restore.md) for command/isolation and recovery limits.
+Configure `scrubline.previewCommand` (workspace-relative command, `{port}` placeholder) and `scrubline.previewPort`. Optional `scrubline.chromiumPath` points to installed Chromium for screenshots, with no runtime browser download. Use Render history to prepare local screenshots, then scrub or Play without restarting preview commands. Select a missing frame to render it on demand. Open preview is explicit and interactive. Folder-scoped preview settings refresh without restarting the extension. Then Review restore and confirm the exact paths. Drift or unsaved buffers block restore. Undo refuses later edits. See [M2 notes](docs/m2-preview-restore.md) for command/isolation and recovery limits.
 
 ## Visual context
 
@@ -54,9 +54,11 @@ Windows CI runs these checks. Source and limits: [M1 notes](docs/m1-source-timel
 - .agents: sanitised hook recorder; [configuration](docs/hooks.md)
 - docs: limitations and verification
 
-## Release 0.6.0
+## Release 0.7.0
 
-Install the unsigned VSIX locally. Run Scrubline: Open Panel in a trusted single-folder workspace. Configure previewCommand and optional chromiumPath in Settings for rendered history. [Release gates and Human checks](docs/m6-release.md).
+Install the unsigned VSIX locally. Run Scrubline: Open Panel in a trusted single-folder workspace. Configure previewCommand and optional chromiumPath in Settings for rendered history. [Release gates and Human checks](docs/v07-release.md).
+
+History is bound to the canonical folder path. Older unbound history stays on disk and is not automatically reassigned to the current folder; v0.7 starts new bound history. Scrubline Output records the notice. Renaming/moving a folder starts a new binding.
 
 Shipped-build dark/light/high-contrast screenshots are included in the release evidence patch; binary publication through GitHub upload is unavailable in this session.
 
