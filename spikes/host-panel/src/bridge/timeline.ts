@@ -28,11 +28,22 @@ export interface TimelineState {
   rows: TimelineRow[];
   unsaved: boolean;
   message?: string;
+  selected?: string;
+  rendered?: string[];
+  rendering?: {
+    running: boolean;
+    done: number;
+    total: number;
+    failed: number;
+    cancelled?: boolean;
+    message?: string;
+  };
   preview?: {
     status: 'idle' | 'loading' | 'ready' | 'error';
     checkpoint?: string;
     url?: string;
     image?: string;
+    preload?: string;
     label?: string;
     message?: string;
   };
@@ -49,6 +60,9 @@ export interface TimelineState {
   };
 }
 export type TimelineInbound =
+  | { type: 'render-history' }
+  | { type: 'cancel-render' }
+  | { type: 'refresh-renders' }
   | { type: 'fork-checkpoint'; id: string }
   | { type: 'capture-branch'; branch: string }
   | { type: 'compare-branch'; branch: string }
