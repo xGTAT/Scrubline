@@ -51,24 +51,30 @@ export class PreviewRunner {
       shell: true,
       detached: process.platform !== 'win32',
       windowsHide: true,
-      stdio: 'ignore',
+      stdio: ['ignore', 'ignore', 'pipe'],
       env: { ...process.env, PORT: String(this.config.port) }
     });
     let exited = false;
-    this.process.once('exit', () => {
+    let stderr = '';
+    this.process.stderr?.on('data', (data: Buffer) => {
+      stderr = (stderr + data.toString()).slice(-2048);
+    });
+    this.process.once('exit', (code, signal) => {
       exited = true;
       this.live = false;
-      this.lastExit = 'Preview process exited.';
+      this.lastExit = `Preview process exited (${code ?? signal ?? 'unknown'}). ${stderr.trim()}`;
       if (!this.stopped) this.onExit?.(this.lastExit);
     });
-    this.process.once('error', () => {
+    this.process.once('error', (e) => {
+      this.lastExit = `Preview launch failed: ${e.message}`;
       exited = true;
     });
     const url = `http://127.0.0.1:${this.config.port}`;
     const deadline = Date.now() + this.config.timeoutMs;
     try {
       while (Date.now() < deadline) {
-        if (this.stopped || exited) throw new Error('Preview process exited. Check command.');
+        if (this.stopped || exited)
+          throw new Error(this.lastExit ?? 'Preview process exited. Check command.');
         try {
           const response = await fetch(url, { signal: AbortSignal.timeout(500) });
           if (response.ok) {
