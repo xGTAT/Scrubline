@@ -369,3 +369,108 @@ test('M6 motion actual frames are stable and reduced-motion disables entry', asy
   );
   await context.close();
 });
+
+test('v0.7 paged card slider changed paths and preview never disagree; render progress and playback', async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.goto('/');
+  await expect(page.getByText('No checkpoints yet')).toBeVisible();
+  await page.evaluate(() => {
+    const w = window as unknown as { __sendTimeline: (v: unknown) => void };
+    w.__sendTimeline({
+      status: 'ready',
+      rows: [
+        {
+          id: 'a',
+          createdAt: '2026-10-06T06:00:00Z',
+          changedPaths: ['old-settings.json'],
+          attribution: { kind: 'unattributed' }
+        },
+        {
+          id: 'b',
+          createdAt: '2026-10-06T06:01:00Z',
+          changedPaths: ['headline.html'],
+          attribution: { kind: 'unattributed' }
+        }
+      ],
+      unsaved: false,
+      selected: 'a',
+      rendered: ['a', 'b'],
+      preview: {
+        status: 'ready',
+        checkpoint: 'a',
+        label: 'Cached screenshot',
+        image:
+          'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aW3sAAAAASUVORK5CYII='
+      }
+    });
+  });
+  await page.getByRole('button', { name: 'Newer', exact: true }).click();
+  await expect(page.locator('#scrub')).toHaveValue('1');
+  await expect(page.locator('.row')).toContainText('11:31');
+  await page.getByText('Changed paths (1)').click();
+  await expect(page.getByRole('button', { name: 'headline.html' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'old-settings.json' })).toHaveCount(0);
+  await expect(page.getByText('Cached screenshot', { exact: true })).not.toBeVisible();
+  await page.getByRole('button', { name: 'Older', exact: true }).click();
+  await expect(page.locator('#scrub')).toHaveValue('0');
+  await page.getByText('Render history (2/2)', { exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Render history', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Play', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+  await expect(page.locator('#scrub')).toHaveValue('1', { timeout: 3000 });
+  await page.screenshot({ path: resolve(evidenceDir, 'panel_v07_cache.png'), fullPage: true });
+});
+
+test('v0.7 render failures cancellation and late host selection stay explicit', async ({
+  page
+}) => {
+  await page.goto('/');
+  await expect(page.getByText('No checkpoints yet')).toBeVisible();
+  await page.evaluate(() => {
+    (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
+      status: 'ready',
+      rows: [
+        {
+          id: 'a',
+          createdAt: '2026-10-06T06:00:00Z',
+          changedPaths: ['one.html'],
+          attribution: { kind: 'unattributed' }
+        }
+      ],
+      unsaved: false,
+      selected: 'a',
+      rendering: { running: true, done: 0, total: 1, failed: 0 }
+    });
+  });
+  await page.getByText('Render history (0/1)', { exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Cancel render', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'Cancel render', exact: true }).click();
+  await page.evaluate(() => {
+    (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
+      status: 'ready',
+      rows: [
+        {
+          id: 'a',
+          createdAt: '2026-10-06T06:00:00Z',
+          changedPaths: ['one.html'],
+          attribution: { kind: 'unattributed' }
+        }
+      ],
+      unsaved: false,
+      selected: 'a',
+      rendering: {
+        running: false,
+        done: 0,
+        total: 1,
+        failed: 1,
+        cancelled: true,
+        message: 'Missing dependency'
+      }
+    });
+  });
+  await expect(page.getByText(/Missing dependency/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Cancel render', exact: true })).toHaveCount(0);
+});
