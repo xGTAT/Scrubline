@@ -2,7 +2,7 @@
   "name": "scrubline-panel",
   "displayName": "Scrubline Review Panel",
   "description": "Disk checkpoints and a source timeline",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "publisher": "scrubline",
   "engines": {
     "vscode": "^1.80.0"
@@ -62,59 +62,69 @@
           "type": "number",
           "default": 10000,
           "minimum": 1,
-          "description": "Tracked file limit."
+          "description": "Tracked file limit.",
+          "scope": "resource"
         },
         "scrubline.maxFileMB": {
           "type": "number",
           "default": 10,
           "minimum": 1,
-          "description": "Maximum tracked file size."
+          "description": "Maximum tracked file size.",
+          "scope": "resource"
         },
         "scrubline.maxTotalMB": {
           "type": "number",
           "default": 100,
           "minimum": 1,
-          "description": "Maximum captured bytes."
+          "description": "Maximum captured bytes.",
+          "scope": "resource"
         },
         "scrubline.quotaMB": {
           "type": "number",
           "default": 512,
           "minimum": 1,
-          "description": "History storage quota."
+          "description": "History storage quota.",
+          "scope": "resource"
         },
         "scrubline.hookLog": {
           "type": "string",
           "default": "",
-          "description": "Optional sanitised hook log outside the workspace."
+          "description": "Optional sanitised hook log outside the workspace.",
+          "scope": "resource"
         },
         "scrubline.previewCommand": {
           "type": "string",
           "default": "",
-          "description": "Trusted local preview command. Use {port} for the port; runs in isolated historical snapshots when scrubbing."
+          "description": "Trusted local preview command. Use {port} for the port; runs in isolated historical snapshots when scrubbing.",
+          "scope": "resource"
         },
         "scrubline.previewPort": {
           "type": "number",
           "default": 4100,
           "minimum": 1024,
           "maximum": 65535,
-          "description": "Local preview port."
+          "description": "Local preview port.",
+          "scope": "resource"
         },
         "scrubline.previewTimeoutSeconds": {
           "type": "number",
           "default": 15,
           "minimum": 1,
           "maximum": 60,
-          "description": "Preview startup timeout."
+          "description": "Preview startup timeout.",
+          "scope": "resource"
         },
         "scrubline.chromiumPath": {
           "type": "string",
           "default": "",
-          "description": "Optional installed Chromium executable for checkpoint screenshots. No browser download at runtime."
+          "description": "Optional installed Chromium executable for checkpoint screenshots. No browser download at runtime.",
+          "scope": "resource"
         },
         "scrubline.postApplyCommand": {
           "type": "string",
           "default": "",
-          "description": "Trusted build/test command for isolated selective-apply candidate. Required before selective apply."
+          "description": "Trusted build/test command for isolated selective-apply candidate. Required before selective apply.",
+          "scope": "resource"
         },
         "scrubline.ignoreAdditions": {
           "type": "array",
@@ -122,7 +132,8 @@
             "type": "string"
           },
           "default": [],
-          "description": "Additional gitignore-style paths to keep out of checkpoints."
+          "description": "Additional gitignore-style paths to keep out of checkpoints.",
+          "scope": "resource"
         }
       }
     }
