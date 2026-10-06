@@ -20,6 +20,22 @@ exports.run = async () => {
   assert.ok(state.rows.at(-1).changedPaths.includes('host-edit.txt'));
   assert.equal(state.rows.at(-1).attribution.kind, 'unattributed');
   const baseline = state.rows[0].id;
+  assert.ok(api.getStoreRoot().includes('workspaces'), 'canonical folder-bound storage');
+  await api.prepareRenders();
+  assert.equal(
+    api.getTimeline().rendering.failed,
+    0,
+    'folder-scoped preview settings used in saved workspace: ' +
+      JSON.stringify(api.getTimeline().rendering)
+  );
+  const cached = await api.readCached(baseline);
+  assert.ok(cached, 'pre-render PNG persisted');
+  if (process.env.SCRUBLINE_RENDER_EVIDENCE)
+    await fs.copyFile(cached, process.env.SCRUBLINE_RENDER_EVIDENCE);
+  const stat = await fs.stat(cached);
+  await api.prepareRenders();
+  assert.equal((await fs.stat(cached)).mtimeMs, stat.mtimeMs, 'cache hit does not regenerate PNG');
+
   const connection = await vscode.commands.executeCommand('scrubline.startMcp');
   const config = JSON.parse(await fs.readFile(connection, 'utf8'));
   const response = await fetch(config.url, {
@@ -49,6 +65,38 @@ exports.run = async () => {
   const selective = await api.reviewFiles(forkCheckpoint.id, ['baseline.txt']);
   assert.equal(selective.review.conflicts.length, 0);
   assert.equal(selective.review.paths.join(','), 'baseline.txt');
+  await vscode.workspace
+    .getConfiguration('scrubline', vscode.workspace.workspaceFolders[0].uri)
+    .update(
+      'previewCommand',
+      'node different-command.cjs',
+      vscode.ConfigurationTarget.WorkspaceFolder
+    );
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(
+    await api.readCached(baseline),
+    undefined,
+    'config changed invalidates render key without reload'
+  );
+  const job = api.prepareRenders();
+  api.cancelRenders();
+  await job;
+  assert.equal(
+    api.getTimeline().rendering.cancelled,
+    true,
+    'cancel is bounded and does not commit in-flight result'
+  );
+  assert.equal(await api.readCached(baseline), undefined);
+  await vscode.workspace
+    .getConfiguration('scrubline', vscode.workspace.workspaceFolders[0].uri)
+    .update('previewCommand', 'node server.cjs', vscode.ConfigurationTarget.WorkspaceFolder);
+  await new Promise((r) => setTimeout(r, 300));
+  await api.prepareRenders();
+  assert.equal(
+    api.getTimeline().rendering.failed,
+    0,
+    'recovery after failed/cancelled render and settings change'
+  );
   const commands = await vscode.commands.getCommands(true);
   assert.ok(commands.includes('scrubline.deleteHistory'));
   assert.ok(commands.includes('scrubline.compactHistory'));
