@@ -204,3 +204,20 @@ test('partial transaction fails then rolls back completed files without losing e
   expect(await fs.readFile(path.join(root, 'a'), 'utf8')).toBe('newer a');
   expect((await fs.stat(path.join(root, 'z'))).isDirectory()).toBe(true);
 });
+
+test('preview startup errors include bounded child stderr and exit status', async () => {
+  const { root, store } = await setup();
+  await fs.writeFile(
+    path.join(root, 'fail.cjs'),
+    "console.error('fixture launch reason');process.exit(7)"
+  );
+  const runner = new PreviewRunner(
+    { command: 'node fail.cjs', port: await freePort(), timeoutMs: 1000 },
+    store
+  );
+  runners.push(runner);
+  await expect(runner.start(root, true)).rejects.toThrow(
+    /Preview process exited.*fixture launch reason/
+  );
+});
+// Preview diagnostics regression boundary.
