@@ -221,3 +221,26 @@ test('preview startup errors include bounded child stderr and exit status', asyn
   );
 });
 // Preview diagnostics regression boundary.
+
+test('deep bound history keeps child working directory short and cleans it', async () => {
+  const { temp, root } = await setup();
+  const store = new HistoryStore(path.join(temp, 'deep'.repeat(30), 'bound'.repeat(20)));
+  await store.open();
+  await fs.writeFile(
+    path.join(root, 'server.cjs'),
+    "require('http').createServer((q,r)=>r.end('ok')).listen(process.env.PORT,'127.0.0.1')"
+  );
+  const cp = await capture(root, store);
+  const runner = new PreviewRunner(
+    { command: 'node server.cjs', port: await freePort(), timeoutMs: 3000 },
+    store
+  );
+  runners.push(runner);
+  const result = await runner.historical(cp, true);
+  expect(result.url).toBeDefined();
+  const directory = (runner as unknown as { temp: string }).temp;
+  expect(directory.length).toBeLessThan(store.root.length);
+  await runner.stop();
+  await expect(fs.access(directory)).rejects.toThrow();
+});
+// Deep-path preview regression boundary.
