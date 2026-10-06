@@ -24,7 +24,7 @@ const path = require('node:path');
   await fs.writeFile(
     path.join(workspace, '.vscode/settings.json'),
     JSON.stringify({
-      'scrubline.previewCommand': '"' + process.execPath + '" server.cjs',
+      'scrubline.previewCommand': 'node server.cjs',
       'scrubline.previewPort': port,
       'scrubline.chromiumPath': require('playwright-core').chromium.executablePath()
     })
