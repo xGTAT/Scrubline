@@ -39,3 +39,8 @@
 - M4 Windows passed #134 at fea3fb2. M5 deferred by owner; no replay command/UI in release.
 - M6 v0.6.0: 1000-row virtualization, theme/icon/motion polish, compaction/delete commands, ignore additions, Vitest4.1.11 audit clean. 50 units/24 UI/host/install checks local PASS. Windows release run pending.
 - Read docs/m6-release.md for benchmark, exact limits and Human checks; no claim of Antigravity support or owner-machine benchmark.
+
+# v0.7 playback and consistency
+- Explicit sequential Render history and config-keyed PNG cache, progress/cancel, cache-only750ms playback. Card/slider/changed paths/preview share selection.
+- Folder-scoped preview settings refresh without restart. Canonical-folder storage binding preserves unbound legacy history without guessing a migration.
+- Read docs/v07-release.md for operational bounds and gates.
