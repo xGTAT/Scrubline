@@ -37,19 +37,50 @@ export const App: React.FC = () => {
     bridge?.postMessage({ type: 'request-timeline' });
     return () => window.removeEventListener('message', handler);
   }, []);
-  const choose = (id: string) => {
+  const choose = (id: string, playback = false) => {
+    if (!playback) setPlaying(false);
     setSelected(id);
-    const index = state.rows.findIndex((r) => r.id === id);
-    setPage(Math.max(0, state.rows.length - 1 - index));
     bridge?.setState({ selected: id });
     bridge?.postMessage({ type: 'select-checkpoint', id });
   };
+  useEffect(() => {
+    if (state.selected && state.selected !== selected) setSelected(state.selected);
+  }, [state.selected]);
   const row = state.rows.find((r) => r.id === selected);
-  const [page, setPage] = useState(0);
-  const visible = state.rows.slice(
-    Math.max(0, state.rows.length - 1 - page),
-    state.rows.length - page
-  );
+  const [playing, setPlaying] = useState(false);
+  useEffect(() => {
+    if (state.preview?.preload) {
+      const image = new Image();
+      image.src = state.preview.preload;
+    }
+  }, [state.preview?.preload]);
+  const [playMessage, setPlayMessage] = useState('');
+  useEffect(() => {
+    if (!playing) return;
+    const timer = setInterval(() => {
+      const index = state.rows.findIndex((r) => r.id === selected);
+      const next = state.rows[index + 1];
+      if (!next) {
+        setPlaying(false);
+        return;
+      }
+      if (!state.rendered?.includes(next.id)) {
+        setPlaying(false);
+        setPlayMessage('Next frame not rendered.');
+        return;
+      }
+      choose(next.id, true);
+    }, 750);
+    return () => clearInterval(timer);
+  }, [playing, selected, state.rows, state.rendered]);
+  useEffect(() => {
+    const stop = () => {
+      if (document.hidden) setPlaying(false);
+    };
+    document.addEventListener('visibilitychange', stop);
+    return () => document.removeEventListener('visibilitychange', stop);
+  }, []);
+  const visible = row ? [row] : state.rows.slice(-1);
   return (
     <main className="panel">
       <header className="header">
@@ -91,6 +122,34 @@ export const App: React.FC = () => {
         </section>
       )}
       {state.rows.length > 0 && (
+        <details className="render-controls">
+          <summary>
+            Render history ({state.rendered?.length ?? 0}/{state.rows.length})
+          </summary>
+          <p>Local screenshots. No sharing.</p>
+          {state.rendering?.running ? (
+            <>
+              <span aria-live="polite">
+                {state.rendering.done}/{state.rendering.total} · {state.rendering.failed} failed
+              </span>
+              <button onClick={() => bridge?.postMessage({ type: 'cancel-render' })}>
+                Cancel render
+              </button>
+            </>
+          ) : (
+            <>
+              <button onClick={() => bridge?.postMessage({ type: 'render-history' })}>
+                Render history
+              </button>
+              <button onClick={() => bridge?.postMessage({ type: 'refresh-renders' })}>
+                Clear render cache
+              </button>
+            </>
+          )}
+          {state.rendering?.message && <p className="failure">{state.rendering.message}</p>}
+        </details>
+      )}
+      {state.rows.length > 0 && (
         <section className="scrub" aria-label="Read-only scrub">
           <label htmlFor="scrub">Checkpoint</label>
           <input
@@ -108,7 +167,10 @@ export const App: React.FC = () => {
                 state.rows.findIndex((r) => r.id === selected)
               ) + 1
             } of ${state.rows.length}, ${row ? new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(new Date(row.createdAt)) : ''}`}
-            onChange={(e) => choose(state.rows[Number(e.target.value)].id)}
+            onChange={(e) => {
+              setPlaying(false);
+              choose(state.rows[Number(e.target.value)].id);
+            }}
           />
           <nav>
             <button
@@ -142,7 +204,28 @@ export const App: React.FC = () => {
               Next
               <ArrowRight size={14} strokeWidth={1.5} aria-hidden="true" />
             </button>
+            <button
+              disabled={!state.rendered?.length || state.rendering?.running}
+              onClick={() => {
+                setPlayMessage('');
+                if (!playing) {
+                  const index = state.rows.findIndex((r) => r.id === selected);
+                  if (index < 0 || index === state.rows.length - 1) {
+                    const first = state.rows[0];
+                    if (!state.rendered?.includes(first.id)) {
+                      setPlayMessage('First frame not rendered.');
+                      return;
+                    }
+                    choose(first.id);
+                  }
+                }
+                setPlaying(!playing);
+              }}
+            >
+              {playing ? 'Pause' : 'Play'}
+            </button>
           </nav>
+          {playMessage && <small role="status">{playMessage}</small>}
         </section>
       )}
       <section className="preview" aria-live="polite">
@@ -150,7 +233,8 @@ export const App: React.FC = () => {
           <span>Rendering…</span>
         ) : state.preview?.status === 'error' ? (
           <>
-            <span title={state.preview.message}>Preview unavailable</span>
+            <span>Preview unavailable</span>
+            <small className="failure">{state.preview.message}</small>
             <button
               onClick={() =>
                 selected && bridge?.postMessage({ type: 'select-checkpoint', id: selected })
@@ -159,14 +243,25 @@ export const App: React.FC = () => {
               Retry preview
             </button>
           </>
-        ) : state.preview?.status === 'ready' ? (
+        ) : state.preview?.status === 'ready' &&
+          (!selected || state.preview.checkpoint === selected) ? (
           <>
             <span>{state.preview.label}</span>
+            {row && (
+              <small>
+                Selected{' '}
+                {new Intl.DateTimeFormat(undefined, {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit'
+                }).format(new Date(row.createdAt))}
+              </small>
+            )}
             {state.preview.message && (
               <span className="preview-message">{state.preview.message}</span>
             )}
             {state.preview.image && <img src={state.preview.image} alt="Checkpoint screenshot" />}
-            {state.preview.url && (
+            {state.preview.checkpoint && (
               <button onClick={() => bridge?.postMessage({ type: 'open-preview' })}>
                 Open preview
               </button>
@@ -188,9 +283,8 @@ export const App: React.FC = () => {
                   className="row"
                   aria-pressed={selected === r.id}
                   onClick={() => {
-                    setSelected(r.id);
-                    bridge?.setState({ selected: r.id });
-                    bridge?.postMessage({ type: 'select-checkpoint', id: r.id });
+                    setPlaying(false);
+                    choose(r.id);
                   }}
                 >
                   <time>
@@ -208,12 +302,33 @@ export const App: React.FC = () => {
           </ol>
           {state.rows.length > 1 && (
             <nav aria-label="Timeline pages">
-              <button disabled={page === 0} onClick={() => setPage(page - 1)}>
+              <button
+                disabled={state.rows.findIndex((r) => r.id === selected) >= state.rows.length - 1}
+                onClick={() => {
+                  setPlaying(false);
+                  choose(
+                    state.rows[
+                      Math.min(
+                        state.rows.length - 1,
+                        Math.max(
+                          0,
+                          state.rows.findIndex((r) => r.id === selected)
+                        ) + 1
+                      )
+                    ].id
+                  );
+                }}
+              >
                 Newer
               </button>
               <button
-                disabled={(page + 1) * 1 >= state.rows.length}
-                onClick={() => setPage(page + 1)}
+                disabled={state.rows.findIndex((r) => r.id === selected) <= 0}
+                onClick={() => {
+                  setPlaying(false);
+                  choose(
+                    state.rows[Math.max(0, state.rows.findIndex((r) => r.id === selected) - 1)].id
+                  );
+                }}
               >
                 Older
               </button>
