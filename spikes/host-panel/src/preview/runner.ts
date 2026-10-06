@@ -86,9 +86,14 @@ export class PreviewRunner {
       throw e;
     }
   }
-  async historical(c: Checkpoint, trusted: boolean): Promise<PreviewResult> {
+  async historical(
+    c: Checkpoint,
+    trusted: boolean,
+    screenshotDirectory = 'screenshots'
+  ): Promise<PreviewResult> {
     if (!trusted) throw new Error('Trust workspace before preview.');
-    const screenshots = path.join(this.store.root, 'screenshots');
+    const screenshots = path.join(this.store.root, screenshotDirectory);
+    await fs.mkdir(screenshots, { recursive: true });
     const image = path.join(screenshots, `${c.id}.png`);
     const temp = path.join(this.store.root, 'previews', randomUUID());
     await this.stop();
