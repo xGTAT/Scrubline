@@ -34,6 +34,8 @@ test('1000 checkpoint restart keeps immutable ancestry within a measured budget'
     const store = new HistoryStore(temp);
     await store.open();
     // Exercise actual manifest persistence, not a production fixture.
+    // Whole-test budget includes 1000 durable writes and conservative per-commit quota scans.
+    // Windows shared runners can spend >90s here; restart still has its own strict 15s assertion.
     for (let i = 0; i < 1000; i++)
       await store.commit([], new Map(), 'save', { kind: 'unattributed' });
     const start = performance.now();
@@ -52,7 +54,7 @@ test('1000 checkpoint restart keeps immutable ancestry within a measured budget'
   } finally {
     await fs.rm(temp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
-}, 90000);
+}, 240000);
 
 test('ignore additions exclude user paths without disabling built-in secret exclusions', async () => {
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'scrubline-ignore-'));
