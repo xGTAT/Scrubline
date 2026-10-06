@@ -408,7 +408,14 @@ test('v0.7 paged card slider changed paths and preview never disagree; render pr
   });
   await page.getByRole('button', { name: 'Newer', exact: true }).click();
   await expect(page.locator('#scrub')).toHaveValue('1');
-  await expect(page.locator('.row')).toContainText('11:31');
+  const selectedTime = await page.evaluate(() =>
+    new Intl.DateTimeFormat(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    }).format(new Date('2026-10-06T06:01:00Z'))
+  );
+  await expect(page.locator('.row time')).toHaveText(selectedTime);
   await page.getByText('Changed paths (1)').click();
   await expect(page.getByRole('button', { name: 'headline.html' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'old-settings.json' })).toHaveCount(0);
