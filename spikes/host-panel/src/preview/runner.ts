@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import * as net from 'node:net';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import * as os from 'node:os';
 import type { Checkpoint } from '../bridge/timeline';
 import { HistoryStore, atomicWrite } from '../store/store';
 export interface PreviewConfig {
@@ -42,6 +42,7 @@ export class PreviewRunner {
     if (!Number.isInteger(this.config.port) || this.config.port < 1024 || this.config.port > 65535)
       throw new Error('Choose a preview port from 1024 to 65535.');
     await this.stop();
+    await fs.access(workspace);
     this.stopped = false;
     await portAvailable(this.config.port);
     const command = this.config.command.replaceAll('{port}', String(this.config.port));
@@ -66,7 +67,7 @@ export class PreviewRunner {
       if (!this.stopped) this.onExit?.(this.lastExit);
     });
     this.process.once('error', (e) => {
-      this.lastExit = `Preview launch failed: ${e.message}`;
+      this.lastExit = `Preview launch failed: ${e.message}; cwd length ${workspace.length}`;
       exited = true;
     });
     const url = `http://127.0.0.1:${this.config.port}`;
@@ -101,10 +102,12 @@ export class PreviewRunner {
     const screenshots = path.join(this.store.root, screenshotDirectory);
     await fs.mkdir(screenshots, { recursive: true });
     const image = path.join(screenshots, `${c.id}.png`);
-    const temp = path.join(this.store.root, 'previews', randomUUID());
     await this.stop();
-    await this.store.materialize(c, temp);
+    // Windows child processes cannot reliably start in deep VS Code storage paths.
+    // Snapshot/cache stay bound; disposable working copies use a short private temp root.
+    const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'scrubline-preview-'));
     try {
+      await this.store.materialize(c, temp);
       const url = await this.start(temp, trusted);
       this.temp = temp;
       let screenshot: string | undefined;
