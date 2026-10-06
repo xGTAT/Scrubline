@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.0
+
+- Explicit sequential Render history, progress/cancel, persistent PNG cache and cache-only Play/Pause.
+- One checkpoint selection drives cards, slider, changed paths and preview. Captures no longer steal selection.
+- Folder-scoped preview settings refresh without restart; errors visible in panel and Scrubline Output.
+- Canonical-folder storage binding prevents cross-folder saved-workspace history reuse. Older unbound history preserved, not automatically migrated.
+
 ## 0.6.0
 
 - Theme-native compact panel, Phosphor icons, reduced-motion-safe feedback and keyboard/contrast checks.
