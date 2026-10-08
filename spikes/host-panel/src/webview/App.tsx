@@ -13,6 +13,7 @@ import type { TimelineState, TimelineOutbound, TimelineInbound } from '../bridge
 declare global {
   interface Window {
     __SCRUBLINE_HOST_INFO__?: HostInfo;
+    __SCRUBLINE_FULLSCREEN__?: boolean;
     acquireVsCodeApi?: () => {
       postMessage: (m: TimelineInbound) => void;
       getState: () => { selected?: string } | undefined;
@@ -38,7 +39,7 @@ export const App: React.FC = () => {
     bridge?.postMessage({ type: 'request-timeline' });
     return () => window.removeEventListener('message', handler);
   }, []);
-  const [fullscreen, setFullscreen] = useState(false);
+  const [fullscreen, setFullscreen] = useState(window.__SCRUBLINE_FULLSCREEN__ ?? false);
   const [frame, setFrame] = useState<import('./Frame').Frame>();
   useEffect(() => {
     const p = state.preview;
@@ -53,7 +54,8 @@ export const App: React.FC = () => {
       setSelected(id);
       bridge?.postMessage({ type: 'select-checkpoint', id });
     }
-    setFullscreen((old) => !old);
+    if (!bridge || window.__SCRUBLINE_HOST_INFO__?.appHost === 'harness')
+      setFullscreen((old) => !old);
     bridge?.postMessage({ type: 'fullscreen', active: !fullscreen });
   };
   useEffect(() => {

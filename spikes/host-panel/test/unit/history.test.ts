@@ -228,3 +228,21 @@ test('single writer lease prevents multiple windows from forking history', async
   await other.acquireWriter();
   await other.releaseWriter();
 });
+
+test('writer recovers abandoned same-PID endpoint and waits for restart release', async () => {
+  const { store } = await setup();
+  await fs.writeFile(
+    path.join(store.root, 'writer.lock'),
+    JSON.stringify({ pid: process.pid, token: 'abandoned-instance', port: 1 })
+  );
+  await store.acquireWriter();
+  const next = new HistoryStore(store.root);
+  const timer = setTimeout(() => void store.releaseWriter(), 120);
+  try {
+    await next.acquireWriter();
+    await next.releaseWriter();
+  } finally {
+    clearTimeout(timer);
+    await store.releaseWriter();
+  }
+});

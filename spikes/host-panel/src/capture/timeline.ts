@@ -164,7 +164,11 @@ export class Timeline {
     };
     this.notify(this.state);
   }
-  async dispose() {
+  private disposing?: Promise<void>;
+  dispose(): Promise<void> {
+    return (this.disposing ??= this.close());
+  }
+  private async close() {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     if (this.bounded) clearTimeout(this.bounded);

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.5
+
+- Writer leases verify the owning instance, not only its process ID; abandoned leases recover safely.
+- Restart waits briefly for an outgoing writer, and capture ownership is released before preview cleanup.
+- Retry reopens history and runs restore recovery before capturing. Live competing windows remain protected.
+
+## 0.7.4
+
+- Fullscreen opens a retained editor preview instead of hiding the sidebar through Zen mode.
+- Exit fullscreen closes only the preview; reopening works after close, reload or disposal.
+- Fullscreen creation failures surface in a notification and Scrubline Output.
+
 ## 0.7.3
 
 - Fullscreen read-only preview stays inside Antigravity with scrub and playback controls.

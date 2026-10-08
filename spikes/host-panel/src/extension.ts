@@ -55,7 +55,7 @@ export async function activate(context: vscode.ExtensionContext) {
   const diagnostics = vscode.window.createOutputChannel('Scrubline');
   context.subscriptions.push(diagnostics);
   let shutdownPreview = false;
-  let fullscreenActive = false;
+  let fullscreenPanel: vscode.WebviewPanel | undefined;
   const publish = (next: TimelineState) => {
     state = {
       ...next,
@@ -69,7 +69,15 @@ export async function activate(context: vscode.ExtensionContext) {
       branches: alternatives?.list(),
       comparison
     };
-    for (const view of views) void view.postMessage({ type: 'timeline', data: state });
+    for (const view of views) {
+      try {
+        void view
+          .postMessage({ type: 'timeline', data: state })
+          .then(undefined, () => views.delete(view));
+      } catch {
+        views.delete(view);
+      }
+    }
   };
   const folders = vscode.workspace.workspaceFolders ?? [];
   let config = vscode.workspace.getConfiguration('scrubline', folders[0]?.uri);
@@ -154,11 +162,12 @@ export async function activate(context: vscode.ExtensionContext) {
         dispose: () => {
           shutdownPreview = true;
           cancelRender = true;
+          void timeline?.dispose();
           void Promise.all([renderJob?.catch(() => {}), previewQueue.catch(() => {})]).then(
             async () => {
+              await timeline?.dispose();
               await targetSession?.stop();
               await runner?.stop();
-              await timeline?.dispose();
             }
           );
         }
@@ -267,7 +276,7 @@ export async function activate(context: vscode.ExtensionContext) {
       publish(state);
     });
   };
-  const attach = (view: vscode.Webview) => {
+  const attach = (view: vscode.Webview, fullscreen = false) => {
     views.add(view);
     view.options = {
       enableScripts: true,
@@ -277,7 +286,7 @@ export async function activate(context: vscode.ExtensionContext) {
         ...(context.storageUri ? [context.storageUri] : [])
       ]
     };
-    view.html = getWebviewHtml(view, context.extensionUri, hostInfo);
+    view.html = getWebviewHtml(view, context.extensionUri, hostInfo, fullscreen);
     const showPreview = async (id: string, interactive = false) => {
       const checkpoint = timeline?.store.checkpoints.find((c) => c.id === id);
       if (!checkpoint || !runner || !cache || shutdownPreview || refreshing || selected !== id)
@@ -362,9 +371,45 @@ export async function activate(context: vscode.ExtensionContext) {
     const listener = view.onDidReceiveMessage(async (message: TimelineInbound) => {
       try {
         if (message.type === 'fullscreen') {
-          if (fullscreenActive !== message.active) {
-            fullscreenActive = message.active;
-            await vscode.commands.executeCommand('workbench.action.toggleZenMode');
+          if (!message.active) {
+            fullscreenPanel?.dispose();
+            return;
+          }
+          if (!timeline?.store.checkpoints.length) {
+            void vscode.window.showWarningMessage(
+              'Capture a checkpoint before opening fullscreen.'
+            );
+            return;
+          }
+          try {
+            if (!fullscreenPanel) {
+              const panel = vscode.window.createWebviewPanel(
+                'scrubline.fullscreen',
+                'Scrubline Fullscreen',
+                vscode.ViewColumn.Active,
+                { enableScripts: true, retainContextWhenHidden: true }
+              );
+              fullscreenPanel = panel;
+              const panelView = panel.webview;
+              panel.onDidDispose(() => {
+                if (fullscreenPanel === panel) fullscreenPanel = undefined;
+                views.delete(panelView);
+              });
+              await vscode.commands.executeCommand('workbench.action.maximizeEditorHideSidebar');
+              await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
+              attach(panelView, true);
+            }
+            fullscreenPanel.reveal(vscode.ViewColumn.Active);
+            const id = selected ?? timeline.store.checkpoints.at(-1)?.id;
+            if (id) {
+              selected = id;
+              publish(state);
+              await enqueuePreview(id);
+            }
+          } catch (e) {
+            const text = e instanceof Error ? e.message : 'Could not open fullscreen.';
+            diagnostics.appendLine(`Fullscreen failed: ${text}`);
+            void vscode.window.showErrorMessage(`Fullscreen unavailable: ${text}`);
           }
           return;
         }
@@ -374,7 +419,11 @@ export async function activate(context: vscode.ExtensionContext) {
         }
         if (message.type === 'retry-capture') {
           if (timeline && restore) {
-            await timeline.exclusive(() => restore!.recover());
+            await timeline.exclusive(async () => {
+              await timeline!.store.acquireWriter();
+              await timeline!.store.open();
+              await restore!.recover();
+            });
             await timeline.capture('reconcile');
           } else await start();
           return;
@@ -796,8 +845,9 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.ViewColumn.Beside,
         { enableScripts: true, retainContextWhenHidden: true }
       );
-      attach(panel.webview);
-      panel.onDidDispose(() => views.delete(panel.webview));
+      const panelView = panel.webview;
+      attach(panelView);
+      panel.onDidDispose(() => views.delete(panelView));
     }),
     vscode.workspace.onDidChangeConfiguration(async (event) => {
       if (!event.affectsConfiguration('scrubline', folders[0]?.uri) || !runner || !timeline) return;
@@ -835,18 +885,14 @@ export async function activate(context: vscode.ExtensionContext) {
   );
   await start();
   shutdown = async () => {
-    if (fullscreenActive) {
-      fullscreenActive = false;
-      await vscode.commands.executeCommand('workbench.action.toggleZenMode');
-    }
     shutdownPreview = true;
     cancelRender = true;
+    await timeline?.dispose();
     await renderJob?.catch(() => {});
     await previewQueue.catch(() => {});
     await targetSession?.stop();
     await mcpBridge?.stop();
     await runner?.stop();
-    await timeline?.dispose();
   };
   return {
     getTimeline: () => state,
@@ -908,7 +954,8 @@ export async function deactivate() {
 function getWebviewHtml(
   webview: vscode.Webview,
   extensionUri: vscode.Uri,
-  hostInfo: HostInfo
+  hostInfo: HostInfo,
+  fullscreen = false
 ): string {
   const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'dist', 'webview.js'));
   const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'dist', 'webview.css'));
@@ -936,6 +983,7 @@ function getWebviewHtml(
 <body>
   <div id="root"></div>
   <script nonce="${nonce}">
+    window.__SCRUBLINE_FULLSCREEN__ = ${fullscreen};
     window.__SCRUBLINE_HOST_INFO__ = ${JSON.stringify(hostInfo).replace(/</g, '\\u003c')};
   </script>
   <script nonce="${nonce}" src="${scriptUri}"></script>

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import * as net from 'node:net';
 import type { Checkpoint, TrackedFile, Attribution } from '../bridge/timeline';
 
 export const hashBytes = (bytes: Uint8Array | string) =>
@@ -90,39 +91,116 @@ export async function atomicWrite(file: string, data: Uint8Array | string) {
 export class HistoryStore {
   checkpoints: Checkpoint[] = [];
   private lockToken?: string;
-  async acquireWriter() {
-    if (this.lockToken) return;
+  private lockServer?: net.Server;
+  private acquiring?: Promise<void>;
+  acquireWriter(): Promise<void> {
+    if (this.lockToken) return Promise.resolve();
+    return (this.acquiring ??= this.acquireLease().finally(() => {
+      this.acquiring = undefined;
+    }));
+  }
+  private async acquireLease() {
     await fs.mkdir(this.root, { recursive: true });
     const lock = path.join(this.root, 'writer.lock');
+    const guard = path.join(this.root, 'writer.guard');
     const token = randomUUID();
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        await fs.writeFile(lock, JSON.stringify({ pid: process.pid, token }), { flag: 'wx' });
-        this.lockToken = token;
-        return;
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
-        const old = JSON.parse(await fs.readFile(lock, 'utf8'));
-        if (!Number.isInteger(old.pid)) throw new Error('Invalid storage lock.');
+    const server = net.createServer((socket) => {
+      socket.end(token);
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', () => resolve());
+    });
+    server.unref();
+    const port = (server.address() as net.AddressInfo).port;
+    const deadline = Date.now() + 3000;
+    try {
+      while (Date.now() < deadline) {
         try {
-          process.kill(old.pid, 0);
-          throw new Error('History is open in another window.');
-        } catch (err) {
-          if ((err as NodeJS.ErrnoException).code !== 'ESRCH') throw err;
+          await fs.mkdir(guard);
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+          // A reclaim guard lives only around file operations, never a capture.
+          const stat = await fs.stat(guard).catch(() => undefined);
+          if (stat && Date.now() - stat.mtimeMs > 10000)
+            await fs.rm(guard, { recursive: true, force: true });
+          await new Promise((r) => setTimeout(r, 50));
+          continue;
         }
-        await fs.rm(lock);
+        try {
+          let raw: string | undefined;
+          try {
+            raw = await fs.readFile(lock, 'utf8');
+          } catch (e) {
+            if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+          }
+          if (raw) {
+            const old = JSON.parse(raw);
+            if (!Number.isInteger(old.pid) || typeof old.token !== 'string')
+              throw new Error('Invalid storage lock.');
+            let alive: boolean;
+            if (Number.isInteger(old.port) && old.port > 0 && old.port <= 65535) {
+              alive = await new Promise<boolean>((resolve) => {
+                let result = '';
+                const socket = net.connect(old.port, '127.0.0.1');
+                const finish = (value: boolean) => {
+                  socket.destroy();
+                  resolve(value);
+                };
+                socket.setTimeout(300, () => finish(true));
+                socket.on('data', (data) => {
+                  result += data.toString();
+                  if (result === old.token) finish(true);
+                });
+                socket.on('error', (e: NodeJS.ErrnoException) => finish(e.code !== 'ECONNREFUSED'));
+                socket.on('end', () => finish(result === old.token));
+              });
+            } else {
+              try {
+                process.kill(old.pid, 0);
+                alive = true;
+              } catch (e) {
+                if ((e as NodeJS.ErrnoException).code !== 'ESRCH') throw e;
+                alive = false;
+              }
+            }
+            if (alive) {
+              await new Promise((r) => setTimeout(r, 100));
+              continue;
+            }
+            await fs.rm(lock, { force: true });
+          }
+          await fs.writeFile(lock, JSON.stringify({ pid: process.pid, token, port }), {
+            flag: 'wx'
+          });
+          this.lockToken = token;
+          this.lockServer = server;
+          return;
+        } finally {
+          await fs.rm(guard, { recursive: true, force: true });
+        }
       }
+      throw new Error('History is open in another window. Close its Scrubline window, then Retry.');
+    } catch (e) {
+      server.close();
+      throw e;
     }
-    throw new Error('History storage is busy.');
   }
   async releaseWriter() {
+    await this.acquiring;
     if (!this.lockToken) return;
     const token = this.lockToken;
-    this.lockToken = undefined;
     const lock = path.join(this.root, 'writer.lock');
-    const current = JSON.parse(await fs.readFile(lock, 'utf8'));
-    if (current.token === token) await fs.rm(lock);
-    this.lockToken = undefined;
+    try {
+      const current = JSON.parse(await fs.readFile(lock, 'utf8'));
+      if (current.token === token) await fs.rm(lock, { force: true });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+    } finally {
+      this.lockToken = undefined;
+      this.lockServer?.close();
+      this.lockServer = undefined;
+    }
   }
   constructor(
     readonly root: string,
