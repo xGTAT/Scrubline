@@ -202,3 +202,54 @@ test('targeting session captures redacted crop, validates reload, editing yields
     await new Promise<void>((r) => server.close(() => r()));
   }
 }, 15000);
+
+test('sanitized crop preserves inherited dark background and white heading contrast', async () => {
+  const { createServer } = await import('node:http');
+  const server = createServer((_req, res) => {
+    res.setHeader('content-type', 'text/html');
+    res.end(
+      '<body style="background:#0f172a;color:#fff"><h1 id="title">Visible heading</h1></body>'
+    );
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const port = (server.address() as import('node:net').AddressInfo).port;
+  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'scrubline-crop-contrast-'));
+  dirs.push(temp);
+  const { TargetSession } = await import('../../src/targeting/session');
+  let crop: string | undefined;
+  const session = new TargetSession(
+    chromium.executablePath(),
+    temp,
+    (_s, c) => {
+      crop = c;
+    },
+    () => {}
+  );
+  try {
+    await session.start(`http://127.0.0.1:${port}`, [], true);
+    const page = (session as unknown as { page: import('playwright-core').Page }).page;
+    await page.locator('#title').click();
+    await expect.poll(() => crop, { timeout: 5000 }).toBeDefined();
+    const data = (await fs.readFile(crop!)).toString('base64');
+    const pixels = await page.evaluate(async (data) => {
+      const image = new Image();
+      image.src = `data:image/png;base64,${data}`;
+      await image.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(image, 0, 0);
+      const rgba = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      return {
+        background: [...rgba.slice(0, 3)],
+        white: rgba.some((v, i) => i % 4 === 0 && v === 255)
+      };
+    }, data);
+    expect(pixels.background).toEqual([15, 23, 42]);
+    expect(pixels.white).toBe(true);
+  } finally {
+    await session.stop();
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+}, 15000);

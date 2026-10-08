@@ -46,6 +46,7 @@ test('cache prepares once, repeat selections require no render, config invalidat
       renderKey({ command: 'node other', port: 4100, timeoutMs: 15000 })
     );
     expect(await different.get(a.id)).toBeUndefined();
+    const failures: string[] = [];
     const failed = await prepareHistory(
       [a],
       different,
@@ -53,9 +54,11 @@ test('cache prepares once, repeat selections require no render, config invalidat
         throw new Error('build missing');
       },
       () => false,
-      () => {}
+      () => {},
+      (id, message) => failures.push(`${id}: ${message}`)
     );
     expect(failed.failed).toBe(1);
+    expect(failures).toEqual([`${a.id}: build missing`]);
     expect(failed.message).toBe('build missing');
     let cancel = false;
     const stopped = await prepareHistory(

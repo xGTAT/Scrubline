@@ -5,6 +5,7 @@ node_modules/
 dist/
 out/
 *.vsix
+!releases/*.vsix
 
 # Logs & Audit streams
 *.log

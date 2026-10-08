@@ -34,7 +34,8 @@ export class PreviewRunner {
   constructor(
     readonly config: PreviewConfig,
     readonly store: HistoryStore,
-    readonly onExit?: (message: string) => void
+    readonly onExit?: (message: string) => void,
+    readonly diagnostic?: (message: string) => void
   ) {}
   async start(workspace: string, trusted: boolean) {
     if (!trusted) throw new Error('Trust workspace before preview.');
@@ -63,11 +64,13 @@ export class PreviewRunner {
     this.process.once('exit', (code, signal) => {
       exited = true;
       this.live = false;
-      this.lastExit = `Preview process exited (${code ?? signal ?? 'unknown'}). ${stderr.trim()}`;
+      this.lastExit = `Preview process exited (${code ?? signal ?? 'unknown'}). Check command and Scrubline output.`;
+      if (!this.stopped) this.diagnostic?.(`${this.lastExit}\n${stderr.trim()}`);
       if (!this.stopped) this.onExit?.(this.lastExit);
     });
     this.process.once('error', (e) => {
-      this.lastExit = `Preview launch failed: ${e.message}; cwd length ${workspace.length}`;
+      this.lastExit = 'Preview launch failed. Check command and Scrubline output.';
+      this.diagnostic?.(`${this.lastExit} ${e.message}; cwd length ${workspace.length}`);
       exited = true;
     });
     const url = `http://127.0.0.1:${this.config.port}`;
@@ -117,6 +120,7 @@ export class PreviewRunner {
         screenshot = image;
       } catch (error) {
         screenshotError = error instanceof Error ? error.message : String(error);
+        this.diagnostic?.(`[checkpoint ${c.id}] Screenshot failed: ${screenshotError}`);
       }
       return {
         checkpoint: c.id,
@@ -156,7 +160,36 @@ export class PreviewRunner {
       const renderTimeout = Math.max(this.config.timeoutMs, 15000);
       await page.goto(url, { waitUntil: 'networkidle', timeout: renderTimeout });
       await page.evaluate(() => document.fonts.ready);
+      const regions = await page.evaluate(() => {
+        const nodes = [...document.body.querySelectorAll('*')]
+          .filter((e) =>
+            ['H1', 'H2', 'H3', 'P', 'BUTTON', 'IMG', 'INPUT', 'LI', 'LABEL'].includes(e.tagName)
+          )
+          .slice(0, 300);
+        return nodes
+          .map((e, index) => {
+            const rect = e.getBoundingClientRect();
+            const style = getComputedStyle(e);
+            // Store only a signature, never page text or input values in motion metadata.
+            const text = `${e.textContent}|${style.color}|${style.backgroundColor}|${style.fontSize}`;
+            let hash = 0;
+            for (let i = 0; i < text.length; i++)
+              hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+            const x = Math.max(0, rect.x),
+              y = Math.max(0, rect.y);
+            return {
+              key: e.id || `${e.tagName}:${index}`,
+              signature: String(hash),
+              x,
+              y,
+              width: Math.min(rect.right, 960) - x,
+              height: Math.min(rect.bottom, 600) - y
+            };
+          })
+          .filter((r) => r.width > 0 && r.height > 0);
+      });
       await atomicWrite(destination, await page.screenshot({ timeout: renderTimeout }));
+      await atomicWrite(`${destination}.json`, Buffer.from(JSON.stringify(regions)));
     } finally {
       await browser.close();
     }

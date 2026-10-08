@@ -481,3 +481,186 @@ test('v0.7 render failures cancellation and late host selection stay explicit', 
   await expect(page.getByText(/Missing dependency/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Cancel render', exact: true })).toHaveCount(0);
 });
+
+test('v0.7.2 playback prerequisites explain zero renders and single checkpoint', async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.goto('/');
+  await expect(page.getByText('No checkpoints yet')).toBeVisible();
+  const rows = [
+    {
+      id: 'a',
+      createdAt: '2026-10-07T06:00:00Z',
+      changedPaths: [],
+      attribution: { kind: 'unattributed' }
+    },
+    {
+      id: 'b',
+      createdAt: '2026-10-07T06:01:00Z',
+      changedPaths: [],
+      attribution: { kind: 'unattributed' }
+    }
+  ];
+  await page.evaluate((rows) => {
+    (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
+      status: 'ready',
+      rows,
+      unsaved: false,
+      selected: 'a',
+      rendered: []
+    });
+  }, rows);
+  await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeDisabled();
+  await expect(page.getByText('Render history first.')).toBeVisible();
+  await expect(page.locator('#scrub')).toBeEnabled();
+  await page.screenshot({
+    path: resolve(evidenceDir, 'panel_v072_no_renders.png'),
+    fullPage: true
+  });
+  await page.evaluate((rows) => {
+    (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
+      status: 'ready',
+      rows: rows.slice(0, 1),
+      unsaved: false,
+      selected: 'a',
+      rendered: ['a']
+    });
+  }, rows);
+  await expect(page.getByText('Save changes for another checkpoint.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeDisabled();
+  await expect(page.locator('#scrub')).toBeDisabled();
+  await page.screenshot({
+    path: resolve(evidenceDir, 'panel_v072_one_checkpoint.png'),
+    fullPage: true
+  });
+  const issues = (await new AxeBuilder({ page }).analyze()).violations.filter(
+    (v) => v.impact === 'serious' || v.impact === 'critical'
+  );
+  expect(issues).toEqual([]);
+});
+
+test('v0.7.3 fullscreen retains decoded frames while seeking and animates changed regions', async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1000, height: 760 });
+  await page.goto('/');
+  await expect(page.getByText('No checkpoints yet')).toBeVisible();
+  const make = (text: string, fill: string) =>
+    'data:image/svg+xml,' +
+    encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="600"><rect width="960" height="600" fill="${fill}"/><text x="80" y="100" fill="white" font-size="40">${text}</text></svg>`
+    );
+  const a = make('Before', '#142838'),
+    b = make('After', '#203a46');
+  await page.evaluate(
+    ({ a }) => {
+      (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
+        status: 'ready',
+        rows: [
+          {
+            id: 'a',
+            createdAt: '2026-10-08T06:00:00Z',
+            changedPaths: [],
+            attribution: { kind: 'unattributed' }
+          },
+          {
+            id: 'b',
+            createdAt: '2026-10-08T06:01:00Z',
+            changedPaths: ['index.html'],
+            attribution: { kind: 'unattributed' }
+          }
+        ],
+        unsaved: false,
+        selected: 'a',
+        rendered: ['a', 'b'],
+        preview: {
+          status: 'ready',
+          checkpoint: 'a',
+          image: a,
+          label: 'Cached screenshot',
+          regions: [{ key: 'title', signature: 'before', x: 50, y: 50, width: 300, height: 70 }]
+        }
+      });
+    },
+    { a }
+  );
+  await expect(page.locator('.frame')).toHaveAttribute('data-checkpoint', 'a');
+  await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
+  await expect(page.locator('main')).toHaveClass(/fullscreen/);
+  await expect(page.getByRole('slider')).toBeVisible();
+  await page.getByRole('button', { name: 'Next', exact: true }).click();
+  await expect(page.locator('.frame')).toHaveAttribute('data-checkpoint', 'a');
+  await expect(page.locator('.frame')).toHaveAttribute('aria-busy', 'true');
+  await expect(page.locator('.frame-base')).toBeVisible();
+  await page.evaluate(
+    ({ b }) => {
+      const w = window as unknown as { __sendTimeline: (v: unknown) => void };
+      w.__sendTimeline({
+        status: 'ready',
+        rows: [
+          {
+            id: 'a',
+            createdAt: '2026-10-08T06:00:00Z',
+            changedPaths: [],
+            attribution: { kind: 'unattributed' }
+          },
+          {
+            id: 'b',
+            createdAt: '2026-10-08T06:01:00Z',
+            changedPaths: ['index.html'],
+            attribution: { kind: 'unattributed' }
+          }
+        ],
+        unsaved: false,
+        selected: 'b',
+        rendered: ['a', 'b'],
+        preview: {
+          status: 'ready',
+          checkpoint: 'b',
+          image: b,
+          label: 'Cached screenshot',
+          regions: [{ key: 'title', signature: 'after', x: 50, y: 60, width: 300, height: 70 }]
+        }
+      });
+    },
+    { b }
+  );
+  await expect(page.locator('.frame')).toHaveAttribute('data-checkpoint', 'b');
+  await page.screenshot({
+    path: resolve(evidenceDir, 'panel_v073_fullscreen.png'),
+    fullPage: true
+  });
+  // A stale host acknowledgment must not drag the slider or replace the requested frame.
+  await page.evaluate(
+    ({ a }) => {
+      const w = window as unknown as { __sendTimeline: (v: unknown) => void };
+      w.__sendTimeline({
+        status: 'ready',
+        rows: [
+          {
+            id: 'a',
+            createdAt: '2026-10-08T06:00:00Z',
+            changedPaths: [],
+            attribution: { kind: 'unattributed' }
+          },
+          {
+            id: 'b',
+            createdAt: '2026-10-08T06:01:00Z',
+            changedPaths: ['index.html'],
+            attribution: { kind: 'unattributed' }
+          }
+        ],
+        unsaved: false,
+        selected: 'a',
+        rendered: ['a', 'b'],
+        preview: { status: 'ready', checkpoint: 'a', image: a, label: 'Cached screenshot' }
+      });
+    },
+    { a }
+  );
+  await expect(page.locator('#scrub')).toHaveValue('1');
+  await expect(page.locator('.frame')).toHaveAttribute('data-checkpoint', 'b');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('main')).not.toHaveClass(/fullscreen/);
+});

@@ -2,7 +2,7 @@
   "name": "scrubline-panel",
   "displayName": "Scrubline Review Panel",
   "description": "Disk checkpoints and a source timeline",
-  "version": "0.7.0",
+  "version": "0.7.3",
   "publisher": "scrubline",
   "engines": {
     "vscode": "^1.80.0"

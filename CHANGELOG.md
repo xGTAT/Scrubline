@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.3
+
+- Fullscreen read-only preview stays inside Antigravity with scrub and playback controls.
+- Scrubbing retains decoded frames, coalesces rapid seeks, and ignores outdated preview responses.
+- Changed element regions flow in/out using screenshot overlays; reduced-motion mode switches without animation.
+- Screenshot region signatures contain no page text or input values. Older renders regenerate once for region metadata.
+
+## 0.7.2
+
+- Playback explains missing renders and single-checkpoint history instead of silent disabled controls.
+- Render and screenshot failures include checkpoint IDs in Scrubline Output.
+
+## 0.7.1
+
+- Preview failures show one concise panel error; full child stderr moves to the Scrubline Output channel.
+- Selection crops keep the element's inherited background, so light text on dark pages stays readable.
+
 ## 0.7.0
 
 - Explicit sequential Render history, progress/cancel, persistent PNG cache and cache-only Play/Pause.

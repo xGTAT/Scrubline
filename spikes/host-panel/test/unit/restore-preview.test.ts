@@ -145,6 +145,9 @@ test('isolated historical states render differently and never mutate workspace; 
     expect(await page.locator('body').innerText()).toContain('State B (Agent Modified)');
     expect(first.screenshot, first.error).toBeDefined();
     expect(first.screenshot).toContain(a.id);
+    const regions = JSON.parse(await fs.readFile(`${first.screenshot}.json`, 'utf8'));
+    expect(regions.find((r: { key: string }) => r.key === 'app-title')).toBeDefined();
+    expect(JSON.stringify(regions)).not.toContain('Scrubline Sample Application');
     await fs.mkdir(path.resolve('../../docs/evidence'), { recursive: true });
     await fs.copyFile(
       first.screenshot!,
@@ -205,7 +208,7 @@ test('partial transaction fails then rolls back completed files without losing e
   expect((await fs.stat(path.join(root, 'z'))).isDirectory()).toBe(true);
 });
 
-test('preview startup errors include bounded child stderr and exit status', async () => {
+test('preview startup errors keep exit status and send bounded stderr to diagnostics', async () => {
   const { root, store } = await setup();
   await fs.writeFile(
     path.join(root, 'fail.cjs'),
@@ -217,7 +220,7 @@ test('preview startup errors include bounded child stderr and exit status', asyn
   );
   runners.push(runner);
   await expect(runner.start(root, true)).rejects.toThrow(
-    /Preview process exited.*fixture launch reason/
+    /Preview process exited \(7\).*Check command/
   );
 });
 // Preview diagnostics regression boundary.
@@ -231,16 +234,37 @@ test('deep bound history keeps child working directory short and cleans it', asy
     "require('http').createServer((q,r)=>r.end('ok')).listen(process.env.PORT,'127.0.0.1')"
   );
   const cp = await capture(root, store);
+  const diagnostics: string[] = [];
   const runner = new PreviewRunner(
     { command: 'node server.cjs', port: await freePort(), timeoutMs: 3000 },
-    store
+    store,
+    undefined,
+    (message) => diagnostics.push(message)
   );
   runners.push(runner);
   const result = await runner.historical(cp, true);
   expect(result.url).toBeDefined();
+  expect(diagnostics).toContain(
+    `[checkpoint ${cp.id}] Screenshot failed: Set a Chromium path for screenshots.`
+  );
   const directory = (runner as unknown as { temp: string }).temp;
   expect(directory.length).toBeLessThan(store.root.length);
   await runner.stop();
   await expect(fs.access(directory)).rejects.toThrow();
 });
 // Deep-path preview regression boundary.
+
+test('failed command keeps stderr in diagnostics, not timeline error', async () => {
+  const { root, store } = await setup();
+  const diagnostics: string[] = [];
+  const runner = new PreviewRunner(
+    { command: 'node missing-test.js', port: await freePort(), timeoutMs: 2000 },
+    store,
+    undefined,
+    (message) => diagnostics.push(message)
+  );
+  runners.push(runner);
+  await expect(runner.start(root, true)).rejects.toThrow('Check command and Scrubline output.');
+  expect(runner.status()).not.toContain('MODULE_NOT_FOUND');
+  expect(diagnostics.join('\n')).toContain('MODULE_NOT_FOUND');
+});

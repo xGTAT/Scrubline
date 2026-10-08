@@ -7,7 +7,7 @@ export const PNG = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 export function renderKey(config: PreviewConfig) {
   return hashBytes(
     JSON.stringify({
-      version: 1,
+      version: 2,
       command: config.command,
       browser: config.browserPath ?? '',
       viewport: [960, 600],
@@ -34,6 +34,13 @@ export class RenderCache {
       return file;
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+    }
+  }
+  async regions(id: string) {
+    try {
+      return JSON.parse(await fs.readFile(`${this.file(id)}.json`, 'utf8'));
+    } catch {
+      return [];
     }
   }
   private writes = Promise.resolve();
@@ -63,6 +70,11 @@ export class RenderCache {
     if (used + bytes.length > this.maxBytes)
       throw new Error('Render cache limit reached (200 MB).');
     await atomicWrite(this.file(id), bytes);
+    try {
+      await atomicWrite(`${this.file(id)}.json`, await fs.readFile(`${source}.json`));
+    } catch {
+      /* Older cached screenshots remain usable without motion metadata. */
+    }
     return this.file(id);
   }
   async available(checkpoints: readonly Checkpoint[]) {
@@ -92,7 +104,8 @@ export async function prepareHistory(
   cache: RenderCache,
   render: (c: Checkpoint) => Promise<string>,
   cancelled: () => boolean,
-  notify: (p: RenderProgress) => void
+  notify: (p: RenderProgress) => void,
+  failure?: (checkpoint: string, message: string) => void
 ) {
   const progress: RenderProgress = { running: true, done: 0, total: checkpoints.length, failed: 0 };
   notify({ ...progress });
@@ -108,6 +121,7 @@ export async function prepareHistory(
       if (cancelled()) break;
       progress.failed++;
       progress.message = e instanceof Error ? e.message : 'Render failed.';
+      failure?.(c.id, progress.message);
     }
     progress.done++;
     notify({ ...progress });

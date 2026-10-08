@@ -55,6 +55,7 @@ export async function activate(context: vscode.ExtensionContext) {
   const diagnostics = vscode.window.createOutputChannel('Scrubline');
   context.subscriptions.push(diagnostics);
   let shutdownPreview = false;
+  let fullscreenActive = false;
   const publish = (next: TimelineState) => {
     state = {
       ...next,
@@ -120,7 +121,8 @@ export async function activate(context: vscode.ExtensionContext) {
       (message) => {
         preview = { status: 'error', message };
         publish(state);
-      }
+      },
+      (message) => diagnostics.appendLine(message)
     );
     cache = new RenderCache(storeRoot, renderKey(runner.config));
     publish({ status: 'loading', rows: [], unsaved: false });
@@ -219,7 +221,9 @@ export async function activate(context: vscode.ExtensionContext) {
     const activeCache = cache!;
     const background = new PreviewRunner(
       { ...runner!.config, port: runner!.config.port + 3 },
-      timeline!.store
+      timeline!.store,
+      undefined,
+      (message) => diagnostics.appendLine(message)
     );
     renderJob = (async () => {
       try {
@@ -235,7 +239,8 @@ export async function activate(context: vscode.ExtensionContext) {
           (p) => {
             rendering = p;
             publish(state);
-          }
+          },
+          (id, message) => diagnostics.appendLine(`[checkpoint ${id}] Render failed: ${message}`)
         );
         rendered = await activeCache.available(timeline!.store.checkpoints);
         publish(state);
@@ -290,7 +295,8 @@ export async function activate(context: vscode.ExtensionContext) {
             status: 'ready',
             checkpoint: id,
             image: view.asWebviewUri(vscode.Uri.file(hit)).toString(),
-            label: 'Cached screenshot'
+            label: 'Cached screenshot',
+            regions: await activeCache.regions(id)
           };
           const next =
             timeline?.store.checkpoints[
@@ -298,6 +304,13 @@ export async function activate(context: vscode.ExtensionContext) {
             ];
           const nextImage = next ? await activeCache.get(next.id) : undefined;
           if (nextImage) preview.preload = view.asWebviewUri(vscode.Uri.file(nextImage)).toString();
+          const before =
+            timeline?.store.checkpoints[
+              timeline.store.checkpoints.findIndex((c) => c.id === id) - 1
+            ];
+          const previousImage = before ? await activeCache.get(before.id) : undefined;
+          if (previousImage)
+            preview.preloadPrevious = view.asWebviewUri(vscode.Uri.file(previousImage)).toString();
           publish(state);
         }
         return;
@@ -325,6 +338,7 @@ export async function activate(context: vscode.ExtensionContext) {
           url: interactive ? result.url : undefined,
           label: interactive ? result.label : 'Cached screenshot',
           image: image ? view.asWebviewUri(vscode.Uri.file(image)).toString() : undefined,
+          regions: image ? await activeCache.regions(id) : [],
           message: result.error
         };
         publish(state);
@@ -335,7 +349,7 @@ export async function activate(context: vscode.ExtensionContext) {
             checkpoint: id,
             message: e instanceof Error ? e.message : 'Preview failed.'
           };
-          diagnostics.appendLine(preview.message!);
+          diagnostics.appendLine(`[checkpoint ${id}] Preview failed: ${preview.message!}`);
           publish(state);
         }
       }
@@ -347,6 +361,13 @@ export async function activate(context: vscode.ExtensionContext) {
     };
     const listener = view.onDidReceiveMessage(async (message: TimelineInbound) => {
       try {
+        if (message.type === 'fullscreen') {
+          if (fullscreenActive !== message.active) {
+            fullscreenActive = message.active;
+            await vscode.commands.executeCommand('workbench.action.toggleZenMode');
+          }
+          return;
+        }
         if (message.type === 'request-timeline') {
           void view.postMessage({ type: 'timeline', data: state });
           return;
@@ -411,11 +432,15 @@ export async function activate(context: vscode.ExtensionContext) {
           const left = timeline.store.checkpoints.filter((c) => !c.branch).at(-1)!;
           const a = new PreviewRunner(
             { ...runner.config, port: runner.config.port + 1 },
-            timeline.store
+            timeline.store,
+            undefined,
+            (message) => diagnostics.appendLine(message)
           );
           const b = new PreviewRunner(
             { ...runner.config, port: runner.config.port + 2 },
-            timeline.store
+            timeline.store,
+            undefined,
+            (message) => diagnostics.appendLine(message)
           );
           try {
             const x = await a.historical(left, true);
@@ -791,7 +816,9 @@ export async function activate(context: vscode.ExtensionContext) {
           timeoutMs: config.get<number>('previewTimeoutSeconds', 15) * 1000,
           browserPath: config.get<string>('chromiumPath') || undefined
         },
-        timeline.store
+        timeline.store,
+        undefined,
+        (message) => diagnostics.appendLine(message)
       );
       cache = new RenderCache(timeline.store.root, renderKey(runner.config));
       rendered = await cache.available(timeline.store.checkpoints);
@@ -808,6 +835,10 @@ export async function activate(context: vscode.ExtensionContext) {
   );
   await start();
   shutdown = async () => {
+    if (fullscreenActive) {
+      fullscreenActive = false;
+      await vscode.commands.executeCommand('workbench.action.toggleZenMode');
+    }
     shutdownPreview = true;
     cancelRender = true;
     await renderJob?.catch(() => {});

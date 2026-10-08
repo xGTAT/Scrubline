@@ -44,6 +44,8 @@ export interface TimelineState {
     url?: string;
     image?: string;
     preload?: string;
+    preloadPrevious?: string;
+    regions?: import('../webview/Frame').Region[];
     label?: string;
     message?: string;
   };
@@ -61,6 +63,7 @@ export interface TimelineState {
 }
 export type TimelineInbound =
   | { type: 'render-history' }
+  | { type: 'fullscreen'; active: boolean }
   | { type: 'cancel-render' }
   | { type: 'refresh-renders' }
   | { type: 'fork-checkpoint'; id: string }

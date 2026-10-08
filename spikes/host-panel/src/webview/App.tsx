@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   ClockCounterClockwise,
   ArrowLeft,
@@ -7,6 +7,7 @@ import {
   GitBranch,
   ShieldCheck
 } from '@phosphor-icons/react';
+import { FrameView } from './Frame';
 import type { HostInfo } from '../host-info';
 import type { TimelineState, TimelineOutbound, TimelineInbound } from '../bridge/timeline';
 declare global {
@@ -37,23 +38,55 @@ export const App: React.FC = () => {
     bridge?.postMessage({ type: 'request-timeline' });
     return () => window.removeEventListener('message', handler);
   }, []);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [frame, setFrame] = useState<import('./Frame').Frame>();
+  useEffect(() => {
+    const p = state.preview;
+    if (p?.status === 'ready' && p.image && p.checkpoint && p.checkpoint === selected)
+      setFrame({ checkpoint: p.checkpoint, image: p.image, regions: p.regions });
+  }, [state.preview, selected]);
+  const seekTimer = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => () => clearTimeout(seekTimer.current), []);
+  const toggleFullscreen = () => {
+    if (!fullscreen && !frame && state.rows.length) {
+      const id = selected ?? state.rows.at(-1)!.id;
+      setSelected(id);
+      bridge?.postMessage({ type: 'select-checkpoint', id });
+    }
+    setFullscreen((old) => !old);
+    bridge?.postMessage({ type: 'fullscreen', active: !fullscreen });
+  };
+  useEffect(() => {
+    const escape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && fullscreen) toggleFullscreen();
+    };
+    document.addEventListener('keydown', escape);
+    return () => document.removeEventListener('keydown', escape);
+  }, [fullscreen]);
   const choose = (id: string, playback = false) => {
     if (!playback) setPlaying(false);
     setSelected(id);
     bridge?.setState({ selected: id });
-    bridge?.postMessage({ type: 'select-checkpoint', id });
+    clearTimeout(seekTimer.current);
+    seekTimer.current = setTimeout(
+      () => bridge?.postMessage({ type: 'select-checkpoint', id }),
+      60
+    );
   };
   useEffect(() => {
-    if (state.selected && state.selected !== selected) setSelected(state.selected);
+    if (!selected && state.selected) setSelected(state.selected);
   }, [state.selected]);
   const row = state.rows.find((r) => r.id === selected);
   const [playing, setPlaying] = useState(false);
   useEffect(() => {
-    if (state.preview?.preload) {
-      const image = new Image();
-      image.src = state.preview.preload;
+    for (const src of [state.preview?.preload, state.preview?.preloadPrevious]) {
+      if (src) {
+        const image = new Image();
+        image.src = src;
+        void image.decode().catch(() => {});
+      }
     }
-  }, [state.preview?.preload]);
+  }, [state.preview?.preload, state.preview?.preloadPrevious]);
   const [playMessage, setPlayMessage] = useState('');
   useEffect(() => {
     if (!playing) return;
@@ -82,13 +115,17 @@ export const App: React.FC = () => {
   }, []);
   const visible = row ? [row] : state.rows.slice(-1);
   return (
-    <main className="panel">
+    <main className={`panel ${fullscreen ? 'fullscreen' : ''}`}>
       <header className="header">
         <strong>
           <ClockCounterClockwise size={18} strokeWidth={1.5} aria-hidden="true" />
           Scrubline
         </strong>
-        <span className="badge">Local</span>
+        {fullscreen ? (
+          <button onClick={toggleFullscreen}>Exit fullscreen</button>
+        ) : (
+          <span className="badge">Local</span>
+        )}
       </header>
       <section className="status" aria-live="polite">
         <span>
@@ -155,6 +192,7 @@ export const App: React.FC = () => {
           <input
             id="scrub"
             type="range"
+            disabled={state.rows.length < 2}
             min={0}
             max={Math.max(0, state.rows.length - 1)}
             value={Math.max(
@@ -205,7 +243,9 @@ export const App: React.FC = () => {
               <ArrowRight size={14} strokeWidth={1.5} aria-hidden="true" />
             </button>
             <button
-              disabled={!state.rendered?.length || state.rendering?.running}
+              disabled={
+                state.rows.length < 2 || !state.rendered?.length || state.rendering?.running
+              }
               onClick={() => {
                 setPlayMessage('');
                 if (!playing) {
@@ -225,10 +265,24 @@ export const App: React.FC = () => {
               {playing ? 'Pause' : 'Play'}
             </button>
           </nav>
-          {playMessage && <small role="status">{playMessage}</small>}
+          <small role="status">
+            {state.rows.length < 2
+              ? 'Save changes for another checkpoint.'
+              : state.rendering?.running
+                ? 'Rendering history before playback.'
+                : !state.rendered?.length
+                  ? 'Render history first.'
+                  : playMessage}
+          </small>
         </section>
       )}
       <section className="preview" aria-live="polite">
+        {frame && <FrameView frame={frame} requested={selected ?? frame.checkpoint} />}
+        {state.rows.length > 0 && !state.review && !fullscreen && (
+          <button className="fullscreen-button" onClick={toggleFullscreen}>
+            {fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+          </button>
+        )}
         {state.preview?.status === 'loading' ? (
           <span>Rendering…</span>
         ) : state.preview?.status === 'error' ? (
@@ -260,12 +314,8 @@ export const App: React.FC = () => {
             {state.preview.message && (
               <span className="preview-message">{state.preview.message}</span>
             )}
-            {state.preview.image && <img src={state.preview.image} alt="Checkpoint screenshot" />}
-            {state.preview.checkpoint && (
-              <button onClick={() => bridge?.postMessage({ type: 'open-preview' })}>
-                Open preview
-              </button>
-            )}
+
+            {state.preview.checkpoint && <button onClick={toggleFullscreen}>Open preview</button>}
           </>
         ) : state.rows.length > 0 ? (
           <button onClick={() => bridge?.postMessage({ type: 'start-preview' })}>

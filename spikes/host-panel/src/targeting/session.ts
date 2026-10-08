@@ -58,6 +58,8 @@ export class TargetSession {
             'background-color',
             'font-size',
             'font-weight',
+            'font-family',
+            'line-height',
             'padding',
             'border-radius',
             'display',
@@ -128,7 +130,21 @@ export class TargetSession {
             for (const child of [...node.childNodes]) append(child, safe);
           }
           append(clone, inert);
+          // Keep inherited solid background without copying URLs or page content.
+          const layers: number[][] = [];
+          for (let node: Element | null = el; node; node = node.parentElement) {
+            const channels = getComputedStyle(node)
+              .backgroundColor.match(/[\d.]+/g)
+              ?.map(Number);
+            if (channels && channels.length >= 3) layers.push(channels);
+          }
+          let background = [255, 255, 255];
+          for (const layer of layers.reverse()) {
+            const alpha = Math.min(1, Math.max(0, layer[3] ?? 1));
+            background = background.map((v, i) => Math.round(layer[i] * alpha + v * (1 - alpha)));
+          }
           return {
+            background: `rgb(${background.join(',')})`,
             html: inert.innerHTML,
             width: Math.min(960, Math.max(100, el.getBoundingClientRect().width))
           };
@@ -139,9 +155,10 @@ export class TargetSession {
         await cropPage.setContent(
           '<!doctype html><meta charset="utf-8"><body style="margin:16px"></body>'
         );
-        await cropPage.evaluate((html) => {
-          document.body.innerHTML = html;
-        }, source.html);
+        await cropPage.evaluate((source) => {
+          document.body.style.backgroundColor = source.background;
+          document.body.innerHTML = source.html;
+        }, source);
         const texts = await cropPage.locator('body').evaluate((el) => {
           const words: string[] = [];
           const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
