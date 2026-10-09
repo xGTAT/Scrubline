@@ -40,11 +40,11 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('message', handler);
   }, []);
   const [fullscreen, setFullscreen] = useState(window.__SCRUBLINE_FULLSCREEN__ ?? false);
-  const [frame, setFrame] = useState<import('./Frame').Frame>();
+  const [frame, setFrame] = useState<import('./Frame').Frame & { label?: string }>();
   useEffect(() => {
     const p = state.preview;
     if (p?.status === 'ready' && p.image && p.checkpoint && p.checkpoint === selected)
-      setFrame({ checkpoint: p.checkpoint, image: p.image, regions: p.regions });
+      setFrame({ checkpoint: p.checkpoint, image: p.image, regions: p.regions, label: p.label });
   }, [state.preview, selected]);
   const seekTimer = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => () => clearTimeout(seekTimer.current), []);
@@ -285,7 +285,41 @@ export const App: React.FC = () => {
             {fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
           </button>
         )}
-        {state.preview?.status === 'loading' ? (
+        {frame ||
+        (state.preview?.status === 'ready' &&
+          (!selected || state.preview.checkpoint === selected)) ? (
+          <>
+            <span>{frame?.label ?? state.preview?.label}</span>
+            {row && (
+              <small>
+                Selected{' '}
+                {new Intl.DateTimeFormat(undefined, {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit'
+                }).format(new Date(row.createdAt))}
+              </small>
+            )}
+            {state.preview?.status === 'ready' && state.preview.message && (
+              <span className="preview-message">{state.preview.message}</span>
+            )}
+            {(frame || state.preview?.checkpoint) && (
+              <button onClick={toggleFullscreen}>Open preview</button>
+            )}
+            {state.preview?.status === 'error' && (
+              <div role="alert">
+                <small className="failure">{state.preview.message}</small>
+                <button
+                  onClick={() =>
+                    selected && bridge?.postMessage({ type: 'select-checkpoint', id: selected })
+                  }
+                >
+                  Retry preview
+                </button>
+              </div>
+            )}
+          </>
+        ) : state.preview?.status === 'loading' ? (
           <span>Rendering…</span>
         ) : state.preview?.status === 'error' ? (
           <>
@@ -298,26 +332,6 @@ export const App: React.FC = () => {
             >
               Retry preview
             </button>
-          </>
-        ) : state.preview?.status === 'ready' &&
-          (!selected || state.preview.checkpoint === selected) ? (
-          <>
-            <span>{state.preview.label}</span>
-            {row && (
-              <small>
-                Selected{' '}
-                {new Intl.DateTimeFormat(undefined, {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  second: '2-digit'
-                }).format(new Date(row.createdAt))}
-              </small>
-            )}
-            {state.preview.message && (
-              <span className="preview-message">{state.preview.message}</span>
-            )}
-
-            {state.preview.checkpoint && <button onClick={toggleFullscreen}>Open preview</button>}
           </>
         ) : state.rows.length > 0 ? (
           <button onClick={() => bridge?.postMessage({ type: 'start-preview' })}>

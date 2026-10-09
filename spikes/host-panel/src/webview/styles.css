@@ -462,3 +462,8 @@ summary {
     display: none;
   }
 }
+
+/* Checkpoint details can cross the scroll threshold. Keep frame width stable. */
+html {
+  scrollbar-gutter: stable;
+}

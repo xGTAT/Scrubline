@@ -419,7 +419,8 @@ test('v0.7 paged card slider changed paths and preview never disagree; render pr
   await page.getByText('Changed paths (1)').click();
   await expect(page.getByRole('button', { name: 'headline.html' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'old-settings.json' })).toHaveCount(0);
-  await expect(page.getByText('Cached screenshot', { exact: true })).not.toBeVisible();
+  // Preview chrome stays visible while the next checkpoint is requested.
+  await expect(page.getByText('Cached screenshot', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Older', exact: true }).click();
   await expect(page.locator('#scrub')).toHaveValue('0');
   await page.getByText('Render history (2/2)', { exact: true }).click();
@@ -664,3 +665,68 @@ test('v0.7.3 fullscreen retains decoded frames while seeking and animates change
   await page.keyboard.press('Escape');
   await expect(page.locator('main')).not.toHaveClass(/fullscreen/);
 });
+
+for (const fullscreen of [false, true]) {
+  test(`v0.7.6 preview chrome stays mounted during seek and playback (${fullscreen ? 'fullscreen' : 'sidebar'})`, async ({
+    page
+  }) => {
+    await page.setViewportSize({ width: fullscreen ? 1000 : 320, height: 760 });
+    await page.goto('/');
+    await expect(page.getByText('No checkpoints yet')).toBeVisible();
+    await page.evaluate(() => {
+      const image =
+        'data:image/svg+xml,' +
+        encodeURIComponent(
+          '<svg xmlns="http://www.w3.org/2000/svg" width="960" height="600"><rect width="960" height="600" fill="#203a46"/></svg>'
+        );
+      const rows = ['a', 'b', 'c'].map((id, i) => ({
+        id,
+        createdAt: `2026-10-09T06:0${i}:00Z`,
+        changedPaths: ['index.html'],
+        attribution: { kind: 'unattributed' }
+      }));
+      const w = window as unknown as {
+        __sendTimeline: (v: unknown) => void;
+        __seek: (id: string, loading?: boolean) => void;
+      };
+      w.__seek = (id, loading = false) =>
+        w.__sendTimeline({
+          status: 'ready',
+          rows,
+          selected: id,
+          unsaved: false,
+          rendered: ['a', 'b', 'c'],
+          preview: loading
+            ? { status: 'loading' }
+            : { status: 'ready', checkpoint: id, image, label: 'Cached screenshot' }
+        });
+      w.__seek('a');
+    });
+    await expect(page.locator('.frame')).toHaveAttribute('data-checkpoint', 'a');
+    if (fullscreen) await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
+    const before = await page.locator('.preview').boundingBox();
+    await page.getByRole('button', { name: 'Next', exact: true }).click();
+    await expect(page.getByText('Cached screenshot', { exact: true })).toBeVisible();
+    await expect(page.locator('.preview small').filter({ hasText: 'Selected' })).toBeVisible();
+    await page.evaluate(() =>
+      (window as unknown as { __seek: (id: string, loading?: boolean) => void }).__seek('b', true)
+    );
+    await expect(page.getByText('Cached screenshot', { exact: true })).toBeVisible();
+    expect((await page.locator('.preview').boundingBox())!.height).toBeCloseTo(before!.height, 2);
+    await page.evaluate(() => (window as unknown as { __seek: (id: string) => void }).__seek('b'));
+    await expect(page.locator('.frame')).toHaveAttribute('data-checkpoint', 'b');
+    await page.getByRole('button', { name: 'Prev', exact: true }).click();
+    await expect(page.getByText('Cached screenshot', { exact: true })).toBeVisible();
+    await page.evaluate(() => (window as unknown as { __seek: (id: string) => void }).__seek('a'));
+    await expect(page.locator('.frame')).toHaveAttribute('data-checkpoint', 'a');
+    await page.getByRole('button', { name: 'Play', exact: true }).click();
+    await expect(page.getByRole('slider')).toHaveValue('1');
+    await expect(page.getByText('Cached screenshot', { exact: true })).toBeVisible();
+    expect((await page.locator('.preview').boundingBox())!.height).toBeCloseTo(before!.height, 2);
+    await page.getByRole('button', { name: 'Pause', exact: true }).click();
+    await page.screenshot({
+      path: `/downloads/scrubline-v076-${fullscreen ? 'fullscreen' : 'sidebar'}.png`,
+      fullPage: true
+    });
+  });
+}
