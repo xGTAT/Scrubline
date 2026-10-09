@@ -37,24 +37,30 @@ async function freePort() {
     });
   });
 }
-test('review then apply and undo restore exact bytes; exclusions untouched', async () => {
-  const { root, store } = await setup();
-  await fs.writeFile(path.join(root, 'a'), 'earlier');
-  await fs.writeFile(path.join(root, '.env'), 'secret');
-  const a = await capture(root, store);
-  await fs.rename(path.join(root, 'a'), path.join(root, 'b'));
-  await fs.writeFile(path.join(root, 'binary'), Buffer.from([0, 255, 13, 10]));
-  const b = await capture(root, store);
-  const restore = new Restore(root, store, defaultLimits);
-  const review = await restore.review(a, b, false);
-  expect(review.paths).toEqual(['a', 'b', 'binary']);
-  const applied = await restore.apply(review.token, a, false);
-  expect((await scan(root, store.root)).files).toEqual(a.files);
-  expect(await fs.readFile(path.join(root, '.env'), 'utf8')).toBe('secret');
-  await restore.undo(applied, false);
-  expect((await scan(root, store.root)).files).toEqual(b.files);
-  expect(await fs.readFile(path.join(root, '.env'), 'utf8')).toBe('secret');
-});
+// Durable restore journals and Undo perform many synced file writes. Hosted
+// Windows runners can exceed Vitest's 5s default without a functional failure.
+test(
+  'review then apply and undo restore exact bytes; exclusions untouched',
+  async () => {
+    const { root, store } = await setup();
+    await fs.writeFile(path.join(root, 'a'), 'earlier');
+    await fs.writeFile(path.join(root, '.env'), 'secret');
+    const a = await capture(root, store);
+    await fs.rename(path.join(root, 'a'), path.join(root, 'b'));
+    await fs.writeFile(path.join(root, 'binary'), Buffer.from([0, 255, 13, 10]));
+    const b = await capture(root, store);
+    const restore = new Restore(root, store, defaultLimits);
+    const review = await restore.review(a, b, false);
+    expect(review.paths).toEqual(['a', 'b', 'binary']);
+    const applied = await restore.apply(review.token, a, false);
+    expect((await scan(root, store.root)).files).toEqual(a.files);
+    expect(await fs.readFile(path.join(root, '.env'), 'utf8')).toBe('secret');
+    await restore.undo(applied, false);
+    expect((await scan(root, store.root)).files).toEqual(b.files);
+    expect(await fs.readFile(path.join(root, '.env'), 'utf8')).toBe('secret');
+  },
+  process.platform === 'win32' ? 15000 : 5000
+);
 test('drift, unsaved buffers and concurrent edits stop before write', async () => {
   const { root, store } = await setup();
   await fs.writeFile(path.join(root, 'a'), 'earlier');
