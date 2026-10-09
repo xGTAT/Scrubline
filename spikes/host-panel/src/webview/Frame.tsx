@@ -18,17 +18,70 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
   const [previous, setPrevious] = useState<Frame>();
   const ticket = useRef(0);
   const latest = useRef<Frame>();
+  const figure = useRef<HTMLElement>(null);
+  const [transition, setTransition] = useState(0);
+  const composited = (): Frame | undefined => {
+    const current = latest.current;
+    if (!current) return;
+    const base = figure.current?.querySelector<HTMLImageElement>('.frame-base');
+    const outgoing = figure.current?.querySelector<HTMLImageElement>('.frame-out');
+    if (!base || !outgoing) return current;
+    // Continue from the pixels currently on screen, not the last full screenshot.
+    // Otherwise a new frame during a fade jumps back to its unfaded predecessor.
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = 960;
+      canvas.height = 600;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return current;
+      ctx.drawImage(base, 0, 0, 960, 600);
+      ctx.globalAlpha = Number(getComputedStyle(outgoing).opacity);
+      ctx.drawImage(outgoing, 0, 0, 960, 600);
+      const bounds = figure.current!.getBoundingClientRect();
+      for (const region of figure.current!.querySelectorAll<HTMLElement>('.region')) {
+        const image = region.querySelector<HTMLImageElement>('img');
+        if (!image || !image.complete) continue;
+        const clip = region.getBoundingClientRect();
+        const pixels = image.getBoundingClientRect();
+        const sx = 960 / bounds.width,
+          sy = 600 / bounds.height;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(
+          (clip.x - bounds.x) * sx,
+          (clip.y - bounds.y) * sy,
+          clip.width * sx,
+          clip.height * sy
+        );
+        ctx.clip();
+        ctx.globalAlpha = Number(getComputedStyle(region).opacity);
+        ctx.drawImage(
+          image,
+          (pixels.x - bounds.x) * sx,
+          (pixels.y - bounds.y) * sy,
+          pixels.width * sx,
+          pixels.height * sy
+        );
+        ctx.restore();
+      }
+      return { ...current, image: canvas.toDataURL('image/png') };
+    } catch {
+      return current;
+    }
+  };
   useEffect(() => {
     const token = ++ticket.current;
     if (!frame || frame.checkpoint !== requested) return;
     const image = new Image();
+    image.crossOrigin = 'anonymous';
     image.src = frame.image;
     void image
       .decode()
       .then(() => {
         if (token !== ticket.current) return;
         if (latest.current?.checkpoint === frame.checkpoint) return;
-        setPrevious(latest.current);
+        setPrevious(composited());
+        setTransition((n) => n + 1);
         latest.current = frame;
         setShown(frame);
       })
@@ -40,7 +93,7 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
   useEffect(() => {
     const timer = setTimeout(() => setPrevious(undefined), 220);
     return () => clearTimeout(timer);
-  }, [shown]);
+  }, [shown, transition]);
   if (!shown) return null;
   const changed = (a: Region[], b: Region[]) =>
     a
@@ -60,17 +113,32 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
     <figure
       className="frame"
       data-checkpoint={shown.checkpoint}
+      ref={figure}
       aria-busy={shown.checkpoint !== requested}
     >
-      <img className="frame-base" src={shown.image} alt="Checkpoint screenshot" />
-      {previous && <img className="frame-out" src={previous.image} alt="" aria-hidden="true" />}
+      <img
+        className="frame-base"
+        crossOrigin="anonymous"
+        src={shown.image}
+        alt="Checkpoint screenshot"
+      />
+      {previous && (
+        <img
+          key={transition}
+          className="frame-out"
+          crossOrigin="anonymous"
+          src={previous.image}
+          alt=""
+          aria-hidden="true"
+        />
+      )}
       {[
         [previous, outgoing, 'out'],
         [shown, incoming, 'in']
       ].map(([source, regions, direction]) =>
         (regions as Region[]).map((r) => (
           <span
-            key={`${shown.checkpoint}-${direction}-${r.key}`}
+            key={`${shown.checkpoint}-${transition}-${direction}-${r.key}`}
             className={`region region-${direction}`}
             aria-hidden="true"
             style={{
@@ -81,6 +149,7 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
             }}
           >
             <img
+              crossOrigin="anonymous"
               src={(source as Frame).image}
               alt=""
               style={{

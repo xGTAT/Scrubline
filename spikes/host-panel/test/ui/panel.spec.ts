@@ -730,3 +730,88 @@ for (const fullscreen of [false, true]) {
     });
   });
 }
+
+for (const fullscreen of [false, true]) {
+  test(`v0.7.8 fades at every scrub speed (${fullscreen})`, async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByText('No checkpoints yet')).toBeVisible();
+    await page.evaluate(() => {
+      const rows = ['a', 'b', 'c'].map((id, i) => ({
+        id,
+        createdAt: `2026-10-09T06:0${i}:00Z`,
+        changedPaths: [],
+        attribution: { kind: 'unattributed' }
+      }));
+      const w = window as unknown as {
+        __sendTimeline: (v: unknown) => void;
+        __frame: (id: string) => void;
+      };
+      w.__frame = (id) =>
+        w.__sendTimeline({
+          status: 'ready',
+          rows,
+          selected: id,
+          unsaved: false,
+          rendered: ['a', 'b', 'c'],
+          preview: {
+            status: 'ready',
+            checkpoint: id,
+            label: 'Cached screenshot',
+            image:
+              'data:image/svg+xml,' +
+              encodeURIComponent(
+                `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="600"><rect width="960" height="600" fill="${id === 'a' ? '#142838' : id === 'b' ? '#203a46' : '#483028'}"/></svg>`
+              ),
+            regions: [{ key: 'title', signature: id, x: 50, y: 50, width: 300, height: 70 }]
+          }
+        });
+      w.__frame('a');
+    });
+    await expect(page.locator('.frame')).toHaveAttribute('data-checkpoint', 'a');
+    if (fullscreen) await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
+    const slider = page.getByRole('slider');
+    const input = async (value: string) =>
+      slider.evaluate((el: HTMLInputElement, value) => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(el, value);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      }, value);
+    const frame = async (id: string) =>
+      page.evaluate(
+        (id) => (window as unknown as { __frame: (id: string) => void }).__frame(id),
+        id
+      );
+    await slider.dispatchEvent('pointerdown');
+    await input('1');
+    await frame('b');
+    await expect(page.locator('.frame-out')).toBeVisible();
+    await expect(page.locator('.region-in')).toBeVisible();
+    await page.waitForTimeout(250);
+    await input('0');
+    await frame('a');
+    await expect(page.locator('.frame-out')).toBeVisible();
+    // Continuous inputs must still animate, starting from the composited pixels.
+    await input('0.7');
+    await input('1.5');
+    await frame('c');
+    await expect(page.locator('.frame')).toHaveAttribute('data-checkpoint', 'c');
+    await expect(page.locator('.frame-out')).toBeVisible();
+    await expect(page.locator('.region-in')).toBeVisible();
+    expect(await page.locator('.frame-out').getAttribute('src')).toContain('data:image/png');
+    await slider.dispatchEvent('pointerup');
+    await expect(page.locator('.frame-out')).toBeVisible();
+    await expect(page.locator('.region-in')).toBeVisible();
+    await expect(slider).toHaveValue('2');
+    await page.screenshot({
+      path: `/downloads/scrubline-v078-${fullscreen ? 'fullscreen' : 'sidebar'}.png`
+    });
+    await expect(page.locator('.frame-out')).toHaveCount(0);
+    // A frame arriving after release must still animate, not be dropped.
+    await slider.dispatchEvent('pointerdown');
+    await input('1');
+    await input('0');
+    await slider.dispatchEvent('pointerup');
+    await frame('a');
+    await expect(page.locator('.frame')).toHaveAttribute('data-checkpoint', 'a');
+    await expect(page.locator('.frame-out')).toBeVisible();
+  });
+}

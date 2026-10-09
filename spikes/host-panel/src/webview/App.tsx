@@ -46,6 +46,9 @@ export const App: React.FC = () => {
     if (p?.status === 'ready' && p.image && p.checkpoint && p.checkpoint === selected)
       setFrame({ checkpoint: p.checkpoint, image: p.image, regions: p.regions, label: p.label });
   }, [state.preview, selected]);
+  const [scrubbing, setScrubbing] = useState(false);
+  const [sliderPosition, setSliderPosition] = useState<number>();
+  const pendingSeek = useRef<string>();
   const seekTimer = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => () => clearTimeout(seekTimer.current), []);
   const toggleFullscreen = () => {
@@ -69,11 +72,15 @@ export const App: React.FC = () => {
     if (!playback) setPlaying(false);
     setSelected(id);
     bridge?.setState({ selected: id });
-    clearTimeout(seekTimer.current);
-    seekTimer.current = setTimeout(
-      () => bridge?.postMessage({ type: 'select-checkpoint', id }),
-      60
-    );
+    pendingSeek.current = id;
+    if (!seekTimer.current) {
+      seekTimer.current = setTimeout(() => {
+        seekTimer.current = undefined;
+        const next = pendingSeek.current;
+        pendingSeek.current = undefined;
+        if (next) bridge?.postMessage({ type: 'select-checkpoint', id: next });
+      }, 32);
+    }
   };
   useEffect(() => {
     if (!selected && state.selected) setSelected(state.selected);
@@ -197,10 +204,29 @@ export const App: React.FC = () => {
             disabled={state.rows.length < 2}
             min={0}
             max={Math.max(0, state.rows.length - 1)}
-            value={Math.max(
-              0,
-              state.rows.findIndex((r) => r.id === selected)
-            )}
+            step="any"
+            value={
+              sliderPosition ??
+              Math.max(
+                0,
+                state.rows.findIndex((r) => r.id === selected)
+              )
+            }
+            onPointerDown={() => {
+              setScrubbing(true);
+            }}
+            onPointerUp={() => {
+              setScrubbing(false);
+              setSliderPosition(undefined);
+            }}
+            onPointerCancel={() => {
+              setScrubbing(false);
+              setSliderPosition(undefined);
+            }}
+            onBlur={() => {
+              setScrubbing(false);
+              setSliderPosition(undefined);
+            }}
             aria-valuetext={`Checkpoint ${
               Math.max(
                 0,
@@ -209,7 +235,9 @@ export const App: React.FC = () => {
             } of ${state.rows.length}, ${row ? new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(new Date(row.createdAt)) : ''}`}
             onChange={(e) => {
               setPlaying(false);
-              choose(state.rows[Number(e.target.value)].id);
+              const position = Number(e.target.value);
+              setSliderPosition(scrubbing ? position : undefined);
+              choose(state.rows[Math.round(position)].id);
             }}
           />
           <nav>

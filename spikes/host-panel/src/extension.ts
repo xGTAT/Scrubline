@@ -300,7 +300,7 @@ export async function activate(context: vscode.ExtensionContext) {
       if (hit) {
         await activeRunner.stop();
         if (selected === id && token === generation) {
-          preview = {
+          const cachedPreview: NonNullable<TimelineState['preview']> = {
             status: 'ready',
             checkpoint: id,
             image: view.asWebviewUri(vscode.Uri.file(hit)).toString(),
@@ -312,14 +312,19 @@ export async function activate(context: vscode.ExtensionContext) {
               timeline.store.checkpoints.findIndex((c) => c.id === id) + 1
             ];
           const nextImage = next ? await activeCache.get(next.id) : undefined;
-          if (nextImage) preview.preload = view.asWebviewUri(vscode.Uri.file(nextImage)).toString();
+          if (nextImage)
+            cachedPreview.preload = view.asWebviewUri(vscode.Uri.file(nextImage)).toString();
           const before =
             timeline?.store.checkpoints[
               timeline.store.checkpoints.findIndex((c) => c.id === id) - 1
             ];
           const previousImage = before ? await activeCache.get(before.id) : undefined;
           if (previousImage)
-            preview.preloadPrevious = view.asWebviewUri(vscode.Uri.file(previousImage)).toString();
+            cachedPreview.preloadPrevious = view
+              .asWebviewUri(vscode.Uri.file(previousImage))
+              .toString();
+          if (selected !== id || token !== generation) return;
+          preview = cachedPreview;
           publish(state);
         }
         return;
