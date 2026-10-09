@@ -796,7 +796,7 @@ for (const fullscreen of [false, true]) {
     await expect(page.locator('.frame')).toHaveAttribute('data-checkpoint', 'c');
     await expect(page.locator('.frame-out')).toBeVisible();
     await expect(page.locator('.region-in')).toBeVisible();
-    expect(await page.locator('.frame-out').getAttribute('src')).toContain('data:image/png');
+    await expect(page.locator('canvas.frame-out')).toBeVisible();
     await slider.dispatchEvent('pointerup');
     await expect(page.locator('.frame-out')).toBeVisible();
     await expect(page.locator('.region-in')).toBeVisible();
@@ -815,3 +815,52 @@ for (const fullscreen of [false, true]) {
     await expect(page.locator('.frame-out')).toBeVisible();
   });
 }
+
+test('v0.7.9 interrupted region fade does not recrop a flattened composite', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByText('No checkpoints yet')).toBeVisible();
+  await page.evaluate(() => {
+    const rows = ['a', 'b', 'c'].map((id, i) => ({
+      id,
+      createdAt: `2026-10-09T06:0${i}:00Z`,
+      changedPaths: [],
+      attribution: { kind: 'unattributed' }
+    }));
+    const w = window as unknown as {
+      __sendTimeline: (v: unknown) => void;
+      __f: (id: string) => void;
+    };
+    w.__f = (id) =>
+      w.__sendTimeline({
+        status: 'ready',
+        rows,
+        selected: id,
+        unsaved: false,
+        rendered: ['a', 'b', 'c'],
+        preview: {
+          status: 'ready',
+          checkpoint: id,
+          label: 'Cached screenshot',
+          image:
+            'data:image/svg+xml,' +
+            encodeURIComponent(
+              `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="600"><rect width="960" height="600" fill="${id === 'a' ? '#123456' : id === 'b' ? '#456789' : '#789abc'}"/></svg>`
+            ),
+          regions: [{ key: 'moving', signature: id, x: 50, y: 50, width: 300, height: 70 }]
+        }
+      });
+    w.__f('a');
+  });
+  await expect(page.locator('.frame')).toHaveAttribute('data-checkpoint', 'a');
+  const seek = async (id: string) => {
+    await page.getByRole('slider').fill(id === 'b' ? '1' : '2');
+    await page.evaluate((id) => (window as unknown as { __f: (id: string) => void }).__f(id), id);
+    await expect(page.locator('.frame')).toHaveAttribute('data-checkpoint', id);
+  };
+  await seek('b');
+  await expect(page.locator('.region-out')).toBeVisible();
+  await seek('c');
+  await expect(page.locator('canvas.frame-out')).toBeVisible();
+  await expect(page.locator('.region-out')).toHaveCount(0);
+  await expect(page.locator('.region-in')).toBeVisible();
+});

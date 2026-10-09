@@ -11,6 +11,7 @@ export interface Frame {
   checkpoint: string;
   image: string;
   regions?: Region[];
+  composite?: HTMLCanvasElement;
 }
 // Keep the last decoded frame visible until the newest requested image is ready.
 export function FrameView({ frame, requested }: { frame?: Frame; requested?: string }) {
@@ -24,7 +25,9 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
     const current = latest.current;
     if (!current) return;
     const base = figure.current?.querySelector<HTMLImageElement>('.frame-base');
-    const outgoing = figure.current?.querySelector<HTMLImageElement>('.frame-out');
+    const outgoing = figure.current?.querySelector<HTMLImageElement | HTMLCanvasElement>(
+      '.frame-out'
+    );
     if (!base || !outgoing) return current;
     // Continue from the pixels currently on screen, not the last full screenshot.
     // Otherwise a new frame during a fade jumps back to its unfaded predecessor.
@@ -64,7 +67,8 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
         );
         ctx.restore();
       }
-      return { ...current, image: canvas.toDataURL('image/png') };
+      // Pixels already include region motion: don't crop/animate them again.
+      return { ...current, regions: [], composite: canvas };
     } catch {
       return current;
     }
@@ -94,6 +98,11 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
     const timer = setTimeout(() => setPrevious(undefined), 220);
     return () => clearTimeout(timer);
   }, [shown, transition]);
+  useEffect(() => {
+    if (!previous?.composite) return;
+    const target = figure.current?.querySelector<HTMLCanvasElement>('canvas.frame-out');
+    target?.getContext('2d')?.drawImage(previous.composite, 0, 0);
+  }, [previous, transition]);
   if (!shown) return null;
   const changed = (a: Region[], b: Region[]) =>
     a
@@ -122,16 +131,25 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
         src={shown.image}
         alt="Checkpoint screenshot"
       />
-      {previous && (
-        <img
-          key={transition}
-          className="frame-out"
-          crossOrigin="anonymous"
-          src={previous.image}
-          alt=""
-          aria-hidden="true"
-        />
-      )}
+      {previous &&
+        (previous.composite ? (
+          <canvas
+            key={transition}
+            className="frame-out"
+            width={960}
+            height={600}
+            aria-hidden="true"
+          />
+        ) : (
+          <img
+            key={transition}
+            className="frame-out"
+            crossOrigin="anonymous"
+            src={previous.image}
+            alt=""
+            aria-hidden="true"
+          />
+        ))}
       {[
         [previous, outgoing, 'out'],
         [shown, incoming, 'in']
