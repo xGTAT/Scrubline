@@ -23,6 +23,7 @@ export async function investigate(
   const chain = ancestry(store.checkpoints, request.good, request.bad);
   const state: Investigation = {
     running: true,
+    request,
     message: 'Checking saved ancestry with fresh probes.',
     transitions: [],
     observations: [],

@@ -1,3 +1,4 @@
+import { prepareRollback, applyRollback, type RollbackCandidate } from './investigation/rollback';
 import { investigate } from './investigation/run';
 import { sweep } from './layout/sweep';
 import { validateGuard, validateSweep } from './layout/types';
@@ -51,6 +52,8 @@ export async function activate(context: vscode.ExtensionContext) {
   let cancelInvestigation = false;
   let investigation: import('./investigation/types').Investigation | undefined;
   let layoutJob: Promise<unknown> | undefined;
+  let rollbackCandidate: RollbackCandidate | undefined;
+  let rollback: TimelineState['rollback'];
   let selectiveTarget: import('./bridge/timeline').Checkpoint | undefined;
   let comparison: TimelineState['comparison'];
   let mcpBridge: McpBridge | undefined;
@@ -93,6 +96,7 @@ export async function activate(context: vscode.ExtensionContext) {
       selected,
       layout,
       investigation,
+      rollback,
       rendered,
       rendering,
       preview,
@@ -485,6 +489,77 @@ export async function activate(context: vscode.ExtensionContext) {
           }
           return;
         }
+        if (message.type === 'review-css-rollback') {
+          if (
+            !vscode.workspace.isTrusted ||
+            !timeline ||
+            !runner ||
+            layoutJob ||
+            renderJob ||
+            refreshing ||
+            !investigation?.minimal ||
+            !investigation.request ||
+            investigation.running
+          )
+            throw new Error('Complete a verified investigation first.');
+          rollbackCandidate = undefined;
+          review = undefined;
+          selectiveTarget = undefined;
+          const active = timeline!;
+          const result = investigation;
+          const request = result.request!;
+          const good = active.store.checkpoints.find((c) => c.id === result.transitions[0]?.good);
+          const bad = active.store.checkpoints.find((c) => c.id === result.transitions[0]?.bad);
+          if (!good || !bad) throw new Error('Investigation endpoints unavailable.');
+          rollback = { message: 'Checking inverse candidate and keep guards twice.' };
+          publish(state);
+          const token = generation;
+          cancelInvestigation = false;
+          const config = { ...runner.config };
+          const work = previewQueue
+            .catch(() => {})
+            .then(() =>
+              active.exclusive(async () => {
+                const current = active.store.checkpoints.filter((c) => !c.branch).at(-1)!;
+                const candidate = await prepareRollback(
+                  active.store,
+                  current,
+                  good,
+                  bad,
+                  result.units,
+                  config,
+                  request.guard,
+                  message.keep,
+                  () => cancelInvestigation || generation !== token || shutdownPreview
+                );
+                const reviewed = await restore!.review(candidate.target, current, state.unsaved);
+                if (reviewed.conflicts.length)
+                  throw new Error('Workspace drift. Review rollback again.');
+                if (generation !== token || shutdownPreview || cancelInvestigation)
+                  throw new Error('Rollback review cancelled or stale.');
+                rollbackCandidate = candidate;
+                selectiveTarget = candidate.target;
+                review = reviewed;
+                rollback = {
+                  message:
+                    'Repair and keep guards passed twice. Review exact inverse before confirming restore.',
+                  changes: candidate.changes
+                };
+                publish(state);
+              })
+            );
+          layoutJob = work;
+          previewQueue = work.then(
+            () => {},
+            () => {}
+          );
+          try {
+            await work;
+          } finally {
+            layoutJob = undefined;
+          }
+          return;
+        }
         if (message.type === 'cancel-investigation') {
           cancelInvestigation = true;
           return;
@@ -499,6 +574,8 @@ export async function activate(context: vscode.ExtensionContext) {
             refreshing
           )
             throw new Error('Wait for evidence work.');
+          rollbackCandidate = undefined;
+          rollback = undefined;
           cancelInvestigation = false;
           const token = generation;
           const active = timeline;
@@ -885,7 +962,31 @@ export async function activate(context: vscode.ExtensionContext) {
         if (message.type === 'apply-reviewed' && (target || selectiveTarget?.id === message.id)) {
           const applying = selectiveTarget?.id === message.id ? selectiveTarget : target!;
           await timeline.exclusive(async () => {
-            if (selectiveTarget?.id === message.id)
+            if (rollbackCandidate?.target.id === message.id) {
+              if (!runner || !vscode.workspace.isTrusted)
+                throw new Error('Trusted preview unavailable.');
+              if (layoutJob || renderJob || refreshing)
+                throw new Error('Wait for active evidence work.');
+              await previewQueue.catch(() => {});
+              const rollbackWork = applyRollback(
+                restore!,
+                rollbackCandidate,
+                message.token,
+                runner.config,
+                () => state.unsaved,
+                () => shutdownPreview || cancelInvestigation
+              );
+              layoutJob = rollbackWork;
+              previewQueue = rollbackWork.then(
+                () => {},
+                () => {}
+              );
+              try {
+                await rollbackWork;
+              } finally {
+                layoutJob = undefined;
+              }
+            } else if (selectiveTarget?.id === message.id)
               await applySelective(
                 restore!,
                 applying,
@@ -898,6 +999,8 @@ export async function activate(context: vscode.ExtensionContext) {
           });
           review = undefined;
           selectiveTarget = undefined;
+          rollbackCandidate = undefined;
+          rollback = undefined;
           canUndo = true;
           await timeline.capture('reconcile');
           if (selected) {
@@ -915,7 +1018,15 @@ export async function activate(context: vscode.ExtensionContext) {
             await enqueuePreview(selected!);
           }
         }
-        if (message.type === 'open-diff' && target && safePath(message.path)) {
+        if (
+          message.type === 'open-diff' &&
+          (target || selectiveTarget?.id === message.id) &&
+          safePath(message.path)
+        ) {
+          const target =
+            selectiveTarget?.id === message.id
+              ? selectiveTarget
+              : timeline.store.checkpoints.find((c) => c.id === message.id)!;
           const current = timeline.store.checkpoints.at(-1)!;
           const changed = [
             ...new Set([
@@ -962,6 +1073,8 @@ export async function activate(context: vscode.ExtensionContext) {
         if (message.type === 'apply-reviewed') {
           review = undefined;
           selectiveTarget = undefined;
+          rollbackCandidate = undefined;
+          rollback = undefined;
           canUndo = true;
           await timeline?.capture('reconcile');
         }

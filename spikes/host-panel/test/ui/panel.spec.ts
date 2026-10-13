@@ -1106,4 +1106,10 @@ test('CSS investigation evidence reports its bounded claim without an apply cont
   await expect(page.getByText(/1-minimal declaration set/)).toBeVisible();
   await expect(page.getByText('site.css: body / min-width')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Apply culprit' })).toHaveCount(0);
+  await page.getByText('Guarded CSS rollback', { exact: true }).click();
+  await page.getByLabel('Keep element', { exact: true }).fill('nav');
+  await expect(page.getByRole('button', { name: 'Review guarded inverse' })).toBeDisabled();
+  await page.getByLabel('Keep ancestor', { exact: true }).fill('body');
+  await expect(page.getByRole('button', { name: 'Review guarded inverse' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Review guarded inverse' }).click();
 });

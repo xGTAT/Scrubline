@@ -18,6 +18,8 @@ export function InvestigationView({
   const [kind, setKind] = useState<'horizontal-overflow' | 'containment'>('horizontal-overflow');
   const [selector, setSelector] = useState('');
   const [container, setContainer] = useState('');
+  const [keepElement, setKeepElement] = useState('');
+  const [keepAncestor, setKeepAncestor] = useState('');
   return (
     <details className="breakpoint-map" onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary>CSS culprit investigation</summary>
@@ -25,7 +27,7 @@ export function InvestigationView({
         <>
           <p>
             Static CSS value changes only. Fresh probes of 2-5 saved states; explicit assertion, not
-            visual blame. Runs trusted commands. No source files applied.
+            visual blame. Runs trusted commands. Investigation does not apply source files.
           </p>
           <label>
             Last-known-good checkpoint
@@ -129,6 +131,44 @@ export function InvestigationView({
                   </li>
                 ))}
               </ul>
+              {value.minimal && !value.running && (
+                <details>
+                  <summary>Guarded CSS rollback</summary>
+                  <p>
+                    Independent min/max width/height only. Other declaration types are refused.
+                    Optional keep assertion must pass before and after.
+                  </p>
+                  <label>
+                    Keep element
+                    <input value={keepElement} onChange={(e) => setKeepElement(e.target.value)} />
+                  </label>
+                  <label>
+                    Keep ancestor
+                    <input value={keepAncestor} onChange={(e) => setKeepAncestor(e.target.value)} />
+                  </label>
+                  <button
+                    disabled={Boolean(keepElement) !== Boolean(keepAncestor)}
+                    onClick={() =>
+                      send({
+                        type: 'review-css-rollback',
+                        keep:
+                          keepElement && keepAncestor
+                            ? [
+                                {
+                                  kind: 'containment',
+                                  selector: keepElement,
+                                  container: keepAncestor,
+                                  tolerance: 1
+                                }
+                              ]
+                            : []
+                      })
+                    }
+                  >
+                    Review guarded inverse
+                  </button>
+                </details>
+              )}
               <p>
                 Results apply only to this assertion/environment. No unique root cause or AI-turn
                 attribution claimed.

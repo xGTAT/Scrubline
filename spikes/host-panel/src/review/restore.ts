@@ -53,7 +53,8 @@ export class Restore {
     token: string,
     target: Checkpoint,
     unsaved: boolean,
-    beforeWrite?: () => Promise<void>
+    beforeWrite?: () => Promise<void>,
+    afterWrite?: () => Promise<void>
   ): Promise<Checkpoint> {
     const review = this.pending;
     this.pending = undefined;
@@ -145,6 +146,7 @@ export class Restore {
           await save();
         }
       }
+      await afterWrite?.();
       const result = await scan(this.workspace, this.store.root, this.limits);
       if (changedPaths(target.files, result.files).length)
         throw new Error('Concurrent edit. Restore stopped.');

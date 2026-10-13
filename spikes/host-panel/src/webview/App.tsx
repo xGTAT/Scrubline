@@ -620,6 +620,19 @@ export const App: React.FC = () => {
             </>
           ) : (
             <>
+              {state.rollback && (
+                <section aria-label="Rollback review">
+                  <p role="status">{state.rollback.message}</p>
+                  {state.rollback.changes?.map((u) => (
+                    <p key={u.path + u.key}>
+                      <code>
+                        {u.path}: {u.selector} / {u.property}
+                      </code>{' '}
+                      {u.after} → {u.before}
+                    </p>
+                  ))}
+                </section>
+              )}
               <span>
                 Restore {state.review.paths.length} file{state.review.paths.length === 1 ? '' : 's'}
                 ?
@@ -630,6 +643,17 @@ export const App: React.FC = () => {
                   {state.review.paths.map((p) => (
                     <li key={p} title={p}>
                       {p}
+                      <button
+                        onClick={() =>
+                          bridge?.postMessage({
+                            type: 'open-diff',
+                            id: state.review!.checkpoint,
+                            path: p
+                          })
+                        }
+                      >
+                        Review exact diff
+                      </button>
                     </li>
                   ))}
                 </ul>

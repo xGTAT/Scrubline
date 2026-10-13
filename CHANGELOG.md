@@ -29,6 +29,13 @@
 
 # Changelog
 
+## 0.8.3
+
+- Guarded CSS inverse rollback for uniquely owned min/max width/height values, rebased against current source while retaining unrelated edits.
+- Repair and optional keep geometry assertions checked twice; exact inverse/diff review and settings/dirty/drift checks before apply.
+- Post-apply live-source assertion checks inside the recovery journal; failed checks roll back safely, concurrent bytes are preserved, successful apply supports Undo.
+- Shorthand/shared-token/structural/duplicate CSS ownership is refused rather than guessed.
+
 ## 0.7.5
 
 - Writer leases verify the owning instance, not only its process ID; abandoned leases recover safely.
