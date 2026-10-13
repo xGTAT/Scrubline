@@ -540,3 +540,43 @@ html {
     color: CanvasText;
   }
 }
+
+.breakpoint-map label {
+  display: grid;
+  gap: 4px;
+  margin-block: 8px;
+}
+.breakpoint-map input,
+.breakpoint-map select {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, #555);
+}
+.map-scroll {
+  overflow-x: auto;
+}
+.breakpoint-map table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.breakpoint-map th,
+.breakpoint-map td {
+  padding: 4px;
+  font-size: 12px;
+}
+.map-cell {
+  width: 100%;
+}
+.map-fail {
+  border: 1px solid #ba746e;
+}
+.map-pass {
+  border: 1px solid #669b86;
+}
+.map-unknown {
+  opacity: 0.65;
+}

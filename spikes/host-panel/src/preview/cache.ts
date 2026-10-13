@@ -67,14 +67,16 @@ export class RenderCache {
         if (
           file !== this.file(id) &&
           file !== `${this.file(id)}.json` &&
-          file !== `${this.file(id)}.receipt.json`
+          file !== `${this.file(id)}.receipt.json` &&
+          file !== `${this.file(id)}.layout.json`
         )
           used += (await fs.stat(file)).size;
       }
     }
     const metadata = await fs.readFile(`${source}.json`).catch(() => Buffer.alloc(0));
     const receipt = await fs.readFile(`${source}.receipt.json`).catch(() => Buffer.alloc(0));
-    if (used + bytes.length + metadata.length + receipt.length > this.maxBytes)
+    const layout = await fs.readFile(`${source}.layout.json`).catch(() => Buffer.alloc(0));
+    if (used + bytes.length + metadata.length + receipt.length + layout.length > this.maxBytes)
       throw new Error('Render cache limit reached (200 MB).');
     await atomicWrite(this.file(id), bytes);
     try {
@@ -84,6 +86,8 @@ export class RenderCache {
     }
     if (receipt.length) await atomicWrite(`${this.file(id)}.receipt.json`, receipt);
     else await fs.rm(`${this.file(id)}.receipt.json`, { force: true });
+    if (layout.length) await atomicWrite(`${this.file(id)}.layout.json`, layout);
+    else await fs.rm(`${this.file(id)}.layout.json`, { force: true });
     return this.file(id);
   }
   async available(checkpoints: readonly Checkpoint[]) {

@@ -56,6 +56,7 @@ export interface TimelineState {
   canUndo?: boolean;
   branches?: { id: string; name: string; checkpoint: string; base: string; directory: string }[];
   comparison?: { left?: string; right?: string; leftId: string; rightId: string; message?: string };
+  layout?: import('../layout/types').LayoutMatrix;
   targeting?: {
     status: 'off' | 'on' | 'ready' | 'stale' | 'error';
     message?: string;
@@ -70,6 +71,13 @@ export type TimelineInbound =
   | { type: 'cancel-render' }
   | { type: 'refresh-renders' }
   | { type: 'recheck-render'; id: string }
+  | {
+      type: 'layout-sweep';
+      widths: number[];
+      checkpoints: string[];
+      guard: import('../layout/types').LayoutGuard;
+    }
+  | { type: 'cancel-layout' }
   | { type: 'fork-checkpoint'; id: string }
   | { type: 'capture-branch'; branch: string }
   | { type: 'compare-branch'; branch: string }

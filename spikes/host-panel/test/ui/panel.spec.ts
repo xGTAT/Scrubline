@@ -957,7 +957,7 @@ test('alternative inspection keeps review controls and returns to the main timel
   await expect(page.getByRole('slider')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Review restore', exact: true })).toBeVisible();
   await expect(page.getByText('Changed paths (1)', { exact: true })).toBeVisible();
-  await expect(page.locator('.render-controls summary')).toHaveText('Render history (2/3)');
+  await expect(page.locator('.render-controls > summary')).toHaveText('Render history (2/3)');
   await page.getByRole('button', { name: 'Back to timeline', exact: true }).click();
   await expect(page.getByText('Alternative: Review fork')).toHaveCount(0);
   await expect(page.getByRole('slider')).toBeVisible();
@@ -1005,4 +1005,58 @@ test('portrait evidence uses decoded dimensions and shows a bounded render recei
   await expect(page.getByText(/dependencies and backend state are not frozen/)).toBeVisible();
   const bounds = await page.locator('.frame').boundingBox();
   expect(bounds!.width / bounds!.height).toBeCloseTo(390 / 844, 2);
+});
+
+test('breakpoint map shows sampled failures and unknowns with explicit evidence review', async ({
+  page
+}) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
+      status: 'ready',
+      unsaved: false,
+      rows: [
+        {
+          id: 'map',
+          createdAt: '2026-10-13T13:00:00Z',
+          changedPaths: [],
+          attribution: { kind: 'unattributed' }
+        }
+      ],
+      layout: {
+        running: false,
+        done: 1,
+        total: 2,
+        widths: [760, 800],
+        checkpoints: ['map'],
+        cells: [
+          {
+            checkpoint: 'map',
+            width: 760,
+            result: {
+              version: 1,
+              checkpoint: 'map',
+              specification: 's',
+              guard: { kind: 'horizontal-overflow', tolerance: 1 },
+              outcome: 'fail',
+              message: '140px horizontal overflow'
+            }
+          }
+        ],
+        message: 'Only sampled widths checked. Unsampled intervals are unknown.'
+      }
+    });
+  });
+  await page.locator('.render-controls > summary').click();
+  await page.getByText('Breakpoint history', { exact: true }).click();
+  await expect(page.getByRole('button', { name: 'map at 760: fail' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'map at 800: unsampled' })).toBeDisabled();
+  await page.getByRole('button', { name: 'map at 760: fail' }).click();
+  await expect(page.getByText('760px: 140px horizontal overflow')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open checkpoint for review' })).toBeVisible();
+  await page.getByLabel('Widths (CSS px)').fill('390,390');
+  await page.getByRole('button', { name: 'Run approved assertion' }).click();
+  await expect(
+    page.getByText('Use distinct widths from 240 to 3840, up to 24 probes.')
+  ).toBeVisible();
 });

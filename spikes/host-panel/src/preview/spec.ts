@@ -27,7 +27,8 @@ export function specificationKey(config: PreviewConfig) {
   const spec = specification(config);
   return hashBytes(
     JSON.stringify({
-      version: 4,
+      version: 5,
+      guard: config.guard ?? null,
       ...spec,
       command: config.command,
       browser: config.browserIdentity ?? config.browserPath ?? '',

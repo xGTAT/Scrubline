@@ -1,3 +1,10 @@
+## 0.8.1
+
+- Opt-in breakpoint/history map for up to five checkpoints and 24 sampled probes.
+- Approved page-overflow or unique ancestor-containment assertions with numeric tolerances.
+- Pass/fail/unknown results, serial cancellation, sampled-width evidence and links to checkpoint review.
+- Unsampled intervals remain unknown; no framework ownership or automatic repair claimed.
+
 ## 0.8.0
 
 - Configurable local route, viewport and optional visible readiness selector.

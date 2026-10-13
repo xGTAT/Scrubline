@@ -1,3 +1,4 @@
+import { checkGeometry } from '../layout/collect';
 import { spawn, type ChildProcess } from 'node:child_process';
 import * as net from 'node:net';
 import * as fs from 'node:fs/promises';
@@ -18,6 +19,7 @@ export interface PreviewConfig {
   height?: number;
   route?: string;
   readySelector?: string;
+  guard?: import('../layout/types').LayoutGuard;
 }
 export interface PreviewResult {
   checkpoint: string;
@@ -248,6 +250,19 @@ export class PreviewRunner {
           })
           .filter((r) => r && r.width > 0 && r.height > 0);
       }, spec);
+      if (this.config.guard && checkpoint) {
+        const result = await checkGeometry(page, this.config.guard);
+        await atomicWrite(
+          `${destination}.layout.json`,
+          JSON.stringify({
+            version: 1,
+            checkpoint: checkpoint.id,
+            specification: specificationKey(this.config),
+            guard: this.config.guard,
+            ...result
+          })
+        );
+      }
       const image = await page.screenshot({ timeout: renderTimeout });
       const geometry = JSON.stringify(regions);
       await atomicWrite(destination, image);

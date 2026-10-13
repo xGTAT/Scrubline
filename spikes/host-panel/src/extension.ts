@@ -1,3 +1,5 @@
+import { sweep } from './layout/sweep';
+import { validateGuard, validateSweep } from './layout/types';
 import { repeatability } from './preview/repeatability';
 import { atomicWrite } from './store/store';
 import { identifyBrowser } from './preview/spec';
@@ -43,6 +45,9 @@ export async function activate(context: vscode.ExtensionContext) {
   let review: TimelineState['review'];
   let canUndo = false;
   let alternatives: Alternatives | undefined;
+  let layout: import('./layout/types').LayoutMatrix | undefined;
+  let cancelLayout = false;
+  let layoutJob: Promise<unknown> | undefined;
   let selectiveTarget: import('./bridge/timeline').Checkpoint | undefined;
   let comparison: TimelineState['comparison'];
   let mcpBridge: McpBridge | undefined;
@@ -83,6 +88,7 @@ export async function activate(context: vscode.ExtensionContext) {
           : [])
       ],
       selected,
+      layout,
       rendered,
       rendering,
       preview,
@@ -252,7 +258,8 @@ export async function activate(context: vscode.ExtensionContext) {
     return values;
   };
   const beginRender = () => {
-    if (renderJob || !cache || !runner || !timeline || shutdownPreview || refreshing) return;
+    if (renderJob || layoutJob || !cache || !runner || !timeline || shutdownPreview || refreshing)
+      return;
     cancelRender = false;
     const checkpoints = timeline!.store.checkpoints.filter((c) => !c.branch);
     const activeCache = cache!;
@@ -418,8 +425,12 @@ export async function activate(context: vscode.ExtensionContext) {
       }
     };
     const enqueuePreview = (id: string, interactive = false) => {
+      if (layoutJob) cancelLayout = true;
       const work = previewQueue.catch(() => {}).then(() => showPreview(id, interactive));
-      previewQueue = work.catch(() => {});
+      previewQueue = work.then(
+        () => {},
+        () => {}
+      );
       return work;
     };
     const listener = view.onDidReceiveMessage(async (message: TimelineInbound) => {
@@ -467,8 +478,93 @@ export async function activate(context: vscode.ExtensionContext) {
           }
           return;
         }
+        if (message.type === 'cancel-layout') {
+          cancelLayout = true;
+          return;
+        }
+        if (message.type === 'layout-sweep') {
+          if (!timeline || !runner || layoutJob || renderJob || refreshing)
+            throw new Error('Wait for active evidence work.');
+          validateGuard(message.guard);
+          validateSweep(message.widths, message.checkpoints);
+          const chosen = message.checkpoints.map((id) =>
+            timeline!.store.checkpoints.find((c) => c.id === id && !c.branch)
+          );
+          if (chosen.some((c) => !c)) throw new Error('Choose known main checkpoints.');
+          cancelLayout = false;
+          const token = generation;
+          const store = timeline.store;
+          const config = { ...runner.config };
+          const notify = (next: import('./layout/types').LayoutMatrix) => {
+            layout = next;
+            publish(state);
+          };
+          const work = previewQueue
+            .catch(() => {})
+            .then(() =>
+              sweep(
+                chosen as import('./bridge/timeline').Checkpoint[],
+                message.widths,
+                async (cp, width) => {
+                  const probe = new PreviewRunner(
+                    { ...config, width, guard: message.guard, port: config.port + 4 },
+                    store,
+                    undefined,
+                    (text) => diagnostics.appendLine(text)
+                  );
+                  try {
+                    const result = await probe.historical(
+                      cp,
+                      vscode.workspace.isTrusted,
+                      'layout-probes'
+                    );
+                    if (!result.url || !result.screenshot || !result.receipt)
+                      throw new Error('Fresh layout probe unavailable.');
+                    const measured = JSON.parse(
+                      await fs.readFile(`${result.screenshot}.layout.json`, 'utf8')
+                    );
+                    // Store bounded image/receipt/geometry in the existing quota-accounted cache.
+                    const probeCache = new RenderCache(store.root, renderKey(probe.config));
+                    const image = await probeCache.put(cp.id, result.screenshot);
+
+                    return {
+                      result: measured,
+                      image: view.asWebviewUri(vscode.Uri.file(image)).toString()
+                    };
+                  } catch (e) {
+                    return {
+                      result: {
+                        version: 1 as const,
+                        checkpoint: cp.id,
+                        specification: renderKey(probe.config),
+                        guard: message.guard,
+                        outcome: 'unknown' as const,
+                        message: e instanceof Error ? e.message : 'Probe failed.'
+                      }
+                    };
+                  } finally {
+                    await probe.stop();
+                  }
+                },
+                () => cancelLayout || token !== generation || shutdownPreview,
+                notify
+              )
+            );
+          layoutJob = work;
+          previewQueue = work.then(
+            () => {},
+            () => {}
+          );
+          try {
+            await work;
+          } finally {
+            layoutJob = undefined;
+            await fs.rm(path.join(store.root, 'layout-probes'), { recursive: true, force: true });
+          }
+          return;
+        }
         if (message.type === 'recheck-render') {
-          if (!timeline || !runner || !cache || renderJob || refreshing)
+          if (!timeline || !runner || !cache || renderJob || layoutJob || refreshing)
             throw new Error('Wait for active rendering.');
           const cp = timeline.store.checkpoints.find((c) => c.id === message.id);
           if (!cp || selected !== cp.id) throw new Error('Select the checkpoint again.');
@@ -955,6 +1051,7 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.workspace.onDidChangeConfiguration(async (event) => {
       if (!event.affectsConfiguration('scrubline', folders[0]?.uri) || !runner || !timeline) return;
       refreshing = true;
+      cancelLayout = true;
       generation++;
       cancelRender = true;
       await renderJob?.catch(() => {});

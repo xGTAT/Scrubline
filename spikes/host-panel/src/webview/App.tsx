@@ -1,3 +1,4 @@
+import { BreakpointMap } from './BreakpointMap';
 import React, { useEffect, useState, useRef } from 'react';
 import {
   ClockCounterClockwise,
@@ -179,6 +180,7 @@ export const App: React.FC = () => {
           <button onClick={() => bridge?.postMessage({ type: 'retry-capture' })}>Retry</button>
         </section>
       )}
+
       {state.rows.length > 0 && (
         <details className="render-controls">
           <summary>
@@ -186,6 +188,12 @@ export const App: React.FC = () => {
             {state.rows.length})
           </summary>
           <p>Local screenshots. No sharing.</p>
+          <BreakpointMap
+            rows={state.rows}
+            matrix={state.layout}
+            send={(message) => bridge?.postMessage(message)}
+            choose={choose}
+          />
           {state.rendering?.running ? (
             <>
               <span aria-live="polite">
