@@ -296,6 +296,13 @@ export async function activate(context: vscode.ExtensionContext) {
       const activeCache = cache;
       await targetSession?.stop();
       targeting = { status: 'off' };
+      const parent = checkpoint.parentId
+        ? timeline?.store.checkpoints.find((c) => c.id === checkpoint.parentId)
+        : undefined;
+      const comparison =
+        parent && (await activeCache.get(parent.id))
+          ? { checkpoint: parent.id, regions: await activeCache.regions(parent.id) }
+          : undefined;
       const hit = !interactive ? await activeCache.get(id) : undefined;
       if (hit) {
         await activeRunner.stop();
@@ -305,7 +312,8 @@ export async function activate(context: vscode.ExtensionContext) {
             checkpoint: id,
             image: view.asWebviewUri(vscode.Uri.file(hit)).toString(),
             label: 'Cached screenshot',
-            regions: await activeCache.regions(id)
+            regions: await activeCache.regions(id),
+            comparison
           };
           const next =
             timeline?.store.checkpoints[
@@ -353,6 +361,7 @@ export async function activate(context: vscode.ExtensionContext) {
           label: interactive ? result.label : 'Cached screenshot',
           image: image ? view.asWebviewUri(vscode.Uri.file(image)).toString() : undefined,
           regions: image ? await activeCache.regions(id) : [],
+          comparison,
           message: result.error
         };
         publish(state);

@@ -1,3 +1,10 @@
+## 0.7.10
+
+- Persistent region outlines compare selected rendered checkpoints with their saved parent.
+- Current and previous positions, additions/removals and size-only changes; toggle and reduced-motion support.
+- Link and SVG sampling with stable IDs/hashed unique accessible labels; 1,000 candidate and 80 visible-mark limits.
+- New render-cache key regenerates comparison metadata.
+
 # Changelog
 
 ## 0.7.5

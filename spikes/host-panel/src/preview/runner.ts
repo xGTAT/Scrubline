@@ -161,24 +161,50 @@ export class PreviewRunner {
       await page.goto(url, { waitUntil: 'networkidle', timeout: renderTimeout });
       await page.evaluate(() => document.fonts.ready);
       const regions = await page.evaluate(() => {
-        const nodes = [...document.body.querySelectorAll('*')]
-          .filter((e) =>
-            ['H1', 'H2', 'H3', 'P', 'BUTTON', 'IMG', 'INPUT', 'LI', 'LABEL'].includes(e.tagName)
+        const selector = 'h1,h2,h3,h4,h5,h6,p,button,a,img,input,li,label,svg,canvas,video';
+        const nodes = [...document.body.querySelectorAll(selector)].slice(0, 1000);
+        const ids = new Map<string, number>();
+        for (const node of document.querySelectorAll('[id]'))
+          ids.set(node.id, (ids.get(node.id) ?? 0) + 1);
+        const identity = (e: Element) => {
+          if (e.id && ids.get(e.id) === 1) return e.id;
+          const label = e.getAttribute('aria-label');
+          if (
+            label &&
+            nodes.filter((n) => n.tagName === e.tagName && n.getAttribute('aria-label') === label)
+              .length === 1
           )
-          .slice(0, 300);
+            return `${e.tagName}:label:${label.split('').reduce((hash, ch) => ((hash << 5) - hash + ch.charCodeAt(0)) | 0, 0)}`;
+          const parts: string[] = [];
+          let node: Element | null = e;
+          while (node && node !== document.body) {
+            const siblings = node.parentElement
+              ? [...node.parentElement.children].filter((n) => n.tagName === node!.tagName)
+              : [node];
+            parts.unshift(`${node.tagName.toLowerCase()}:${siblings.indexOf(node)}`);
+            node = node.parentElement;
+          }
+          return parts.join('/');
+        };
         return nodes
-          .map((e, index) => {
+          .map((e) => {
             const rect = e.getBoundingClientRect();
             const style = getComputedStyle(e);
-            // Store only a signature, never page text or input values in motion metadata.
-            const text = `${e.textContent}|${style.color}|${style.backgroundColor}|${style.fontSize}`;
+            if (
+              style.visibility === 'hidden' ||
+              style.display === 'none' ||
+              Number(style.opacity) === 0
+            )
+              return null;
+            // Hash appearance and markup. Never store text, input values, URLs or markup.
+            const text = `${e.innerHTML}|${style.color}|${style.backgroundColor}|${style.fontSize}|${style.borderColor}`;
             let hash = 0;
             for (let i = 0; i < text.length; i++)
               hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
             const x = Math.max(0, rect.x),
               y = Math.max(0, rect.y);
             return {
-              key: e.id || `${e.tagName}:${index}`,
+              key: identity(e),
               signature: String(hash),
               x,
               y,
@@ -186,7 +212,7 @@ export class PreviewRunner {
               height: Math.min(rect.bottom, 600) - y
             };
           })
-          .filter((r) => r.width > 0 && r.height > 0);
+          .filter((r) => r && r.width > 0 && r.height > 0);
       });
       await atomicWrite(destination, await page.screenshot({ timeout: renderTimeout }));
       await atomicWrite(`${destination}.json`, Buffer.from(JSON.stringify(regions)));

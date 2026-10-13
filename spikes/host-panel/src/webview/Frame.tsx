@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { regionChanges } from './regions';
 export interface Region {
   key: string;
   signature: string;
@@ -12,6 +13,7 @@ export interface Frame {
   image: string;
   regions?: Region[];
   composite?: HTMLCanvasElement;
+  comparison?: { checkpoint: string; regions: Region[] };
 }
 // Keep the last decoded frame visible until the newest requested image is ready.
 export function FrameView({ frame, requested }: { frame?: Frame; requested?: string }) {
@@ -21,6 +23,7 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
   const latest = useRef<Frame>();
   const figure = useRef<HTMLElement>(null);
   const [transition, setTransition] = useState(0);
+  const [highlights, setHighlights] = useState(true);
   const composited = (): Frame | undefined => {
     const current = latest.current;
     if (!current) return;
@@ -112,12 +115,27 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
           !match ||
           match.signature !== r.signature ||
           Math.abs(match.x - r.x) > 1 ||
-          Math.abs(match.y - r.y) > 1
+          Math.abs(match.y - r.y) > 1 ||
+          Math.abs(match.width - r.width) > 1 ||
+          Math.abs(match.height - r.height) > 1
         );
       })
       .slice(0, 24);
   const outgoing = previous ? changed(previous.regions ?? [], shown.regions ?? []) : [];
   const incoming = previous ? changed(shown.regions ?? [], previous.regions ?? []) : [];
+  const marks = shown.comparison
+    ? regionChanges(shown.comparison.regions, shown.regions ?? [])
+    : [];
+  // Small elements first: preserve useful detail instead of covering it with large containers.
+  const visibleMarks = [...marks]
+    .sort((a, b) => a.region.width * a.region.height - b.region.width * b.region.height)
+    .slice(0, 80);
+  const box = (r: Region) => ({
+    left: `${r.x / 9.6}%`,
+    top: `${r.y / 6}%`,
+    width: `${r.width / 9.6}%`,
+    height: `${r.height / 6}%`
+  });
   return (
     <figure
       className="frame"
@@ -179,6 +197,47 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
             />
           </span>
         ))
+      )}
+      {highlights &&
+        shown.checkpoint === requested &&
+        visibleMarks.map((m) => (
+          <React.Fragment key={`mark-${m.region.key}`}>
+            {m.kind === 'moved' && m.old && (
+              <span
+                aria-hidden="true"
+                className="region-mark region-mark-previous"
+                style={box(m.old)}
+              />
+            )}
+            <span
+              aria-hidden="true"
+              className={`region-mark region-mark-${m.kind}`}
+              style={box(m.region)}
+              title={m.kind}
+            />
+          </React.Fragment>
+        ))}
+      {shown.comparison && (
+        <figcaption className="highlight-controls">
+          <label>
+            <input
+              type="checkbox"
+              checked={highlights}
+              onChange={(e) => setHighlights(e.target.checked)}
+            />{' '}
+            Region highlights
+          </label>
+          <span role="status">
+            {shown.checkpoint !== requested
+              ? 'Loading comparison…'
+              : shown.comparison
+                ? `${marks.length} changed vs parent${marks.length > 80 ? ' (80 shown)' : ''}`
+                : 'No comparison'}
+          </span>
+          {highlights && shown.comparison && (
+            <span className="highlight-legend">Solid: current · Dashed: previous / removed</span>
+          )}
+        </figcaption>
       )}
       <figcaption className="frame-caption">
         {shown.checkpoint !== requested ? 'Loading selected checkpoint…' : 'Read-only screenshot'}

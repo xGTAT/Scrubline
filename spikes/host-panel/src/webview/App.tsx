@@ -44,7 +44,13 @@ export const App: React.FC = () => {
   useEffect(() => {
     const p = state.preview;
     if (p?.status === 'ready' && p.image && p.checkpoint && p.checkpoint === selected)
-      setFrame({ checkpoint: p.checkpoint, image: p.image, regions: p.regions, label: p.label });
+      setFrame({
+        checkpoint: p.checkpoint,
+        image: p.image,
+        regions: p.regions,
+        comparison: p.comparison,
+        label: p.label
+      });
   }, [state.preview, selected]);
   const [scrubbing, setScrubbing] = useState(false);
   const [sliderPosition, setSliderPosition] = useState<number>();

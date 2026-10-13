@@ -46,6 +46,7 @@ export interface TimelineState {
     preload?: string;
     preloadPrevious?: string;
     regions?: import('../webview/Frame').Region[];
+    comparison?: { checkpoint: string; regions: import('../webview/Frame').Region[] };
     label?: string;
     message?: string;
   };

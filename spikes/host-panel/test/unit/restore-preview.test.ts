@@ -274,3 +274,42 @@ test('failed command keeps stderr in diagnostics, not timeline error', async () 
   expect(runner.status()).not.toContain('MODULE_NOT_FOUND');
   expect(diagnostics.join('\n')).toContain('MODULE_NOT_FOUND');
 });
+
+test('region capture includes stable labelled SVG, links and resized elements without plaintext metadata', async () => {
+  const { root, store } = await setup();
+  await fs.writeFile(
+    path.join(root, 'server.cjs'),
+    "require('http').createServer((q,r)=>r.end(require('fs').readFileSync('index.html'))).listen(process.env.PORT,'127.0.0.1')"
+  );
+  await fs.writeFile(
+    path.join(root, 'index.html'),
+    '<html><body><a id="link" href="/secret-path">Private title</a><svg aria-label="Unique illustration" width="120" height="80"><rect width="120" height="80" fill="red"/></svg></body></html>'
+  );
+  const a = await capture(root, store);
+  const runner = new PreviewRunner(
+    {
+      command: 'node server.cjs',
+      port: await freePort(),
+      timeoutMs: 5000,
+      browserPath: chromium.executablePath()
+    },
+    store
+  );
+  runners.push(runner);
+  const first = await runner.historical(a, true);
+  expect(first.screenshot, first.error).toBeDefined();
+  const regions = JSON.parse(await fs.readFile(`${first.screenshot}.json`, 'utf8'));
+  expect(regions.find((r: { key: string }) => r.key === 'link')).toBeDefined();
+  const svg = regions.find((r: { key: string }) => r.key.startsWith('svg:label:'));
+  expect(svg).toBeDefined();
+  expect(JSON.stringify(regions)).not.toMatch(/Private title|secret-path|Unique illustration/);
+  await fs.writeFile(
+    path.join(root, 'index.html'),
+    '<html><body><p>New element</p><a id="link" href="/secret-path">Private title</a><svg aria-label="Unique illustration" width="200" height="80"><rect width="120" height="80" fill="red"/></svg></body></html>'
+  );
+  const b = await capture(root, store);
+  const second = await runner.historical(b, true);
+  expect(second.screenshot, second.error).toBeDefined();
+  const next = JSON.parse(await fs.readFile(`${second.screenshot}.json`, 'utf8'));
+  expect(next.find((r: { key: string }) => r.key === svg.key).width).toBe(200);
+}, 30000);

@@ -864,3 +864,68 @@ test('v0.7.9 interrupted region fade does not recrop a flattened composite', asy
   await expect(page.locator('.region-out')).toHaveCount(0);
   await expect(page.locator('.region-in')).toBeVisible();
 });
+
+test('v0.7.10 parent comparison marks persist after fades, seek directly, toggle, and reduced motion', async ({
+  page
+}) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    const image =
+      'data:image/svg+xml,' +
+      encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="960" height="600"><rect width="960" height="600" fill="#182024"/></svg>'
+      );
+    const rows = ['a', 'b', 'c'].map((id) => ({
+      id,
+      createdAt: '2026-10-09T06:00:00Z',
+      changedPaths: [],
+      attribution: { kind: 'unattributed' }
+    }));
+    const r = (key: string, x: number, width: number) => ({
+      key,
+      signature: 'stable',
+      x,
+      y: 160,
+      width,
+      height: 90
+    });
+    const send = (id: string) =>
+      (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
+        status: 'ready',
+        rows,
+        selected: id,
+        unsaved: false,
+        preview: {
+          status: 'ready',
+          checkpoint: id,
+          image,
+          regions: [r('link', 300, 180), r('svg', 520, 250)],
+          comparison: {
+            checkpoint: id === 'b' ? 'a' : 'b',
+            regions: [r('link', 70, 180), r('svg', 520, 100)]
+          }
+        }
+      });
+    (window as unknown as { __highlightFrame: (id: string) => void }).__highlightFrame = send;
+    send('c');
+  });
+  await expect(page.locator('.frame')).toHaveAttribute('data-checkpoint', 'c');
+  await expect(page.locator('.region-mark-moved')).toHaveCount(1);
+  await expect(page.locator('.region-mark-resized')).toHaveCount(1);
+  await expect(page.locator('.region-mark-previous')).toHaveCount(1);
+  await page.waitForTimeout(350);
+  await expect(page.locator('.frame-out')).toHaveCount(0);
+  await expect(page.locator('.region-mark-moved')).toBeVisible();
+  await page.getByLabel('Region highlights', { exact: true }).uncheck();
+  await expect(page.locator('.region-mark')).toHaveCount(0);
+  await page.getByLabel('Region highlights', { exact: true }).check();
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.getByRole('slider').fill('1');
+  await page.evaluate(() =>
+    (window as unknown as { __highlightFrame: (id: string) => void }).__highlightFrame('b')
+  );
+  await expect(page.locator('.frame')).toHaveAttribute('data-checkpoint', 'b');
+  await expect(page.locator('.region-mark-moved')).toBeVisible();
+  await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
+  await expect(page.locator('.region-mark-moved')).toBeVisible();
+});
