@@ -29,6 +29,12 @@
 
 # Changelog
 
+## 0.8.4
+
+- Measured repair context extends manual-paste packets with source-bound CSS declaration spans, historical transition, assertion, complete counterfactual outcomes, and matching receipt when available.
+- Deterministic UTF-8 byte budget, whole-section omissions, secret redaction, explicit byte-based token estimate, and text-only review.
+- Rechecks immutable source, specification and selected DOM before copying; no inferred component ownership or automatic model submission.
+
 ## 0.8.3
 
 - Guarded CSS inverse rollback for uniquely owned min/max width/height values, rebased against current source while retaining unrelated edits.

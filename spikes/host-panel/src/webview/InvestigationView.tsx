@@ -169,6 +169,12 @@ export function InvestigationView({
                   </button>
                 </details>
               )}
+              <button
+                disabled={value.running || !value.units.length}
+                onClick={() => send({ type: 'build-measured-packet' })}
+              >
+                Build measured repair packet
+              </button>
               <p>
                 Results apply only to this assertion/environment. No unique root cause or AI-turn
                 attribution claimed.

@@ -8,6 +8,7 @@ import { ancestry } from './history';
 import { declarationChanges, applyUnits, type CssUnit } from './change-units';
 import { minimize, type Outcome } from './minimize';
 import type { Investigation, InvestigationRequest } from './types';
+import { specificationKey } from '../preview/spec';
 import { validateGuard } from '../layout/types';
 export async function investigate(
   store: HistoryStore,
@@ -24,6 +25,7 @@ export async function investigate(
   const state: Investigation = {
     running: true,
     request,
+    specification: specificationKey(config),
     message: 'Checking saved ancestry with fresh probes.',
     transitions: [],
     observations: [],

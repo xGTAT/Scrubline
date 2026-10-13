@@ -53,6 +53,7 @@ export interface TimelineState {
     message?: string;
   };
   review?: { token: string; checkpoint: string; paths: string[]; conflicts: string[] };
+  measuredPacket?: import('../targeting/measured').MeasuredPacket;
   rollback?: { message: string; changes?: import('../investigation/change-units').CssUnit[] };
   canUndo?: boolean;
   branches?: { id: string; name: string; checkpoint: string; base: string; directory: string }[];
@@ -82,6 +83,8 @@ export type TimelineInbound =
   | { type: 'cancel-layout' }
   | { type: 'investigate-css'; request: import('../investigation/types').InvestigationRequest }
   | { type: 'cancel-investigation' }
+  | { type: 'build-measured-packet' }
+  | { type: 'copy-measured-packet'; identity: string }
   | { type: 'review-css-rollback'; keep: import('../layout/types').LayoutGuard[] }
   | { type: 'fork-checkpoint'; id: string }
   | { type: 'capture-branch'; branch: string }

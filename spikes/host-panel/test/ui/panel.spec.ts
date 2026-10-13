@@ -1113,3 +1113,36 @@ test('CSS investigation evidence reports its bounded claim without an apply cont
   await expect(page.getByRole('button', { name: 'Review guarded inverse' })).toBeEnabled();
   await page.getByRole('button', { name: 'Review guarded inverse' }).click();
 });
+
+test('measured repair packet is text-only and copy is inside explicit review', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() =>
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: {
+          type: 'timeline',
+          data: {
+            status: 'ready',
+            rows: [],
+            unsaved: false,
+            measuredPacket: {
+              body: 'Assertion: no overflow\nOmitted: matching render receipt',
+              bytes: 65,
+              tokenUpperEstimate: 65,
+              identity: 'packet',
+              checkpoint: 'b',
+              specification: 'spec'
+            }
+          }
+        }
+      })
+    )
+  );
+  await expect(
+    page.getByRole('button', { name: 'Copy reviewed measured packet' })
+  ).not.toBeVisible();
+  await page.getByText('Review measured repair packet', { exact: true }).click();
+  await expect(page.getByText('Assertion: no overflow', { exact: false })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Copy reviewed measured packet' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Copy reviewed measured packet' }).click();
+});

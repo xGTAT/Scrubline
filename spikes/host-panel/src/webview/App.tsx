@@ -725,6 +725,27 @@ export const App: React.FC = () => {
           </button>
         </section>
       )}
+      {state.measuredPacket && (
+        <details className="measured-packet">
+          <summary>Review measured repair packet</summary>
+          <p>
+            {state.measuredPacket.bytes} UTF-8 bytes · token estimate at most{' '}
+            {state.measuredPacket.tokenUpperEstimate} (not tokenizer measured)
+          </p>
+          <pre>{state.measuredPacket.body}</pre>
+          <button
+            disabled={state.unsaved}
+            onClick={() =>
+              bridge?.postMessage({
+                type: 'copy-measured-packet',
+                identity: state.measuredPacket!.identity
+              })
+            }
+          >
+            Copy reviewed measured packet
+          </button>
+        </details>
+      )}
       {state.canUndo && (
         <button onClick={() => bridge?.postMessage({ type: 'undo-restore' })}>Undo restore</button>
       )}

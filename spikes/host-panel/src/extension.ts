@@ -1,3 +1,5 @@
+import { measuredPacket } from './targeting/measured';
+import { specificationKey } from './preview/spec';
 import { prepareRollback, applyRollback, type RollbackCandidate } from './investigation/rollback';
 import { investigate } from './investigation/run';
 import { sweep } from './layout/sweep';
@@ -52,6 +54,7 @@ export async function activate(context: vscode.ExtensionContext) {
   let cancelInvestigation = false;
   let investigation: import('./investigation/types').Investigation | undefined;
   let layoutJob: Promise<unknown> | undefined;
+  let measured: TimelineState['measuredPacket'];
   let rollbackCandidate: RollbackCandidate | undefined;
   let rollback: TimelineState['rollback'];
   let selectiveTarget: import('./bridge/timeline').Checkpoint | undefined;
@@ -97,6 +100,7 @@ export async function activate(context: vscode.ExtensionContext) {
       layout,
       investigation,
       rollback,
+      measuredPacket: measured,
       rendered,
       rendering,
       preview,
@@ -489,6 +493,49 @@ export async function activate(context: vscode.ExtensionContext) {
           }
           return;
         }
+        if (message.type === 'build-measured-packet') {
+          if (!timeline || !investigation || !runner)
+            throw new Error('Investigate before building measured context.');
+          measured = await measuredPacket(
+            timeline.store,
+            investigation,
+            runner.config,
+            await secrets(),
+            preview?.receipt,
+            targeting?.status === 'ready' ? targeting.packet : undefined
+          );
+          publish(state);
+          return;
+        }
+        if (message.type === 'copy-measured-packet') {
+          if (
+            !measured ||
+            measured.identity !== message.identity ||
+            !runner ||
+            measured.specification !== specificationKey(runner.config) ||
+            state.unsaved
+          )
+            throw new Error('Packet stale or workspace unsaved. Rebuild before copying.');
+          if (
+            targeting?.status === 'ready' &&
+            (!targetSession || !(await targetSession.validate()))
+          )
+            throw new Error('Selected DOM stale. Select again before rebuilding.');
+          // Immutable source blobs are verified again before clipboard disclosure.
+          if (!timeline || !investigation) throw new Error('Investigation unavailable.');
+          const current = await measuredPacket(
+            timeline.store,
+            investigation,
+            runner.config,
+            await secrets(),
+            preview?.receipt,
+            targeting?.status === 'ready' ? targeting.packet : undefined
+          );
+          if (current.identity !== measured.identity)
+            throw new Error('Packet context changed. Review again.');
+          await vscode.env.clipboard.writeText(measured.body);
+          return;
+        }
         if (message.type === 'review-css-rollback') {
           if (
             !vscode.workspace.isTrusted ||
@@ -574,6 +621,7 @@ export async function activate(context: vscode.ExtensionContext) {
             refreshing
           )
             throw new Error('Wait for evidence work.');
+          measured = undefined;
           rollbackCandidate = undefined;
           rollback = undefined;
           cancelInvestigation = false;
