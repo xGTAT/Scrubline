@@ -21,3 +21,25 @@ export function regionChanges(before: Region[], after: Region[]): RegionChange[]
   for (const r of before) if (!current.has(r.key)) result.push({ region: r, kind: 'removed' });
   return result;
 }
+
+/** Prefer substantial, separate changes over nested marks of the same visual area. */
+export function focusedChanges(changes: RegionChange[]): RegionChange[] {
+  const area = (r: Region) => r.width * r.height;
+  const ranked = [...changes].sort((a, b) => area(b.region) - area(a.region));
+  const distinct: RegionChange[] = [];
+  for (const change of ranked) {
+    const r = change.region;
+    if (
+      distinct.some(
+        ({ region: p }) =>
+          r.x >= p.x &&
+          r.y >= p.y &&
+          r.x + r.width <= p.x + p.width &&
+          r.y + r.height <= p.y + p.height
+      )
+    )
+      continue;
+    distinct.push(change);
+  }
+  return distinct;
+}

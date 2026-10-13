@@ -18,6 +18,7 @@ export interface Checkpoint {
   attribution: Attribution;
 }
 export interface TimelineRow {
+  alternative?: string;
   id: string;
   createdAt: string;
   changedPaths: string[];

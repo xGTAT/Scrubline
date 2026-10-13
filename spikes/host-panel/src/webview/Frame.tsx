@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { regionChanges } from './regions';
+import { regionChanges, focusedChanges } from './regions';
 export interface Region {
   key: string;
   signature: string;
@@ -23,7 +23,13 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
   const latest = useRef<Frame>();
   const figure = useRef<HTMLElement>(null);
   const [transition, setTransition] = useState(0);
-  const [highlights, setHighlights] = useState(true);
+  const [highlights, setHighlights] = useState(false);
+  const [focusIndex, setFocusIndex] = useState(0);
+  const [oldPosition, setOldPosition] = useState(false);
+  useEffect(() => {
+    setFocusIndex(0);
+    setOldPosition(false);
+  }, [requested]);
   const composited = (): Frame | undefined => {
     const current = latest.current;
     if (!current) return;
@@ -126,10 +132,9 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
   const marks = shown.comparison
     ? regionChanges(shown.comparison.regions, shown.regions ?? [])
     : [];
-  // Small elements first: preserve useful detail instead of covering it with large containers.
-  const visibleMarks = [...marks]
-    .sort((a, b) => a.region.width * a.region.height - b.region.width * b.region.height)
-    .slice(0, 80);
+  const significant = focusedChanges(marks);
+  const focused = significant[Math.min(focusIndex, Math.max(0, significant.length - 1))];
+  const focusRegion = oldPosition && focused?.old ? focused.old : focused?.region;
   const box = (r: Region) => ({
     left: `${r.x / 9.6}%`,
     top: `${r.y / 6}%`,
@@ -198,44 +203,55 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
           </span>
         ))
       )}
-      {highlights &&
-        shown.checkpoint === requested &&
-        visibleMarks.map((m) => (
-          <React.Fragment key={`mark-${m.region.key}`}>
-            {m.kind === 'moved' && m.old && (
-              <span
-                aria-hidden="true"
-                className="region-mark region-mark-previous"
-                style={box(m.old)}
-              />
-            )}
-            <span
-              aria-hidden="true"
-              className={`region-mark region-mark-${m.kind}`}
-              style={box(m.region)}
-              title={m.kind}
-            />
-          </React.Fragment>
-        ))}
+      {highlights && shown.checkpoint === requested && focusRegion && (
+        <span
+          aria-hidden="true"
+          className={`change-focus change-focus-${focused.kind}`}
+          style={box(focusRegion)}
+        />
+      )}
       {shown.comparison && (
         <figcaption className="highlight-controls">
-          <label>
-            <input
-              type="checkbox"
-              checked={highlights}
-              onChange={(e) => setHighlights(e.target.checked)}
-            />{' '}
-            Region highlights
-          </label>
-          <span role="status">
-            {shown.checkpoint !== requested
-              ? 'Loading comparison…'
-              : shown.comparison
-                ? `${marks.length} changed vs parent${marks.length > 80 ? ' (80 shown)' : ''}`
-                : 'No comparison'}
-          </span>
-          {highlights && shown.comparison && (
-            <span className="highlight-legend">Solid: current · Dashed: previous / removed</span>
+          <button
+            className="changes-toggle"
+            aria-pressed={highlights}
+            disabled={shown.checkpoint !== requested || !significant.length}
+            onClick={() => setHighlights(!highlights)}
+          >
+            {highlights ? 'Hide changes' : `${significant.length} changes`}
+          </button>
+          {highlights && focused && shown.checkpoint === requested && (
+            <>
+              <button
+                aria-label="Previous change"
+                disabled={focusIndex === 0}
+                onClick={() => {
+                  setFocusIndex(Math.max(0, focusIndex - 1));
+                  setOldPosition(false);
+                }}
+              >
+                ‹
+              </button>
+              <span role="status">
+                {Math.min(focusIndex + 1, significant.length)} / {significant.length} ·{' '}
+                {focused.kind}
+              </span>
+              <button
+                aria-label="Next change"
+                disabled={focusIndex >= significant.length - 1}
+                onClick={() => {
+                  setFocusIndex(Math.min(significant.length - 1, focusIndex + 1));
+                  setOldPosition(false);
+                }}
+              >
+                ›
+              </button>
+              {focused.old && (
+                <button aria-pressed={oldPosition} onClick={() => setOldPosition(!oldPosition)}>
+                  {oldPosition ? 'Current position' : 'Previous position'}
+                </button>
+              )}
+            </>
           )}
         </figcaption>
       )}

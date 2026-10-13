@@ -59,6 +59,26 @@ export async function activate(context: vscode.ExtensionContext) {
   const publish = (next: TimelineState) => {
     state = {
       ...next,
+      rows: [
+        ...next.rows.filter(
+          (row) => !timeline?.store.checkpoints.some((c) => c.id === row.id && c.branch)
+        ),
+        ...(selected && timeline?.store.checkpoints.some((c) => c.id === selected && c.branch)
+          ? (timeline?.store.checkpoints
+              .filter((c) => c.id === selected && c.branch)
+              .map((c) => ({
+                id: c.id,
+                alternative: c.branch?.name,
+                createdAt: c.createdAt,
+                attribution: c.attribution,
+                changedPaths: changedPaths(
+                  timeline!.store.checkpoints.find((parent) => parent.id === c.parentId)?.files ??
+                    [],
+                  c.files
+                )
+              })) ?? [])
+          : [])
+      ],
       selected,
       rendered,
       rendering,

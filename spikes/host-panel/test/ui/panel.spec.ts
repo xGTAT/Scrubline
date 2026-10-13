@@ -263,7 +263,7 @@ test('M4 fork list and two alternatives comparison stay usable at narrow width',
       branches: [
         {
           id: 'branch',
-          name: 'Navbar',
+          name: 'Static navbar',
           base: 'a',
           checkpoint: 'b'.repeat(64),
           directory: 'test-only'
@@ -279,7 +279,7 @@ test('M4 fork list and two alternatives comparison stay usable at narrow width',
   await expect(page.getByRole('button', { name: 'Choose files' })).toBeVisible();
   const bounds = await page.getByRole('button', { name: 'Choose files' }).boundingBox();
   expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(280);
-  await expect(page.getByRole('button', { name: 'Navbar', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Static navbar', exact: true })).toBeVisible();
   expect(
     (await new AxeBuilder({ page }).analyze()).violations.filter(
       (v) => v.impact === 'serious' || v.impact === 'critical'
@@ -865,7 +865,7 @@ test('v0.7.9 interrupted region fade does not recrop a flattened composite', asy
   await expect(page.locator('.region-in')).toBeVisible();
 });
 
-test('v0.7.10 parent comparison marks persist after fades, seek directly, toggle, and reduced motion', async ({
+test('focused change review is opt-in, single-area, navigable and reduced-motion aware', async ({
   page
 }) => {
   await page.goto('/');
@@ -910,22 +910,55 @@ test('v0.7.10 parent comparison marks persist after fades, seek directly, toggle
     send('c');
   });
   await expect(page.locator('.frame')).toHaveAttribute('data-checkpoint', 'c');
-  await expect(page.locator('.region-mark-moved')).toHaveCount(1);
-  await expect(page.locator('.region-mark-resized')).toHaveCount(1);
-  await expect(page.locator('.region-mark-previous')).toHaveCount(1);
+  await expect(page.locator('.change-focus')).toHaveCount(0);
+  await page.getByRole('button', { name: '2 changes', exact: true }).click();
+  await expect(page.locator('.change-focus')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Next change', exact: true }).click();
+  await expect(page.locator('.highlight-controls [role=status]')).toContainText('2 / 2');
   await page.waitForTimeout(350);
   await expect(page.locator('.frame-out')).toHaveCount(0);
-  await expect(page.locator('.region-mark-moved')).toBeVisible();
-  await page.getByLabel('Region highlights', { exact: true }).uncheck();
-  await expect(page.locator('.region-mark')).toHaveCount(0);
-  await page.getByLabel('Region highlights', { exact: true }).check();
+  await expect(page.locator('.change-focus')).toBeVisible();
+  await page.getByRole('button', { name: 'Hide changes', exact: true }).click();
+  await expect(page.locator('.change-focus')).toHaveCount(0);
+  await page.getByRole('button', { name: '2 changes', exact: true }).click();
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.getByRole('slider').fill('1');
   await page.evaluate(() =>
     (window as unknown as { __highlightFrame: (id: string) => void }).__highlightFrame('b')
   );
   await expect(page.locator('.frame')).toHaveAttribute('data-checkpoint', 'b');
-  await expect(page.locator('.region-mark-moved')).toBeVisible();
+  await expect(page.locator('.change-focus')).toBeVisible();
   await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
-  await expect(page.locator('.region-mark-moved')).toBeVisible();
+  await expect(page.locator('.change-focus')).toBeVisible();
+});
+
+test('alternative inspection keeps review controls and returns to the main timeline', async ({
+  page
+}) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    const rows = ['a', 'b', 'alt'].map((id) => ({
+      id,
+      createdAt: '2026-10-13T08:15:36Z',
+      changedPaths: ['index.html'],
+      attribution: { kind: 'unattributed' },
+      ...(id === 'alt' ? { alternative: 'Review fork' } : {})
+    }));
+    (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
+      status: 'ready',
+      rows,
+      selected: 'alt',
+      unsaved: false,
+      rendered: ['a', 'alt', 'unlisted-branch'],
+      preview: { status: 'idle' }
+    });
+  });
+  await expect(page.getByText('Alternative: Review fork')).toBeVisible();
+  await expect(page.getByRole('slider')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Review restore', exact: true })).toBeVisible();
+  await expect(page.getByText('Changed paths (1)', { exact: true })).toBeVisible();
+  await expect(page.locator('.render-controls summary')).toHaveText('Render history (2/3)');
+  await page.getByRole('button', { name: 'Back to timeline', exact: true }).click();
+  await expect(page.getByText('Alternative: Review fork')).toHaveCount(0);
+  await expect(page.getByRole('slider')).toBeVisible();
 });

@@ -176,7 +176,8 @@ export const App: React.FC = () => {
       {state.rows.length > 0 && (
         <details className="render-controls">
           <summary>
-            Render history ({state.rendered?.length ?? 0}/{state.rows.length})
+            Render history ({state.rows.filter((r) => state.rendered?.includes(r.id)).length}/
+            {state.rows.length})
           </summary>
           <p>Local screenshots. No sharing.</p>
           {state.rendering?.running ? (
@@ -201,7 +202,20 @@ export const App: React.FC = () => {
           {state.rendering?.message && <p className="failure">{state.rendering.message}</p>}
         </details>
       )}
-      {state.rows.length > 0 && (
+      {row?.alternative && (
+        <section className="alternative-selection" aria-label="Alternative selection">
+          <span>Alternative: {row.alternative}</span>
+          <button
+            onClick={() => {
+              setPlaying(false);
+              choose(state.rows.filter((r) => !r.alternative).at(-1)!.id);
+            }}
+          >
+            Back to timeline
+          </button>
+        </section>
+      )}
+      {state.rows.length > 0 && !row?.alternative && (
         <section className="scrub" aria-label="Read-only scrub">
           <label htmlFor="scrub">Checkpoint</label>
           <input
@@ -476,11 +490,12 @@ export const App: React.FC = () => {
               <li key={b.id}>
                 <span title={b.base}>Fork: {b.name}</span>
                 <button
+                  title="Prototype: standalone static HTML navbar only. Framework components and shared CSS are not supported."
                   onClick={() =>
                     bridge?.postMessage({ type: 'review-navbar', id: b.checkpoint, document: '' })
                   }
                 >
-                  Navbar
+                  Static navbar
                 </button>
                 <button
                   onClick={() => bridge?.postMessage({ type: 'capture-branch', branch: b.id })}
@@ -494,6 +509,7 @@ export const App: React.FC = () => {
                 </button>
                 <button
                   onClick={() => {
+                    setPlaying(false);
                     setSelected(b.checkpoint);
                     bridge?.postMessage({ type: 'select-checkpoint', id: b.checkpoint });
                   }}

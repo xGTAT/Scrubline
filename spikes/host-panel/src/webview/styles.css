@@ -468,52 +468,72 @@ html {
   scrollbar-gutter: stable;
 }
 
-/* Persistent checkpoint-parent region comparison, independent of transition motion. */
-.region-mark {
+/* Change review is opt-in and shows one quiet focus area, never a wall of boxes. */
+.change-focus {
   position: absolute;
   pointer-events: none;
-  border: 2px solid #fbbf24;
-  box-shadow: 0 0 0 1px #181818;
   z-index: 3;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #71c5b01a, #71c5b004);
+  box-shadow:
+    0 0 0 1px #8ad6c27a,
+    0 0 22px 3px #71c5b029;
+  transition:
+    left 260ms ease,
+    top 260ms ease,
+    width 260ms ease,
+    height 260ms ease;
+  animation: focus-arrive 360ms ease-out;
 }
-.region-mark-previous,
-.region-mark-removed {
-  border-style: dashed;
-  border-color: #f472b6;
-}
-.region-mark-added {
-  border-color: #34d399;
+@keyframes focus-arrive {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 .highlight-controls {
   position: absolute;
-  left: 4px;
-  top: 4px;
+  left: 10px;
+  bottom: 26px;
   z-index: 4;
-  padding: 4px 7px;
-  background: #181818ed;
-  color: #fff;
-  font-size: 11px;
-  display: flex;
-  flex-direction: column;
-  max-width: calc(100% - 8px);
-}
-.highlight-controls label {
   display: flex;
   align-items: center;
-  gap: 6px;
-  cursor: pointer;
+  flex-wrap: wrap;
+  gap: 5px;
+  max-width: calc(100% - 20px);
+  padding: 4px;
+  border-radius: 10px;
+  background: #161b20e8;
+  color: #e2ebe7;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 3px 15px #0002;
+  font-size: 11px;
 }
-.highlight-controls input {
-  width: 14px;
-  height: 14px;
-  padding: 0;
+.highlight-controls button {
+  width: auto;
+  min-height: 28px;
+  margin: 0;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: transparent;
 }
-.highlight-legend {
-  color: #ddd;
+.highlight-controls button[aria-pressed='true'] {
+  background: #71c5b022;
+}
+.highlight-controls span {
+  padding: 0 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .change-focus {
+    animation: none;
+    transition: none;
+  }
 }
 @media (forced-colors: active) {
-  .region-mark {
-    border-color: Highlight;
+  .change-focus {
+    outline: 1px solid Highlight;
   }
   .highlight-controls {
     background: Canvas;

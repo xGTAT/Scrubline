@@ -32,3 +32,16 @@ test('subpixel movement stays below comparison tolerance and matching uses ident
     regionChanges([region('a'), region('b')], [region('b'), region('a', { x: 10.5 })])
   ).toEqual([]);
 });
+
+test('focus review collapses nested changes without losing separate areas', async () => {
+  const { focusedChanges } = await import('../../src/webview/regions');
+  const changes = regionChanges(
+    [],
+    [
+      region('parent', { x: 0, y: 0, width: 200, height: 200 }),
+      region('child'),
+      region('other', { x: 400 })
+    ]
+  );
+  expect(focusedChanges(changes).map((c) => c.region.key)).toEqual(['parent', 'other']);
+});
