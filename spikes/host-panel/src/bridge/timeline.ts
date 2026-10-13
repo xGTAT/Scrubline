@@ -44,6 +44,7 @@ export interface TimelineState {
     checkpoint?: string;
     url?: string;
     image?: string;
+    receipt?: import('../evidence/types').RenderReceipt;
     preload?: string;
     preloadPrevious?: string;
     regions?: import('../webview/Frame').Region[];
@@ -68,6 +69,7 @@ export type TimelineInbound =
   | { type: 'fullscreen'; active: boolean }
   | { type: 'cancel-render' }
   | { type: 'refresh-renders' }
+  | { type: 'recheck-render'; id: string }
   | { type: 'fork-checkpoint'; id: string }
   | { type: 'capture-branch'; branch: string }
   | { type: 'compare-branch'; branch: string }

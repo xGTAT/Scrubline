@@ -313,3 +313,42 @@ test('region capture includes stable labelled SVG, links and resized elements wi
   const next = JSON.parse(await fs.readFile(`${second.screenshot}.json`, 'utf8'));
   expect(next.find((r: { key: string }) => r.key === svg.key).width).toBe(200);
 }, 30000);
+
+test('configured route and dimensions produce integrity checked receipts without raw commands', async () => {
+  const { root, store } = await setup();
+  await fs.writeFile(
+    path.join(root, 'server.cjs'),
+    "require('http').createServer((q,r)=>r.end(q.url === '/ready?fixture=yes' ? '<h1 id=ready>Ready</h1>' : '<h1>Wrong route</h1>')).listen(process.env.PORT,'127.0.0.1')"
+  );
+  await fs.writeFile(path.join(root, 'package-lock.json'), '{}');
+  const cp = await capture(root, store);
+  const { identifyBrowser, specificationKey } = await import('../../src/preview/spec');
+  const { readReceipt } = await import('../../src/preview/receipt');
+  const { RenderCache } = await import('../../src/preview/cache');
+  const config = await identifyBrowser({
+    command: 'node server.cjs',
+    port: await freePort(),
+    timeoutMs: 3000,
+    browserPath: chromium.executablePath(),
+    width: 390,
+    height: 844,
+    route: '/ready?fixture=yes',
+    readySelector: '#ready'
+  });
+  const runner = new PreviewRunner(config, store);
+  runners.push(runner);
+  const result = await runner.historical(cp, true);
+  expect(result.screenshot, result.error).toBeDefined();
+  const bytes = await fs.readFile(result.screenshot!);
+  expect(bytes.readUInt32BE(16)).toBe(390);
+  expect(bytes.readUInt32BE(20)).toBe(844);
+  expect(result.receipt?.viewport).toEqual({ width: 390, height: 844 });
+  expect(result.receipt?.lockfiles).toHaveLength(1);
+  expect(JSON.stringify(result.receipt)).not.toMatch(/server\.cjs|fixture=yes|\/home\//);
+  const cache = new RenderCache(store.root, specificationKey(config));
+  await cache.put(cp.id, result.screenshot!);
+  expect((await cache.receipt(cp.id))?.imageHash).toBe(result.receipt!.imageHash);
+  await fs.appendFile(result.screenshot!, 'tampered');
+  expect(await readReceipt(result.screenshot!, cp.id)).toBeUndefined();
+  await expect(cache.put(cp.id, result.screenshot!)).rejects.toThrow('receipt invalid');
+}, 30000);

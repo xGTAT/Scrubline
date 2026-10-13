@@ -2,7 +2,7 @@
   "name": "scrubline-panel",
   "displayName": "Scrubline Review Panel",
   "description": "Disk checkpoints and a source timeline",
-  "version": "0.7.10",
+  "version": "0.8.0",
   "publisher": "scrubline",
   "engines": {
     "vscode": "^1.80.0"
@@ -133,6 +133,34 @@
           },
           "default": [],
           "description": "Additional gitignore-style paths to keep out of checkpoints.",
+          "scope": "resource"
+        },
+        "scrubline.previewWidth": {
+          "type": "number",
+          "default": 960,
+          "minimum": 240,
+          "maximum": 3840,
+          "description": "Preview viewport width in CSS pixels.",
+          "scope": "resource"
+        },
+        "scrubline.previewHeight": {
+          "type": "number",
+          "default": 600,
+          "minimum": 240,
+          "maximum": 3840,
+          "description": "Preview viewport height in CSS pixels.",
+          "scope": "resource"
+        },
+        "scrubline.previewRoute": {
+          "type": "string",
+          "default": "/",
+          "description": "Local preview path, including optional query. No external URL or fragment.",
+          "scope": "resource"
+        },
+        "scrubline.previewReadySelector": {
+          "type": "string",
+          "default": "",
+          "description": "Optional unique selector that must become visible before capture.",
           "scope": "resource"
         }
       }

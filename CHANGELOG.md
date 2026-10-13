@@ -1,3 +1,11 @@
+## 0.8.0
+
+- Configurable local route, viewport and optional visible readiness selector.
+- Browser executable/runtime-bound render cache with integrity-checked source/environment receipts.
+- Two fresh render probes classify exact evidence as repeatable-in-two-probes or unstable, without claiming frozen dependencies/backends.
+- Actual image dimensions drive transitions and highlights; portrait previews stay readable.
+- Preserved screenshot fallback carries its original provenance instead of pretending to be a fresh render.
+
 ## 0.7.10
 
 - Persistent region outlines compare selected rendered checkpoints with their saved parent.

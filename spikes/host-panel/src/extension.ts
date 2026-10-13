@@ -1,3 +1,6 @@
+import { repeatability } from './preview/repeatability';
+import { atomicWrite } from './store/store';
+import { identifyBrowser } from './preview/spec';
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import * as path from 'node:path';
@@ -143,7 +146,11 @@ export async function activate(context: vscode.ExtensionContext) {
         command: config.get<string>('previewCommand', ''),
         port: config.get<number>('previewPort', 4100),
         timeoutMs: config.get<number>('previewTimeoutSeconds', 15) * 1000,
-        browserPath: config.get<string>('chromiumPath') || undefined
+        browserPath: config.get<string>('chromiumPath') || undefined,
+        width: config.get<number>('previewWidth', 960),
+        height: config.get<number>('previewHeight', 600),
+        route: config.get<string>('previewRoute', '/'),
+        readySelector: config.get<string>('previewReadySelector', '')
       },
       timeline.store,
       (message) => {
@@ -152,6 +159,7 @@ export async function activate(context: vscode.ExtensionContext) {
       },
       (message) => diagnostics.appendLine(message)
     );
+    Object.assign(runner.config, await identifyBrowser(runner.config));
     cache = new RenderCache(storeRoot, renderKey(runner.config));
     publish({ status: 'loading', rows: [], unsaved: false });
     const watcher = vscode.workspace.createFileSystemWatcher(
@@ -331,7 +339,10 @@ export async function activate(context: vscode.ExtensionContext) {
             status: 'ready',
             checkpoint: id,
             image: view.asWebviewUri(vscode.Uri.file(hit)).toString(),
-            label: 'Cached screenshot',
+            label: (await activeCache.receipt(id))
+              ? 'Cached evidence'
+              : 'Legacy screenshot - unverified',
+            receipt: await activeCache.receipt(id),
             regions: await activeCache.regions(id),
             comparison
           };
@@ -363,12 +374,12 @@ export async function activate(context: vscode.ExtensionContext) {
       }
       try {
         const result = await activeRunner.historical(checkpoint, vscode.workspace.isTrusted);
-        let image = result.url ? result.screenshot : undefined;
+        let image = result.screenshot;
         if (token !== generation) {
           await activeRunner.stop();
           return;
         }
-        if (image) {
+        if (image && result.url) {
           image = await activeCache.put(id, image);
           if (!rendered.includes(id)) rendered.push(id);
         }
@@ -378,9 +389,18 @@ export async function activate(context: vscode.ExtensionContext) {
           status: image || (interactive && result.url) ? 'ready' : 'error',
           checkpoint: id,
           url: interactive ? result.url : undefined,
-          label: interactive ? result.label : 'Cached screenshot',
+          label: !result.url
+            ? 'Screenshot only - preview unavailable'
+            : interactive
+              ? result.label
+              : 'Rendered evidence - not rechecked',
+          receipt: result.receipt,
           image: image ? view.asWebviewUri(vscode.Uri.file(image)).toString() : undefined,
-          regions: image ? await activeCache.regions(id) : [],
+          regions: image
+            ? result.url
+              ? await activeCache.regions(id)
+              : JSON.parse(await fs.readFile(`${image}.json`, 'utf8').catch(() => '[]'))
+            : [],
           comparison,
           message: result.error
         };
@@ -445,6 +465,55 @@ export async function activate(context: vscode.ExtensionContext) {
             diagnostics.appendLine(`Fullscreen failed: ${text}`);
             void vscode.window.showErrorMessage(`Fullscreen unavailable: ${text}`);
           }
+          return;
+        }
+        if (message.type === 'recheck-render') {
+          if (!timeline || !runner || !cache || renderJob || refreshing)
+            throw new Error('Wait for active rendering.');
+          const cp = timeline.store.checkpoints.find((c) => c.id === message.id);
+          if (!cp || selected !== cp.id) throw new Error('Select the checkpoint again.');
+          const activeCache = cache;
+          const activeRunner = runner;
+          const token = generation;
+          const job = previewQueue
+            .catch(() => {})
+            .then(async () => {
+              preview = {
+                status: 'loading',
+                checkpoint: cp.id,
+                message: 'Two fresh probes of the trusted preview command.'
+              };
+              publish(state);
+              const probes: import('./evidence/types').RenderReceipt[] = [];
+              let last: import('./preview/runner').PreviewResult | undefined;
+              try {
+                for (let i = 0; i < 2; i++) {
+                  if (token !== generation || selected !== cp.id)
+                    throw new Error('Recheck cancelled.');
+                  last = await activeRunner.historical(cp, vscode.workspace.isTrusted);
+                  if (!last.url || !last.screenshot || !last.receipt)
+                    throw new Error(
+                      'Fresh probe unavailable; screenshot fallback is not a recheck.'
+                    );
+                  probes.push(last.receipt);
+                  await activeRunner.stop();
+                }
+                if (token !== generation || selected !== cp.id)
+                  throw new Error('Recheck cancelled.');
+                last!.receipt!.repeatability = repeatability(probes);
+                last!.receipt!.probes = 2;
+                await atomicWrite(
+                  `${last!.screenshot!}.receipt.json`,
+                  JSON.stringify(last!.receipt)
+                );
+                await activeCache.put(cp.id, last!.screenshot!);
+              } finally {
+                await activeRunner.stop();
+              }
+            });
+          previewQueue = job.catch(() => {});
+          await job;
+          await enqueuePreview(cp.id);
           return;
         }
         if (message.type === 'request-timeline') {
@@ -618,7 +687,7 @@ export async function activate(context: vscode.ExtensionContext) {
               publish(state);
             }
           );
-          await targetSession.start(preview.url, redactions);
+          await targetSession.start(preview.url, redactions, false, preview.receipt?.viewport);
           targeting = { status: 'on' };
           publish(state);
         }
@@ -898,12 +967,17 @@ export async function activate(context: vscode.ExtensionContext) {
           command: config.get<string>('previewCommand', ''),
           port: config.get<number>('previewPort', 4100),
           timeoutMs: config.get<number>('previewTimeoutSeconds', 15) * 1000,
-          browserPath: config.get<string>('chromiumPath') || undefined
+          browserPath: config.get<string>('chromiumPath') || undefined,
+          width: config.get<number>('previewWidth', 960),
+          height: config.get<number>('previewHeight', 600),
+          route: config.get<string>('previewRoute', '/'),
+          readySelector: config.get<string>('previewReadySelector', '')
         },
         timeline.store,
         undefined,
         (message) => diagnostics.appendLine(message)
       );
+      Object.assign(runner.config, await identifyBrowser(runner.config));
       cache = new RenderCache(timeline.store.root, renderKey(runner.config));
       rendered = await cache.available(timeline.store.checkpoints);
       preview = undefined;

@@ -1,21 +1,10 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { hashBytes, atomicWrite } from '../store/store';
+import { atomicWrite } from '../store/store';
 import type { Checkpoint } from '../bridge/timeline';
-import type { PreviewConfig } from './runner';
+import { readReceipt } from './receipt';
 export const PNG = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
-export function renderKey(config: PreviewConfig) {
-  return hashBytes(
-    JSON.stringify({
-      version: 3,
-      command: config.command,
-      browser: config.browserPath ?? '',
-      viewport: [960, 600],
-      engine: 'playwright-1.63.0',
-      timeout: config.timeoutMs
-    })
-  );
-}
+export { specificationKey as renderKey } from './spec';
 export class RenderCache {
   constructor(
     readonly root: string,
@@ -31,6 +20,11 @@ export class RenderCache {
     try {
       const bytes = await fs.readFile(file);
       if (bytes.length < 8 || !bytes.subarray(0, 8).equals(PNG)) return;
+      const hasReceipt = await fs.access(`${file}.receipt.json`).then(
+        () => true,
+        () => false
+      );
+      if (hasReceipt && !(await this.receipt(id))) return;
       return file;
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
@@ -43,6 +37,9 @@ export class RenderCache {
       return [];
     }
   }
+  async receipt(id: string) {
+    return readReceipt(this.file(id), id, this.key);
+  }
   private writes = Promise.resolve();
   put(id: string, source: string): Promise<string> {
     const job = this.writes.catch(() => {}).then(() => this.commit(id, source));
@@ -54,6 +51,9 @@ export class RenderCache {
   }
   private async commit(id: string, source: string) {
     const bytes = await fs.readFile(source);
+    const supplied = await fs.readFile(`${source}.receipt.json`).catch(() => undefined);
+    if (supplied && !(await readReceipt(source, id, this.key)))
+      throw new Error('Render receipt invalid.');
     if (!bytes.subarray(0, 8).equals(PNG)) throw new Error('Render did not produce a PNG.');
     const directory = path.dirname(this.file(id));
     await fs.mkdir(directory, { recursive: true });
@@ -64,17 +64,26 @@ export class RenderCache {
       if (!(await fs.lstat(dir)).isDirectory()) continue;
       for (const entry of await fs.readdir(dir)) {
         const file = path.join(dir, entry);
-        if (entry.endsWith('.png') && file !== this.file(id)) used += (await fs.stat(file)).size;
+        if (
+          file !== this.file(id) &&
+          file !== `${this.file(id)}.json` &&
+          file !== `${this.file(id)}.receipt.json`
+        )
+          used += (await fs.stat(file)).size;
       }
     }
-    if (used + bytes.length > this.maxBytes)
+    const metadata = await fs.readFile(`${source}.json`).catch(() => Buffer.alloc(0));
+    const receipt = await fs.readFile(`${source}.receipt.json`).catch(() => Buffer.alloc(0));
+    if (used + bytes.length + metadata.length + receipt.length > this.maxBytes)
       throw new Error('Render cache limit reached (200 MB).');
     await atomicWrite(this.file(id), bytes);
     try {
       await atomicWrite(`${this.file(id)}.json`, await fs.readFile(`${source}.json`));
     } catch {
-      /* Older cached screenshots remain usable without motion metadata. */
+      await fs.rm(`${this.file(id)}.json`, { force: true });
     }
+    if (receipt.length) await atomicWrite(`${this.file(id)}.receipt.json`, receipt);
+    else await fs.rm(`${this.file(id)}.receipt.json`, { force: true });
     return this.file(id);
   }
   async available(checkpoints: readonly Checkpoint[]) {

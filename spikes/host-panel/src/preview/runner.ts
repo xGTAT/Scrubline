@@ -4,12 +4,20 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import type { Checkpoint } from '../bridge/timeline';
-import { HistoryStore, atomicWrite } from '../store/store';
+import { specification, specificationKey } from './spec';
+import { readReceipt } from './receipt';
+import type { RenderReceipt } from '../evidence/types';
+import { hashBytes, HistoryStore, atomicWrite } from '../store/store';
 export interface PreviewConfig {
   command: string;
   port: number;
   timeoutMs: number;
   browserPath?: string;
+  browserIdentity?: string;
+  width?: number;
+  height?: number;
+  route?: string;
+  readySelector?: string;
 }
 export interface PreviewResult {
   checkpoint: string;
@@ -17,6 +25,7 @@ export interface PreviewResult {
   screenshot?: string;
   label: 'Isolated preview' | 'Screenshot';
   error?: string;
+  receipt?: RenderReceipt;
 }
 async function portAvailable(port: number) {
   await new Promise<void>((resolve, reject) => {
@@ -38,6 +47,7 @@ export class PreviewRunner {
     readonly diagnostic?: (message: string) => void
   ) {}
   async start(workspace: string, trusted: boolean) {
+    specification(this.config);
     if (!trusted) throw new Error('Trust workspace before preview.');
     if (!this.config.command.trim()) throw new Error('Set a preview command in Settings.');
     if (!Number.isInteger(this.config.port) || this.config.port < 1024 || this.config.port > 65535)
@@ -102,7 +112,9 @@ export class PreviewRunner {
     screenshotDirectory = 'screenshots'
   ): Promise<PreviewResult> {
     if (!trusted) throw new Error('Trust workspace before preview.');
-    const screenshots = path.join(this.store.root, screenshotDirectory);
+    const spec = specification(this.config);
+    const key = specificationKey(this.config);
+    const screenshots = path.join(this.store.root, screenshotDirectory, key);
     await fs.mkdir(screenshots, { recursive: true });
     const image = path.join(screenshots, `${c.id}.png`);
     await this.stop();
@@ -111,12 +123,13 @@ export class PreviewRunner {
     const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'scrubline-preview-'));
     try {
       await this.store.materialize(c, temp);
-      const url = await this.start(temp, trusted);
+      const origin = await this.start(temp, trusted);
+      const url = new URL(spec.route, origin).toString();
       this.temp = temp;
       let screenshot: string | undefined;
       let screenshotError: string | undefined;
       try {
-        await this.screenshot(url, image);
+        await this.screenshot(url, image, c);
         screenshot = image;
       } catch (error) {
         screenshotError = error instanceof Error ? error.message : String(error);
@@ -127,26 +140,39 @@ export class PreviewRunner {
         url,
         screenshot,
         label: 'Isolated preview',
+        receipt: screenshot ? await readReceipt(image, c.id, key) : undefined,
         ...(!screenshot
           ? { error: `Screenshot unavailable: ${screenshotError ?? 'Configure Chromium.'}` }
           : {})
       };
     } catch (e) {
       await fs.rm(temp, { recursive: true, force: true });
-      try {
-        await fs.access(image);
-        return {
-          checkpoint: c.id,
-          screenshot: image,
-          label: 'Screenshot',
-          error: 'Historical command unavailable. Screenshot only.'
-        };
-      } catch {
-        throw e;
+      const root = path.join(this.store.root, screenshotDirectory);
+      const candidates = [image, path.join(root, `${c.id}.png`)];
+      for (const directory of await fs.readdir(root).catch(() => [])) {
+        if (/^[a-f0-9]{64}$/.test(directory))
+          candidates.push(path.join(root, directory, `${c.id}.png`));
       }
+      for (const candidate of candidates) {
+        try {
+          await fs.access(candidate);
+          return {
+            checkpoint: c.id,
+            screenshot: candidate,
+            label: 'Screenshot',
+            receipt: await readReceipt(candidate, c.id),
+            error:
+              'Historical command unavailable. Screenshot only; original render specification may differ.'
+          } as PreviewResult;
+        } catch {
+          /* Try preserved evidence, never claim a new render. */
+        }
+      }
+      throw e;
     }
   }
-  async screenshot(url: string, destination: string) {
+  async screenshot(url: string, destination: string, checkpoint?: Checkpoint) {
+    const spec = specification(this.config);
     if (!this.config.browserPath) throw new Error('Set a Chromium path for screenshots.');
     const { chromium } = await import('playwright-core');
     const browser = await chromium.launch({
@@ -155,12 +181,20 @@ export class PreviewRunner {
       args: ['--disable-gpu']
     });
     try {
-      const page = await browser.newPage({ viewport: { width: 960, height: 600 } });
+      const page = await browser.newPage({ viewport: { width: spec.width, height: spec.height } });
       // Server startup and browser rendering have separate budgets.
       const renderTimeout = Math.max(this.config.timeoutMs, 15000);
       await page.goto(url, { waitUntil: 'networkidle', timeout: renderTimeout });
+      if (new URL(page.url()).origin !== new URL(url).origin)
+        throw new Error('Preview redirected off origin.');
+      if (spec.readySelector && (await page.locator(spec.readySelector).count()) > 1)
+        throw new Error('Readiness selector is ambiguous.');
+      if (spec.readySelector)
+        await page
+          .locator(spec.readySelector)
+          .waitFor({ state: 'visible', timeout: renderTimeout });
       await page.evaluate(() => document.fonts.ready);
-      const regions = await page.evaluate(() => {
+      const regions = await page.evaluate(({ width, height }) => {
         const selector = 'h1,h2,h3,h4,h5,h6,p,button,a,img,input,li,label,svg,canvas,video';
         const nodes = [...document.body.querySelectorAll(selector)].slice(0, 1000);
         const ids = new Map<string, number>();
@@ -208,14 +242,42 @@ export class PreviewRunner {
               signature: String(hash),
               x,
               y,
-              width: Math.min(rect.right, 960) - x,
-              height: Math.min(rect.bottom, 600) - y
+              width: Math.min(rect.right, width) - x,
+              height: Math.min(rect.bottom, height) - y
             };
           })
           .filter((r) => r && r.width > 0 && r.height > 0);
-      });
-      await atomicWrite(destination, await page.screenshot({ timeout: renderTimeout }));
-      await atomicWrite(`${destination}.json`, Buffer.from(JSON.stringify(regions)));
+      }, spec);
+      const image = await page.screenshot({ timeout: renderTimeout });
+      const geometry = JSON.stringify(regions);
+      await atomicWrite(destination, image);
+      await atomicWrite(`${destination}.json`, geometry);
+      if (checkpoint) {
+        const receipt: RenderReceipt = {
+          version: 1,
+          checkpoint: checkpoint.id,
+          specification: specificationKey(this.config),
+          source: hashBytes(JSON.stringify(checkpoint.files)),
+          lockfiles: checkpoint.files
+            .filter((f) =>
+              /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?)$/.test(f.path)
+            )
+            .map((f) => ({ path: f.path, hash: f.hash })),
+          browserVersion: browser.version(),
+          browserIdentity: this.config.browserIdentity ?? 'unverified',
+          runtime: process.version,
+          platform: process.platform,
+          viewport: { width: spec.width, height: spec.height },
+          routeIdentity: hashBytes(spec.route),
+          commandIdentity: hashBytes(this.config.command),
+          capturedAt: new Date().toISOString(),
+          imageHash: hashBytes(image),
+          geometryHash: hashBytes(geometry),
+          dependencies: 'tracked-source-only',
+          repeatability: 'not-rechecked'
+        };
+        await atomicWrite(`${destination}.receipt.json`, JSON.stringify(receipt));
+      }
     } finally {
       await browser.close();
     }
@@ -226,8 +288,9 @@ export class PreviewRunner {
   async checkpointScreenshot(c: Checkpoint) {
     if (!this.live) return;
     await this.screenshot(
-      `http://127.0.0.1:${this.config.port}`,
-      path.join(this.store.root, 'screenshots', `${c.id}.png`)
+      new URL(specification(this.config).route, `http://127.0.0.1:${this.config.port}`).toString(),
+      path.join(this.store.root, 'screenshots', specificationKey(this.config), `${c.id}.png`),
+      c
     );
   }
   async stop() {

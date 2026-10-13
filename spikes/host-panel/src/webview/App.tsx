@@ -40,7 +40,12 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('message', handler);
   }, []);
   const [fullscreen, setFullscreen] = useState(window.__SCRUBLINE_FULLSCREEN__ ?? false);
-  const [frame, setFrame] = useState<import('./Frame').Frame & { label?: string }>();
+  const [frame, setFrame] = useState<
+    import('./Frame').Frame & {
+      label?: string;
+      receipt?: import('../evidence/types').RenderReceipt;
+    }
+  >();
   useEffect(() => {
     const p = state.preview;
     if (p?.status === 'ready' && p.image && p.checkpoint && p.checkpoint === selected)
@@ -49,7 +54,8 @@ export const App: React.FC = () => {
         image: p.image,
         regions: p.regions,
         comparison: p.comparison,
-        label: p.label
+        label: p.label,
+        receipt: p.receipt
       });
   }, [state.preview, selected]);
   const [scrubbing, setScrubbing] = useState(false);
@@ -338,6 +344,31 @@ export const App: React.FC = () => {
           (!selected || state.preview.checkpoint === selected)) ? (
           <>
             <span>{frame?.label ?? state.preview?.label}</span>
+            {(frame?.receipt ?? state.preview?.receipt) && (
+              <details className="render-receipt">
+                <summary>Render receipt</summary>
+                <p>
+                  {(frame?.receipt ?? state.preview?.receipt)!.viewport.width} x{' '}
+                  {(frame?.receipt ?? state.preview?.receipt)!.viewport.height} · Chromium{' '}
+                  {(frame?.receipt ?? state.preview?.receipt)!.browserVersion}
+                </p>
+                <p>
+                  Captured {(frame?.receipt ?? state.preview?.receipt)!.capturedAt}. Tracked source
+                  only; dependencies and backend state are not frozen.
+                </p>
+                <p>
+                  Repeatability:{' '}
+                  {(frame?.receipt ?? state.preview?.receipt)!.repeatability ?? 'not-rechecked'}.
+                </p>
+                <button
+                  disabled={state.preview?.status === 'loading'}
+                  title="Runs the trusted preview command twice in isolated source copies. Does not freeze server-side effects."
+                  onClick={() => bridge?.postMessage({ type: 'recheck-render', id: selected! })}
+                >
+                  Recheck twice
+                </button>
+              </details>
+            )}
             {row && (
               <small>
                 Selected{' '}

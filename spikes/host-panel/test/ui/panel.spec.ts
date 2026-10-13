@@ -962,3 +962,47 @@ test('alternative inspection keeps review controls and returns to the main timel
   await expect(page.getByText('Alternative: Review fork')).toHaveCount(0);
   await expect(page.getByRole('slider')).toBeVisible();
 });
+
+test('portrait evidence uses decoded dimensions and shows a bounded render receipt', async ({
+  page
+}) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    const image =
+      'data:image/svg+xml,' +
+      encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="390" height="844"><rect width="390" height="844" fill="#214449"/></svg>'
+      );
+    (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
+      status: 'ready',
+      rows: [
+        {
+          id: 'portrait',
+          createdAt: '2026-10-13T13:00:00Z',
+          changedPaths: [],
+          attribution: { kind: 'unattributed' }
+        }
+      ],
+      selected: 'portrait',
+      unsaved: false,
+      preview: {
+        status: 'ready',
+        checkpoint: 'portrait',
+        image,
+        label: 'Cached evidence - not rechecked',
+        receipt: {
+          viewport: { width: 390, height: 844 },
+          browserVersion: 'test browser',
+          capturedAt: '2026-10-13T13:00:00Z',
+          imageHash: 'portrait'
+        }
+      }
+    });
+  });
+  await expect(page.locator('.frame')).toHaveAttribute('style', /390 \/ 844/);
+  await page.getByText('Render receipt', { exact: true }).click();
+  await expect(page.getByText(/390 x 844/)).toBeVisible();
+  await expect(page.getByText(/dependencies and backend state are not frozen/)).toBeVisible();
+  const bounds = await page.locator('.frame').boundingBox();
+  expect(bounds!.width / bounds!.height).toBeCloseTo(390 / 844, 2);
+});

@@ -11,6 +11,9 @@ export interface Region {
 export interface Frame {
   checkpoint: string;
   image: string;
+  width?: number;
+  height?: number;
+  receipt?: import('../evidence/types').RenderReceipt;
   regions?: Region[];
   composite?: HTMLCanvasElement;
   comparison?: { checkpoint: string; regions: Region[] };
@@ -42,21 +45,21 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
     // Otherwise a new frame during a fade jumps back to its unfaded predecessor.
     try {
       const canvas = document.createElement('canvas');
-      canvas.width = 960;
-      canvas.height = 600;
+      canvas.width = current.width ?? 960;
+      canvas.height = current.height ?? 600;
       const ctx = canvas.getContext('2d');
       if (!ctx) return current;
-      ctx.drawImage(base, 0, 0, 960, 600);
+      ctx.drawImage(base, 0, 0, canvas.width, canvas.height);
       ctx.globalAlpha = Number(getComputedStyle(outgoing).opacity);
-      ctx.drawImage(outgoing, 0, 0, 960, 600);
+      ctx.drawImage(outgoing, 0, 0, canvas.width, canvas.height);
       const bounds = figure.current!.getBoundingClientRect();
       for (const region of figure.current!.querySelectorAll<HTMLElement>('.region')) {
         const image = region.querySelector<HTMLImageElement>('img');
         if (!image || !image.complete) continue;
         const clip = region.getBoundingClientRect();
         const pixels = image.getBoundingClientRect();
-        const sx = 960 / bounds.width,
-          sy = 600 / bounds.height;
+        const sx = canvas.width / bounds.width,
+          sy = canvas.height / bounds.height;
         ctx.save();
         ctx.beginPath();
         ctx.rect(
@@ -92,17 +95,23 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
       .decode()
       .then(() => {
         if (token !== ticket.current) return;
-        if (latest.current?.checkpoint === frame.checkpoint) return;
+        if (
+          latest.current?.checkpoint === frame.checkpoint &&
+          latest.current?.image === frame.image &&
+          latest.current?.receipt?.imageHash === frame.receipt?.imageHash
+        )
+          return;
         setPrevious(composited());
         setTransition((n) => n + 1);
-        latest.current = frame;
-        setShown(frame);
+        const decoded = { ...frame, width: image.naturalWidth, height: image.naturalHeight };
+        latest.current = decoded;
+        setShown(decoded);
       })
       .catch(() => {});
     return () => {
       ticket.current++;
     };
-  }, [frame?.image, frame?.checkpoint, requested]);
+  }, [frame?.image, frame?.checkpoint, requested, frame?.receipt?.imageHash]);
   useEffect(() => {
     const timer = setTimeout(() => setPrevious(undefined), 220);
     return () => clearTimeout(timer);
@@ -127,8 +136,11 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
         );
       })
       .slice(0, 24);
-  const outgoing = previous ? changed(previous.regions ?? [], shown.regions ?? []) : [];
-  const incoming = previous ? changed(shown.regions ?? [], previous.regions ?? []) : [];
+  const dimensionsMatch = previous?.width === shown.width && previous?.height === shown.height;
+  const outgoing =
+    previous && dimensionsMatch ? changed(previous.regions ?? [], shown.regions ?? []) : [];
+  const incoming =
+    previous && dimensionsMatch ? changed(shown.regions ?? [], previous.regions ?? []) : [];
   const marks = shown.comparison
     ? regionChanges(shown.comparison.regions, shown.regions ?? [])
     : [];
@@ -136,14 +148,23 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
   const focused = significant[Math.min(focusIndex, Math.max(0, significant.length - 1))];
   const focusRegion = oldPosition && focused?.old ? focused.old : focused?.region;
   const box = (r: Region) => ({
-    left: `${r.x / 9.6}%`,
-    top: `${r.y / 6}%`,
-    width: `${r.width / 9.6}%`,
-    height: `${r.height / 6}%`
+    left: `${(r.x / (shown.width ?? 960)) * 100}%`,
+    top: `${(r.y / (shown.height ?? 600)) * 100}%`,
+    width: `${(r.width / (shown.width ?? 960)) * 100}%`,
+    height: `${(r.height / (shown.height ?? 600)) * 100}%`
   });
   return (
     <figure
       className="frame"
+      style={{
+        aspectRatio: `${shown.width ?? 960} / ${shown.height ?? 600}`,
+        maxWidth:
+          (shown.width ?? 960) < (shown.height ?? 600)
+            ? `${Math.round((600 * (shown.width ?? 960)) / (shown.height ?? 600))}px`
+            : undefined,
+        marginInline: 'auto',
+        width: '100%'
+      }}
       data-checkpoint={shown.checkpoint}
       ref={figure}
       aria-busy={shown.checkpoint !== requested}
@@ -159,8 +180,8 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
           <canvas
             key={transition}
             className="frame-out"
-            width={960}
-            height={600}
+            width={previous.width ?? 960}
+            height={previous.height ?? 600}
             aria-hidden="true"
           />
         ) : (
@@ -183,10 +204,10 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
             className={`region region-${direction}`}
             aria-hidden="true"
             style={{
-              left: `${r.x / 9.6}%`,
-              top: `${r.y / 6}%`,
-              width: `${r.width / 9.6}%`,
-              height: `${r.height / 6}%`
+              left: `${(r.x / (shown.width ?? 960)) * 100}%`,
+              top: `${(r.y / (shown.height ?? 600)) * 100}%`,
+              width: `${(r.width / (shown.width ?? 960)) * 100}%`,
+              height: `${(r.height / (shown.height ?? 600)) * 100}%`
             }}
           >
             <img
@@ -194,8 +215,8 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
               src={(source as Frame).image}
               alt=""
               style={{
-                width: `${(960 / r.width) * 100}%`,
-                height: `${(600 / r.height) * 100}%`,
+                width: `${((source as Frame).width! / r.width) * 100}%`,
+                height: `${((source as Frame).height! / r.height) * 100}%`,
                 left: `${(-r.x / r.width) * 100}%`,
                 top: `${(-r.y / r.height) * 100}%`
               }}

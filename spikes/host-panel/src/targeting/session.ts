@@ -16,7 +16,12 @@ export class TargetSession {
     readonly notify: (value: Selection, crop?: string) => void,
     readonly unavailable: (message: string) => void
   ) {}
-  async start(url: string, secrets: readonly string[], headless = false) {
+  async start(
+    url: string,
+    secrets: readonly string[],
+    headless = false,
+    viewport = { width: 960, height: 600 }
+  ) {
     const parsed = new URL(url);
     if (parsed.protocol !== 'http:' || parsed.hostname !== '127.0.0.1')
       throw new Error('Targeting requires a local preview.');
@@ -28,7 +33,7 @@ export class TargetSession {
       headless,
       args: ['--disable-gpu']
     });
-    this.page = await this.browser.newPage({ viewport: { width: 960, height: 600 } });
+    this.page = await this.browser.newPage({ viewport });
     const page = this.page;
     await page.exposeBinding('__scrublineStopped', () => this.unavailable('Targeting stopped.'));
     await page.exposeBinding('__scrublineSelect', async (source, value: Selection) => {
