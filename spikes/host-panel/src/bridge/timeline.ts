@@ -57,6 +57,7 @@ export interface TimelineState {
   branches?: { id: string; name: string; checkpoint: string; base: string; directory: string }[];
   comparison?: { left?: string; right?: string; leftId: string; rightId: string; message?: string };
   layout?: import('../layout/types').LayoutMatrix;
+  investigation?: import('../investigation/types').Investigation;
   targeting?: {
     status: 'off' | 'on' | 'ready' | 'stale' | 'error';
     message?: string;
@@ -78,6 +79,8 @@ export type TimelineInbound =
       guard: import('../layout/types').LayoutGuard;
     }
   | { type: 'cancel-layout' }
+  | { type: 'investigate-css'; request: import('../investigation/types').InvestigationRequest }
+  | { type: 'cancel-investigation' }
   | { type: 'fork-checkpoint'; id: string }
   | { type: 'capture-branch'; branch: string }
   | { type: 'compare-branch'; branch: string }

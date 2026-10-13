@@ -1060,3 +1060,50 @@ test('breakpoint map shows sampled failures and unknowns with explicit evidence 
     page.getByText('Use distinct widths from 240 to 3840, up to 24 probes.')
   ).toBeVisible();
 });
+
+test('CSS investigation evidence reports its bounded claim without an apply control', async ({
+  page
+}) => {
+  await page.goto('/');
+  await page.evaluate(() =>
+    (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
+      status: 'ready',
+      unsaved: false,
+      rows: [
+        {
+          id: 'a',
+          createdAt: '2026-10-13T13:00:00Z',
+          changedPaths: [],
+          attribution: { kind: 'unattributed' }
+        }
+      ],
+      investigation: {
+        running: false,
+        message:
+          '1-minimal declaration set under this assertion and search. Not a unique root cause.',
+        transitions: [{ good: 'a', bad: 'b' }],
+        observations: [
+          { checkpoint: 'a', outcome: 'pass' },
+          { checkpoint: 'b', outcome: 'fail' }
+        ],
+        units: [
+          {
+            key: 'body',
+            path: 'site.css',
+            selector: 'body',
+            property: 'min-width',
+            before: '0px',
+            after: '900px'
+          }
+        ],
+        probes: 7,
+        minimal: true
+      }
+    })
+  );
+  await page.locator('.render-controls > summary').click();
+  await page.getByText('CSS culprit investigation', { exact: true }).click();
+  await expect(page.getByText(/1-minimal declaration set/)).toBeVisible();
+  await expect(page.getByText('site.css: body / min-width')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Apply culprit' })).toHaveCount(0);
+});

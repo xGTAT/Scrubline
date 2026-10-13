@@ -1,3 +1,4 @@
+import { investigate } from './investigation/run';
 import { sweep } from './layout/sweep';
 import { validateGuard, validateSweep } from './layout/types';
 import { repeatability } from './preview/repeatability';
@@ -47,6 +48,8 @@ export async function activate(context: vscode.ExtensionContext) {
   let alternatives: Alternatives | undefined;
   let layout: import('./layout/types').LayoutMatrix | undefined;
   let cancelLayout = false;
+  let cancelInvestigation = false;
+  let investigation: import('./investigation/types').Investigation | undefined;
   let layoutJob: Promise<unknown> | undefined;
   let selectiveTarget: import('./bridge/timeline').Checkpoint | undefined;
   let comparison: TimelineState['comparison'];
@@ -89,6 +92,7 @@ export async function activate(context: vscode.ExtensionContext) {
       ],
       selected,
       layout,
+      investigation,
       rendered,
       rendering,
       preview,
@@ -425,7 +429,10 @@ export async function activate(context: vscode.ExtensionContext) {
       }
     };
     const enqueuePreview = (id: string, interactive = false) => {
-      if (layoutJob) cancelLayout = true;
+      if (layoutJob) {
+        cancelLayout = true;
+        cancelInvestigation = true;
+      }
       const work = previewQueue.catch(() => {}).then(() => showPreview(id, interactive));
       previewQueue = work.then(
         () => {},
@@ -478,12 +485,64 @@ export async function activate(context: vscode.ExtensionContext) {
           }
           return;
         }
+        if (message.type === 'cancel-investigation') {
+          cancelInvestigation = true;
+          return;
+        }
+        if (message.type === 'investigate-css') {
+          if (
+            !vscode.workspace.isTrusted ||
+            !timeline ||
+            !runner ||
+            layoutJob ||
+            renderJob ||
+            refreshing
+          )
+            throw new Error('Wait for evidence work.');
+          cancelInvestigation = false;
+          const token = generation;
+          const active = timeline;
+          const config = { ...runner.config };
+          const work = previewQueue
+            .catch(() => {})
+            .then(() =>
+              investigate(
+                active.store,
+                config,
+                active.limits,
+                message.request,
+                () => cancelInvestigation || token !== generation || shutdownPreview,
+                (next) => {
+                  investigation = next;
+                  publish(state);
+                }
+              )
+            );
+          layoutJob = work;
+          previewQueue = work.then(
+            () => {},
+            () => {}
+          );
+          try {
+            await work;
+          } finally {
+            layoutJob = undefined;
+          }
+          return;
+        }
         if (message.type === 'cancel-layout') {
           cancelLayout = true;
           return;
         }
         if (message.type === 'layout-sweep') {
-          if (!timeline || !runner || layoutJob || renderJob || refreshing)
+          if (
+            !vscode.workspace.isTrusted ||
+            !timeline ||
+            !runner ||
+            layoutJob ||
+            renderJob ||
+            refreshing
+          )
             throw new Error('Wait for active evidence work.');
           validateGuard(message.guard);
           validateSweep(message.widths, message.checkpoints);

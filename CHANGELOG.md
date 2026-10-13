@@ -1,3 +1,10 @@
+## 0.8.2
+
+- Static CSS culprit investigation scans selected ancestry with an approved geometry assertion.
+- Value-only declaration candidates are tested outside the original workspace with a bounded subset budget.
+- Reports observed transitions and conditional single-removal minimality, not unique root cause or AI authorship.
+- Refuses structural/ambiguous CSS, unknown probes and mismatched pass/fail endpoints.
+
 ## 0.8.1
 
 - Opt-in breakpoint/history map for up to five checkpoints and 24 sampled probes.

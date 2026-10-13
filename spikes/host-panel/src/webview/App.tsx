@@ -1,3 +1,4 @@
+import { InvestigationView } from './InvestigationView';
 import { BreakpointMap } from './BreakpointMap';
 import React, { useEffect, useState, useRef } from 'react';
 import {
@@ -188,6 +189,11 @@ export const App: React.FC = () => {
             {state.rows.length})
           </summary>
           <p>Local screenshots. No sharing.</p>
+          <InvestigationView
+            rows={state.rows}
+            value={state.investigation}
+            send={(message) => bridge?.postMessage(message)}
+          />
           <BreakpointMap
             rows={state.rows}
             matrix={state.layout}
