@@ -99,6 +99,20 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (!selected && state.selected) setSelected(state.selected);
   }, [state.selected]);
+  const reviewArea = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (state.review) reviewArea.current?.scrollIntoView({ block: 'nearest' });
+  }, [state.review?.token]);
+  const openReview = (id: string) => {
+    clearTimeout(seekTimer.current);
+    seekTimer.current = undefined;
+    pendingSeek.current = undefined;
+    setPlaying(false);
+    setSelected(id);
+    bridge?.setState({ selected: id });
+    bridge?.postMessage({ type: 'review-checkpoint', id });
+    reviewArea.current?.scrollIntoView({ block: 'start' });
+  };
   const row = state.rows.find((r) => r.id === selected);
   const [playing, setPlaying] = useState(false);
   useEffect(() => {
@@ -147,7 +161,7 @@ export const App: React.FC = () => {
         {fullscreen ? (
           <button onClick={toggleFullscreen}>Exit fullscreen</button>
         ) : (
-          <span className="badge">Local</span>
+          <span aria-label="Storage location">Local</span>
         )}
       </header>
       <section className="status" aria-live="polite">
@@ -183,7 +197,7 @@ export const App: React.FC = () => {
       )}
 
       {state.rows.length > 0 && (
-        <details className="render-controls">
+        <details className="render-controls" name="scrubline-tools">
           <summary>
             Render history ({state.rows.filter((r) => state.rendered?.includes(r.id)).length}/
             {state.rows.length})
@@ -198,7 +212,7 @@ export const App: React.FC = () => {
             rows={state.rows}
             matrix={state.layout}
             send={(message) => bridge?.postMessage(message)}
-            choose={choose}
+            choose={openReview}
           />
           {state.rendering?.running ? (
             <>
@@ -496,16 +510,29 @@ export const App: React.FC = () => {
         </>
       )}
       {row && (
-        <section aria-label="Review">
-          <button
-            disabled={state.unsaved}
-            onClick={() => bridge?.postMessage({ type: 'review-checkpoint', id: row.id })}
-          >
+        <section aria-label="Review" ref={reviewArea}>
+          <button disabled={state.unsaved} onClick={() => openReview(row.id)}>
             <ShieldCheck size={14} strokeWidth={1.5} aria-hidden="true" />
             Review restore
           </button>
           <details>
             <summary>Changed paths ({row.changedPaths.length})</summary>
+            <button onClick={() => bridge?.postMessage({ type: 'pick-element', id: row.id })}>
+              Pick on page
+            </button>{' '}
+            <button
+              disabled={state.unsaved}
+              onClick={() =>
+                bridge?.postMessage({
+                  type: 'review-element',
+                  id: row.id,
+                  document: '',
+                  element: ''
+                })
+              }
+            >
+              Hidden element ID
+            </button>
             <ul className="paths">
               {row.changedPaths.map((p) => (
                 <li key={p}>
@@ -521,6 +548,89 @@ export const App: React.FC = () => {
           </details>
         </section>
       )}
+      {state.review && (
+        <section role="region" aria-label="Restore confirmation" className="restore-confirmation">
+          {state.review.conflicts.length > 0 ? (
+            <>
+              <span>Workspace drift. Restore blocked.</span>
+              <details>
+                <summary>Three-way conflicts</summary>
+                <ul className="paths">
+                  {state.review.conflicts.map((p) => (
+                    <li key={p}>
+                      <button
+                        title={p}
+                        onClick={() =>
+                          bridge?.postMessage({
+                            type: 'open-diff',
+                            id: state.review!.checkpoint,
+                            path: p
+                          })
+                        }
+                      >
+                        {p}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            </>
+          ) : (
+            <>
+              {state.rollback && (
+                <section aria-label="Rollback review">
+                  <p role="status">{state.rollback.message}</p>
+                  {state.rollback.changes?.map((u) => (
+                    <p key={u.path + u.key}>
+                      <code>
+                        {u.path}: {u.selector} / {u.property}
+                      </code>{' '}
+                      {u.after} → {u.before}
+                    </p>
+                  ))}
+                </section>
+              )}
+              <span>
+                Restore {state.review.paths.length} file{state.review.paths.length === 1 ? '' : 's'}
+                ?
+              </span>
+              <details>
+                <summary>Files</summary>
+                <ul className="paths">
+                  {state.review.paths.map((p) => (
+                    <li key={p} title={p}>
+                      {p}
+                      <button
+                        onClick={() =>
+                          bridge?.postMessage({
+                            type: 'open-diff',
+                            id: state.review!.checkpoint,
+                            path: p
+                          })
+                        }
+                      >
+                        Review exact diff
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+              <button
+                disabled={state.unsaved || state.review.paths.length === 0}
+                onClick={() =>
+                  bridge?.postMessage({
+                    type: 'apply-reviewed',
+                    id: state.review!.checkpoint,
+                    token: state.review!.token
+                  })
+                }
+              >
+                Confirm restore
+              </button>
+            </>
+          )}
+        </section>
+      )}
       {row && (
         <button onClick={() => bridge?.postMessage({ type: 'fork-checkpoint', id: row.id })}>
           <GitBranch size={14} strokeWidth={1.5} aria-hidden="true" />
@@ -528,12 +638,34 @@ export const App: React.FC = () => {
         </button>
       )}
       {!!state.branches?.length && (
-        <details>
+        <details className="alternatives-menu" name="scrubline-tools">
           <summary>Alternatives ({state.branches.length})</summary>
           <ul className="paths">
             {state.branches.map((b) => (
               <li key={b.id}>
-                <span title={b.base}>Fork: {b.name}</span>
+                <strong title={b.directory}>
+                  {b.name} · {b.id.slice(0, 8)}
+                </strong>
+                <small>
+                  Base {b.base.slice(0, 8)} · Saved {b.checkpoint.slice(0, 8)}
+                </small>
+                <button
+                  onClick={() => bridge?.postMessage({ type: 'pick-element', id: b.checkpoint })}
+                >
+                  Pick on page
+                </button>
+                <button
+                  onClick={() =>
+                    bridge?.postMessage({
+                      type: 'review-element',
+                      id: b.checkpoint,
+                      document: '',
+                      element: ''
+                    })
+                  }
+                >
+                  Hidden element ID
+                </button>
                 <button
                   title="Prototype: standalone static HTML navbar only. Framework components and shared CSS are not supported."
                   onClick={() =>
@@ -590,89 +722,6 @@ export const App: React.FC = () => {
           </div>
           {state.comparison.message && <small>{state.comparison.message}</small>}
         </details>
-      )}
-      {state.review && (
-        <section role="region" aria-label="Restore confirmation">
-          {state.review.conflicts.length > 0 ? (
-            <>
-              <span>Workspace drift. Restore blocked.</span>
-              <details>
-                <summary>Three-way conflicts</summary>
-                <ul className="paths">
-                  {state.review.conflicts.map((p) => (
-                    <li key={p}>
-                      <button
-                        title={p}
-                        onClick={() =>
-                          bridge?.postMessage({
-                            type: 'open-diff',
-                            id: state.review!.checkpoint,
-                            path: p
-                          })
-                        }
-                      >
-                        {p}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            </>
-          ) : (
-            <>
-              {state.rollback && (
-                <section aria-label="Rollback review">
-                  <p role="status">{state.rollback.message}</p>
-                  {state.rollback.changes?.map((u) => (
-                    <p key={u.path + u.key}>
-                      <code>
-                        {u.path}: {u.selector} / {u.property}
-                      </code>{' '}
-                      {u.after} → {u.before}
-                    </p>
-                  ))}
-                </section>
-              )}
-              <span>
-                Restore {state.review.paths.length} file{state.review.paths.length === 1 ? '' : 's'}
-                ?
-              </span>
-              <details>
-                <summary>Confirmed files</summary>
-                <ul className="paths">
-                  {state.review.paths.map((p) => (
-                    <li key={p} title={p}>
-                      {p}
-                      <button
-                        onClick={() =>
-                          bridge?.postMessage({
-                            type: 'open-diff',
-                            id: state.review!.checkpoint,
-                            path: p
-                          })
-                        }
-                      >
-                        Review exact diff
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-              <button
-                disabled={state.unsaved || state.review.paths.length === 0}
-                onClick={() =>
-                  bridge?.postMessage({
-                    type: 'apply-reviewed',
-                    id: state.review!.checkpoint,
-                    token: state.review!.token
-                  })
-                }
-              >
-                Confirm restore
-              </button>
-            </>
-          )}
-        </section>
       )}
       {state.preview?.status === 'ready' &&
         state.preview.url &&

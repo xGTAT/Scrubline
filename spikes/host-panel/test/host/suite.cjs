@@ -37,6 +37,26 @@ exports.run = async () => {
   assert.equal((await fs.stat(cached)).mtimeMs, stat.mtimeMs, 'cache hit does not regenerate PNG');
 
   const connection = await vscode.commands.executeCommand('scrubline.startMcp');
+  const mcpDocument = vscode.window.activeTextEditor.document.getText();
+  const definition = JSON.parse(mcpDocument).mcpServers.scrubline;
+  assert.ok(definition.args[0].endsWith('scrubline-mcp.cjs'), 'stable runtime filename');
+  assert.ok(
+    !definition.args[0].includes(extension.extensionPath),
+    'no versioned install dependency'
+  );
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+  const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
+  const client = new Client({ name: 'scrubline-host-check', version: '1.0.0' });
+  try {
+    await client.connect(new StdioClientTransport({ command: 'node', args: definition.args }));
+    assert.equal(client.getServerVersion().version, '0.8.7');
+    const tools = await client.listTools();
+    assert.ok(tools.tools.some((t) => t.name === 'list_checkpoints'));
+    const listed = await client.callTool({ name: 'list_checkpoints', arguments: {} });
+    assert.ok(JSON.parse(listed.content[0].text).checkpoints.length >= 2);
+  } finally {
+    await client.close();
+  }
   const config = JSON.parse(await fs.readFile(connection, 'utf8'));
   const response = await fetch(config.url, {
     method: 'POST',

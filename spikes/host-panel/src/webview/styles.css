@@ -366,31 +366,10 @@ summary {
   display: block;
   border-radius: 0;
 }
-.frame-base,
-.frame-out {
+.frame-base {
   width: 100%;
   height: 100%;
   object-fit: contain;
-}
-.frame-out {
-  position: absolute;
-  inset: 0;
-  animation: frame-out 200ms ease-out forwards;
-}
-.region {
-  position: absolute;
-  overflow: hidden;
-  pointer-events: none;
-}
-.region img {
-  position: absolute;
-  max-width: none;
-}
-.region-in {
-  animation: region-in 200ms ease-out both;
-}
-.region-out {
-  animation: region-out 200ms ease-out both;
 }
 .frame-caption {
   position: absolute;
@@ -400,34 +379,6 @@ summary {
   font-size: 10px;
   color: white;
   background: #000b;
-}
-@keyframes frame-out {
-  from {
-    opacity: 1;
-  }
-  to {
-    opacity: 0;
-  }
-}
-@keyframes region-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-@keyframes region-out {
-  from {
-    opacity: 1;
-    transform: translateY(0);
-  }
-  to {
-    opacity: 0;
-    transform: translateY(-8px);
-  }
 }
 .fullscreen {
   position: fixed;
@@ -455,12 +406,6 @@ summary {
   top: 0;
   z-index: 2;
   background: var(--vscode-editor-background, #181818);
-}
-@media (prefers-reduced-motion: reduce) {
-  .frame-out,
-  .region-out {
-    display: none;
-  }
 }
 
 /* Checkpoint details can cross the scroll threshold. Keep frame width stable. */
@@ -579,4 +524,45 @@ html {
 }
 .map-unknown {
   opacity: 0.65;
+}
+
+/* Keep tools compact, confirmations adjacent to their action, and all long ids contained. */
+.panel > * {
+  min-width: 0;
+}
+.render-controls,
+.alternatives-menu {
+  border: 1px solid var(--vscode-widget-border, #444);
+  border-radius: 8px;
+  padding: 10px;
+}
+.render-controls > summary,
+.alternatives-menu > summary {
+  cursor: pointer;
+}
+.alternatives-menu li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-block: 10px;
+}
+.alternatives-menu li > strong,
+.alternatives-menu li > small {
+  flex-basis: 100%;
+  overflow-wrap: anywhere;
+}
+.restore-confirmation {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  padding: 12px;
+  border: 1px solid var(--vscode-focusBorder, #669b86);
+  border-radius: 8px;
+  background: var(--vscode-editor-background, #181818);
+  max-height: 45vh;
+  overflow-y: auto;
+}
+.restore-confirmation button {
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }

@@ -541,9 +541,7 @@ test('v0.7.2 playback prerequisites explain zero renders and single checkpoint',
   expect(issues).toEqual([]);
 });
 
-test('v0.7.3 fullscreen retains decoded frames while seeking and animates changed regions', async ({
-  page
-}) => {
+test('v0.7.3 fullscreen retains decoded frames while seeking', async ({ page }) => {
   await page.setViewportSize({ width: 1000, height: 760 });
   await page.goto('/');
   await expect(page.getByText('No checkpoints yet')).toBeVisible();
@@ -732,7 +730,7 @@ for (const fullscreen of [false, true]) {
 }
 
 for (const fullscreen of [false, true]) {
-  test(`v0.7.8 fades at every scrub speed (${fullscreen})`, async ({ page }) => {
+  test(`v0.8.7 swaps decoded frames at every scrub speed (${fullscreen})`, async ({ page }) => {
     await page.goto('/');
     await expect(page.getByText('No checkpoints yet')).toBeVisible();
     await page.evaluate(() => {
@@ -783,40 +781,40 @@ for (const fullscreen of [false, true]) {
     await slider.dispatchEvent('pointerdown');
     await input('1');
     await frame('b');
-    await expect(page.locator('.frame-out')).toBeVisible();
-    await expect(page.locator('.region-in')).toBeVisible();
+    await expect(page.locator('.frame-out')).toHaveCount(0);
+    await expect(page.locator('.region-in')).toHaveCount(0);
     await page.waitForTimeout(250);
     await input('0');
     await frame('a');
-    await expect(page.locator('.frame-out')).toBeVisible();
-    // Continuous inputs must still animate, starting from the composited pixels.
+    await expect(page.locator('.frame-out')).toHaveCount(0);
+    // Continuous inputs keep one complete decoded image, with no ghost layers.
     await input('0.7');
     await input('1.5');
     await frame('c');
     await expect(page.locator('.frame')).toHaveAttribute('data-checkpoint', 'c');
-    await expect(page.locator('.frame-out')).toBeVisible();
-    await expect(page.locator('.region-in')).toBeVisible();
-    await expect(page.locator('canvas.frame-out')).toBeVisible();
+    await expect(page.locator('.frame-out')).toHaveCount(0);
+    await expect(page.locator('.region-in')).toHaveCount(0);
+    await expect(page.locator('canvas.frame-out')).toHaveCount(0);
     await slider.dispatchEvent('pointerup');
-    await expect(page.locator('.frame-out')).toBeVisible();
-    await expect(page.locator('.region-in')).toBeVisible();
+    await expect(page.locator('.frame-out')).toHaveCount(0);
+    await expect(page.locator('.region-in')).toHaveCount(0);
     await expect(slider).toHaveValue('2');
     await page.screenshot({
       path: `/downloads/scrubline-v078-${fullscreen ? 'fullscreen' : 'sidebar'}.png`
     });
     await expect(page.locator('.frame-out')).toHaveCount(0);
-    // A frame arriving after release must still animate, not be dropped.
+    // A frame arriving after release must still display, not be dropped.
     await slider.dispatchEvent('pointerdown');
     await input('1');
     await input('0');
     await slider.dispatchEvent('pointerup');
     await frame('a');
     await expect(page.locator('.frame')).toHaveAttribute('data-checkpoint', 'a');
-    await expect(page.locator('.frame-out')).toBeVisible();
+    await expect(page.locator('.frame-out')).toHaveCount(0);
   });
 }
 
-test('v0.7.9 interrupted region fade does not recrop a flattened composite', async ({ page }) => {
+test('v0.8.7 rapid seeks do not create ghost layers', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByText('No checkpoints yet')).toBeVisible();
   await page.evaluate(() => {
@@ -858,11 +856,13 @@ test('v0.7.9 interrupted region fade does not recrop a flattened composite', asy
     await expect(page.locator('.frame')).toHaveAttribute('data-checkpoint', id);
   };
   await seek('b');
-  await expect(page.locator('.region-out')).toBeVisible();
-  await seek('c');
-  await expect(page.locator('canvas.frame-out')).toBeVisible();
   await expect(page.locator('.region-out')).toHaveCount(0);
-  await expect(page.locator('.region-in')).toBeVisible();
+  await seek('c');
+  await expect(page.locator('canvas.frame-out')).toHaveCount(0);
+  await expect(page.locator('.region-out')).toHaveCount(0);
+  await expect(page.locator('.region-in')).toHaveCount(0);
+  // No screenshot or cropped-region blend is retained.
+  await expect(page.locator('canvas.frame-out')).toHaveCount(0);
 });
 
 test('focused change review is opt-in, single-area, navigable and reduced-motion aware', async ({
@@ -1054,6 +1054,8 @@ test('breakpoint map shows sampled failures and unknowns with explicit evidence 
   await page.getByRole('button', { name: 'map at 760: fail' }).click();
   await expect(page.getByText('760px: 140px horizontal overflow')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Open checkpoint for review' })).toBeVisible();
+  await page.getByRole('button', { name: 'Open checkpoint for review' }).click();
+  await expect(page.getByRole('button', { name: 'Review restore', exact: true })).toBeVisible();
   await page.getByLabel('Widths (CSS px)').fill('390,390');
   await page.getByRole('button', { name: 'Run approved assertion' }).click();
   await expect(
@@ -1102,7 +1104,8 @@ test('CSS investigation evidence reports its bounded claim without an apply cont
     })
   );
   await page.locator('.render-controls > summary').click();
-  await page.getByText('CSS culprit investigation', { exact: true }).click();
+  if (!(await page.getByText(/1-minimal declaration set/).isVisible()))
+    await page.getByText('CSS culprit investigation', { exact: true }).click();
   await expect(page.getByText(/1-minimal declaration set/)).toBeVisible();
   await expect(page.getByText('site.css: body / min-width')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Apply culprit' })).toHaveCount(0);
@@ -1145,4 +1148,50 @@ test('measured repair packet is text-only and copy is inside explicit review', a
   await expect(page.getByText('Assertion: no overflow', { exact: false })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Copy reviewed measured packet' })).toBeEnabled();
   await page.getByRole('button', { name: 'Copy reviewed measured packet' }).click();
+});
+
+test('restore confirmation stays in view with expanded alternatives and branches are distinct', async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 390, height: 740 });
+  await page.goto('/');
+  await page.evaluate(() => {
+    (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
+      status: 'ready',
+      unsaved: false,
+      rows: [
+        {
+          id: 'a',
+          createdAt: '2026-10-14T15:00:00Z',
+          changedPaths: ['index.html'],
+          attribution: { kind: 'unattributed' }
+        }
+      ],
+      selected: 'a',
+      review: { token: 'r', checkpoint: 'a', paths: ['index.html'], conflicts: [] },
+      branches: [
+        {
+          id: '11111111-fork',
+          name: 'Alternative',
+          base: 'base1111',
+          checkpoint: 'save1111',
+          directory: 'one'
+        },
+        {
+          id: '22222222-fork',
+          name: 'Alternative',
+          base: 'base2222',
+          checkpoint: 'save2222',
+          directory: 'two'
+        }
+      ]
+    });
+  });
+  await page.getByText('Alternatives (2)', { exact: true }).click();
+  await expect(page.getByText('Alternative · 11111111', { exact: true })).toBeVisible();
+  await expect(page.getByText('Alternative · 22222222', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Pick on page', exact: true })).toHaveCount(2);
+  const confirm = page.getByRole('button', { name: 'Confirm restore', exact: true });
+  await expect(confirm).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

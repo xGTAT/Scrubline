@@ -29,6 +29,19 @@
 
 # Changelog
 
+## 0.8.6
+
+- Interrupted scrub fades paint outgoing composites before the next browser paint and avoid duplicate region motion.
+- Breakpoint checkpoint actions now open actual restore review, with confirmation kept beside review and in view above expanded forks.
+- Plain HTML element cherry-pick restores a unique id subtree, inline style and exclusively id-scoped local CSS through exact diff, isolated validation and Undo. Ambiguous/shared/scripted ownership is refused.
+- Distinct fork/base/saved identities, mutually exclusive major tools and compact progressive disclosure reduce panel crowding. Includes unpushed 0.8.5 stable MCP runtime fix.
+
+## 0.8.5
+
+- MCP setup now uses a verified stable runtime in extension storage instead of a versioned install folder. The runtime refreshes on activation after upgrades.
+- Existing MCP entries pointing to deleted extension folders must be replaced once using Scrubline: Start Local MCP.
+- Added packaged stdio initialize/tool-list verification and runtime upgrade regression coverage.
+
 ## 0.8.4
 
 - Measured repair context extends manual-paste packets with source-bound CSS declaration spans, historical transition, assertion, complete counterfactual outcomes, and matching receipt when available.
@@ -101,3 +114,11 @@ Historical previews, reviewed restore/Undo and transaction recovery.
 ## 0.1.0
 
 Source snapshots, ignore/limit checks, watcher reconciliation and crash recovery.
+
+## 0.8.7
+
+- Remove screenshot crossfades and cropped-region motion at every navigation speed. Keep the last decoded frame until the requested image is ready, then swap once.
+- Mouse-based element picking from saved webpages, including uniquely source-mapped static elements without IDs. Typed IDs remain a secondary path for invisible elements.
+- Support exclusively owned simple tag/class/ID descendant CSS rules, preserving their cascade positions; refuse shared/ambiguous ownership.
+- Test no-ID navbar content/style apply and Undo against live web-lab source; add captured-image navigation regression.
+- Refresh README for current setup, MCP upgrade, review, Alternatives, element workflow and safety limits.

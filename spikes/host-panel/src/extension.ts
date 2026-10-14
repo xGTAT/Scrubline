@@ -1,3 +1,6 @@
+import { ElementPicker } from './branches/picker';
+import { elementCandidate } from './branches/element';
+import { installMcpRuntime } from './mcp/install';
 import { measuredPacket } from './targeting/measured';
 import { specificationKey } from './preview/spec';
 import { prepareRollback, applyRollback, type RollbackCandidate } from './investigation/rollback';
@@ -30,6 +33,10 @@ import type { HostInfo } from './host-info';
 import type { TimelineState, TimelineInbound } from './bridge/timeline';
 
 export async function activate(context: vscode.ExtensionContext) {
+  const mcpRuntime = await installMcpRuntime(
+    context.extensionPath,
+    context.globalStorageUri.fsPath
+  );
   const hostInfo: HostInfo = {
     vscodeVersion: vscode.version,
     appName: vscode.env.appName,
@@ -60,6 +67,8 @@ export async function activate(context: vscode.ExtensionContext) {
   let selectiveTarget: import('./bridge/timeline').Checkpoint | undefined;
   let comparison: TimelineState['comparison'];
   let mcpBridge: McpBridge | undefined;
+  const elementPicker = new ElementPicker();
+  let elementRunner: PreviewRunner | undefined;
   let targetSession: TargetSession | undefined;
   let targeting: TimelineState['targeting'] = { status: 'off' };
   let cache: RenderCache | undefined;
@@ -895,6 +904,95 @@ export async function activate(context: vscode.ExtensionContext) {
             await b.stop();
           }
         }
+        if (message.type === 'pick-element' && target) {
+          if (!runner || !vscode.workspace.isTrusted) throw new Error('Trusted preview required.');
+          await elementPicker.stop();
+          await elementRunner?.stop();
+          const pickedSource = target;
+          const pickedRunner = new PreviewRunner(
+            { ...runner.config, port: runner.config.port + 7 },
+            timeline.store
+          );
+          elementRunner = pickedRunner;
+          const result = await pickedRunner.historical(target, true, 'element-picker');
+          if (!result.url || !runner.config.browserPath) {
+            await pickedRunner.stop();
+            throw new Error('Interactive source preview unavailable.');
+          }
+          const route = new URL(result.url).pathname;
+          const document = route === '/' ? 'index.html' : route.replace(/^\//, '');
+          await elementPicker.start(
+            runner.config.browserPath,
+            result.url,
+            { width: runner.config.width ?? 960, height: runner.config.height ?? 600 },
+            async (indices) => {
+              try {
+                const current = timeline!.store.checkpoints.filter((c) => !c.branch).at(-1)!;
+                const candidate = await elementCandidate(
+                  timeline!.store,
+                  pickedSource,
+                  current,
+                  document,
+                  '',
+                  indices
+                );
+                review = await timeline!.exclusive(() =>
+                  restore!.review(candidate, current, state.unsaved)
+                );
+                selectiveTarget = candidate;
+                selected = pickedSource.id;
+                publish(state);
+                void vscode.window.showInformationMessage(
+                  'Element selected. Review exact files and confirm in Scrubline.'
+                );
+              } catch (e) {
+                void vscode.window.showErrorMessage(
+                  e instanceof Error ? e.message : 'Element selection failed.'
+                );
+              }
+            },
+            () => pickedRunner.stop()
+          );
+          context.subscriptions.push({
+            dispose: () => {
+              void elementPicker.stop();
+              void pickedRunner.stop();
+            }
+          });
+          return;
+        }
+        if (message.type === 'review-element' && target) {
+          const current = timeline.store.checkpoints.filter((c) => !c.branch).at(-1)!;
+          const document =
+            message.document ||
+            (await vscode.window.showQuickPick(
+              target.files.filter((f) => f.path.endsWith('.html')).map((f) => f.path),
+              { placeHolder: 'Plain HTML document' }
+            ));
+          if (!document) return;
+          const element =
+            message.element ||
+            (await vscode.window.showInputBox({
+              prompt:
+                'Unique element id (without #). Includes content, inline styles and exclusive #id CSS.',
+              placeHolder: 'hero'
+            }));
+          if (!element) return;
+          const candidate = await elementCandidate(
+            timeline.store,
+            target,
+            current,
+            document,
+            element
+          );
+          review = await timeline.exclusive(() =>
+            restore!.review(candidate, current, state.unsaved)
+          );
+          selectiveTarget = candidate;
+          selected = target.id;
+          publish(state);
+          return;
+        }
         if (
           (message.type === 'review-selective' || message.type === 'review-navbar') &&
           target &&
@@ -997,6 +1095,7 @@ export async function activate(context: vscode.ExtensionContext) {
           }
         }
         if (message.type === 'review-checkpoint' && target) {
+          selected = target.id;
           selectiveTarget = undefined;
           await timeline.exclusive(async () => {
             review = await restore!.review(
@@ -1206,11 +1305,7 @@ export async function activate(context: vscode.ExtensionContext) {
             mcpServers: {
               scrubline: {
                 command: 'node',
-                args: [
-                  path.join(context.extensionPath, 'dist', 'mcp.js'),
-                  '--connection',
-                  connection
-                ]
+                args: [mcpRuntime, '--connection', connection]
               }
             }
           },

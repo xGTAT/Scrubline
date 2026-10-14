@@ -89,6 +89,8 @@ export type TimelineInbound =
   | { type: 'fork-checkpoint'; id: string }
   | { type: 'capture-branch'; branch: string }
   | { type: 'compare-branch'; branch: string }
+  | { type: 'pick-element'; id: string }
+  | { type: 'review-element'; id: string; document: string; element: string }
   | { type: 'review-navbar'; id: string; document: string }
   | { type: 'review-selective'; id: string; paths: string[] }
   | { type: 'start-targeting' }

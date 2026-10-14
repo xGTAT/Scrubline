@@ -4,7 +4,7 @@ import { z } from 'zod';
 import * as fs from 'node:fs/promises';
 export function createMcpServer(call: (name: string, checkpoint?: string) => Promise<unknown>) {
   const server = new McpServer(
-    { name: 'scrubline', version: '0.3.0' },
+    { name: 'scrubline', version: '0.8.7' },
     { maxToolInputElements: 8 }
   );
   server.registerTool(

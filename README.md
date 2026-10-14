@@ -1,67 +1,95 @@
 # Scrubline
 
-A source timeline for agent-edited frontends. v0.7 captures disk states, renders isolated previews, reviews restore/Undo, and builds redacted manual-paste context from visual selections.
+A local source timeline for agent-edited frontends. Capture disk checkpoints, inspect rendered history, review changes, restore selected files or eligible static HTML elements, and Undo without guessing which source produced a screenshot.
 
-## What works
+## Install 0.8.7
 
-- Baseline capture, save/watcher events, bounded debounce and hash reconciliation in one trusted local folder.
-- SHA-256 blobs and versioned manifests outside the repository; restart recovery and isolated byte reconstruction.
-- .gitignore and built-in exclusions, visible limits/errors, unsaved-buffer label.
-- Real timeline, changed paths, honest Unattributed or exact-content hook match.
+The unsigned VSIX is in [`releases/scrubline-panel-0.8.7.vsix`](releases/scrubline-panel-0.8.7.vsix). In VS Code or Antigravity, run **Extensions: Install from VSIX**, choose the file, then reload the IDE. Open a trusted, single-folder workspace and run **Scrubline: Open Timeline Panel**.
 
-## Preview and restore
+0.8.7 includes the stable MCP runtime update from 0.8.5, review/menu fixes from 0.8.6, mouse element picking, and decoded-frame navigation without screenshot crossfades. Slow scrubbing, Prev, Next and Play all use the same renderer. The last complete image stays visible while the requested image loads; stale decode results cannot replace newer requests. Screenshot transitions are intentionally instantaneous after decoding, avoiding overlapping text and moving crops. Optional change highlights remain available.
 
-Configure `scrubline.previewCommand` (workspace-relative command, `{port}` placeholder) and `scrubline.previewPort`. Optional `scrubline.chromiumPath` points to installed Chromium for screenshots, with no runtime browser download. Use Render history to prepare local screenshots, then scrub or Play without restarting preview commands. Select a missing frame to render it on demand. Open preview is explicit and interactive. Folder-scoped preview settings refresh without restarting the extension. Then Review restore and confirm the exact paths. Drift or unsaved buffers block restore. Undo refuses later edits. See [M2 notes](docs/m2-preview-restore.md) for command/isolation and recovery limits.
+## Capture and preview
 
-## Visual context
+- Baseline and disk-save checkpoints, bounded debounce, hash reconciliation, `.gitignore` and built-in exclusions.
+- SHA-256 blobs and versioned manifests outside the repository, restart recovery, changed paths and explicit unsaved-buffer warnings.
+- Attribution is Unattributed unless an exact-content hook record matches. A checkpoint is not proof of who authored an edit.
 
-Select a rendered checkpoint, then **Select element** to open an opt-in Chromium targeting window. Review the redacted packet before copying it for manual paste. Stale selectors are refused, not retargeted. Crops are sanitized clones, not exact page pixels. See [M3 notes](docs/m3-targeting-context.md) for redaction limits and setup.
+Configure workspace settings:
 
-## Local MCP
+```json
+{
+  "scrubline.previewCommand": "node server.cjs --port {port}",
+  "scrubline.previewPort": 4100,
+  "scrubline.chromiumPath": "/path/to/installed/chromium",
+  "scrubline.previewRoute": "/navbar.html",
+  "scrubline.previewWidth": 960,
+  "scrubline.previewHeight": 600,
+  "scrubline.postApplyCommand": "npm test"
+}
+```
 
-**Scrubline: Start Local MCP** opens client configuration for two tools: list checkpoints and request restore review. MCP never applies files; confirm exact paths in the Scrubline panel. See [M3 notes](docs/m3-targeting-context.md) for setup and local-access limits.
+Use a command appropriate for your project. `{port}` and the `PORT` environment variable carry the selected port. Optional `scrubline.previewReadySelector` waits for a unique visible element before capture. No browser is downloaded at runtime.
 
-## Alternatives
+**Render history** prepares local screenshots. Scrub, Prev, Next or Play through cached history; missing frames render on demand. **Open preview** explicitly opens interactive source. Render receipts bind evidence to source, route, viewport and browser/runtime. Two fresh probes can check repeatability, not freeze dependencies, backends or time.
 
-Fork a checkpoint into an isolated folder, capture edits, compare rendered alternatives, then choose exact files to review. Three-way overlap is blocked. A narrow standalone static navbar prototype is included; shared CSS and embedded/framework ownership are refused. A configured build/test command must pass before and after selective apply. See [M4 notes](docs/m4-branches-selective.md).
+Preview commands run in disposable historical folders, but are not OS security sandboxes. Excluded dependencies and external state are not captured. Only run trusted commands. See [preview and restore notes](docs/m2-preview-restore.md).
 
-## What does not work yet
+## Review, restore and Undo
 
-Replay export and general hunk/framework element apply. Preview commands requiring excluded dependencies may not reproduce; labelled screenshots are the fallback. Not lossless capture of every transient edit. Antigravity runtime needs a live check; Windows FS results need Windows CI verification.
+**Review restore** shows exact paths before confirmation. Breakpoint history's **Open checkpoint for review** opens that same review. Unsaved buffers, source drift, unsafe paths and concurrent changes block writes. Undo refuses intervening edits.
+
+Confirmation lives directly under Review, before forks, and is viewport-bounded. Render history and Alternatives use mutually exclusive sections to reduce panel crowding. Tools are disclosed when needed rather than removed.
+
+## Pick an element from a saved webpage
+
+1. Select a saved checkpoint, open **Changed paths**, and choose **Pick on page**. Each saved Alternative also offers **Pick on page**.
+2. A local Chromium window opens the saved webpage at the configured preview route. Hover to see the target boundary and click the element to keep. Escape stops picking.
+3. Return to Scrubline, inspect **Files** and the exact diff, then **Confirm restore**. A configured build/test command must pass before and after selective apply. Undo restores the previous bytes.
+
+This first version supports static HTML source, including elements with no ID. The clicked DOM path identifies the saved source node; tag, stable attributes and ancestor identity must map uniquely into current source. Unrelated current markup stays current. Content and inline styles travel with the subtree. Simple tag/class/ID descendant rules in linked local CSS travel only when every matched element belongs to that subtree. Shared rules must be unchanged, and owned selector order must match; replacements stay at their original CSS positions.
+
+Use the secondary **Hidden element ID** path for source elements you cannot point to on the page. Choose the tracked HTML file and a unique ID without `#`.
+
+Safety limits: ambiguous/missing identity, duplicate IDs, script-bearing pages, active selected markup, framework-generated DOM, embedded stylesheets, stylesheet-list changes, complex selectors, CSS at-rules, shared custom properties/URLs and differing shared CSS are refused. Inherited shared styles remain current. This is not arbitrary React/Vue/component rollback. The older standalone navbar prototype and whole-file review remain available. See [Alternatives notes](docs/m4-branches-selective.md).
+
+## Alternatives and layout investigation
+
+Fork a saved checkpoint into a separate folder, capture edits, compare rendered results, and choose files or an eligible element for review. Branch/base/saved identities distinguish same-name alternatives. Fork folders are not security sandboxes; dependencies and backend state are not cloned.
+
+Render history contains opt-in breakpoint/history sampling, bounded static-CSS culprit investigation and guarded inverse rollback. Pass/fail/unknown results describe the approved assertion at sampled widths, not universal correctness. Measured repair packets are reviewed text for manual paste, not automatic repairs. General hunk/framework apply and replay export are not shipped.
+
+## Visual context and Local MCP
+
+**Select element** is the separate visual-context workflow: point at the rendered page, review a redacted packet, then copy it for manual paste. Sanitized crops are not exact page pixels. Stale selectors are refused. See [targeting notes](docs/m3-targeting-context.md).
+
+**Scrubline: Start Local MCP** generates client configuration. MCP can list checkpoints and request restore review, never apply files. The runtime is copied to stable global storage on activation, so extension upgrades do not invalidate a versioned extension-directory path. If your existing client configuration points inside an old extension version, replace it once with the newly generated configuration and restart that MCP client.
+
+## Storage and limits
+
+History is bound to the canonical folder path; moving a folder starts a new binding. Old unbound history is not silently assigned to a new workspace. Retention keeps checkpoints until explicit deletion. **Compact unused history data** removes orphan blobs; **Delete workspace history** erases the bound store after confirmation. Additional exclusions use `scrubline.ignoreAdditions`. No telemetry. Private/UNLICENSED; marketplace publication and license choice remain the owner's decision.
 
 ## Build and test
 
 ```bash
 cd spikes/host-panel
 npm ci
-npm run build
 npm run typecheck
 npm run lint
 npm run format
-npm test
-npm run check:nomock
 npx playwright install chromium
+npm test
+npm run build
+npm run check:nomock
 npm run test:ui
-npm run test:host # downloads VS Code, requires a display (xvfb-run on Linux)
+npm run test:host
+npm run package
+node scripts/verify-packaged-mcp.cjs scrubline-panel-0.8.7.vsix
 ```
 
-Windows CI runs these checks. Source and limits: [M1 notes](docs/m1-source-timeline.md). Screenshots are supplied with each milestone patch; GitHub web-editor delivery cannot upload the PNGs.
+The extension-host test downloads VS Code and needs a display (`xvfb-run` on Linux). Windows CI runs the portable checks. 0.8.7 was also tested in Antigravity on Linux against `xGTAT/web-lab` source `299a8e6cfc2b810d8a4f4ba2793c100bee8bb7a5`: no-ID navbar mouse selection, content/CSS restore with newer footer retained, Undo, slow navigation, rapid seeks, and Play. Checked-in navbar image fixtures support the ghost-layer regression; they are test data, not an external-state guarantee.
 
-## Layout
-
-- spikes/host-panel: extension host, React panel, store/capture and tests
-- fixtures/sample-web: test-only two-state site
-- .agents: sanitised hook recorder; [configuration](docs/hooks.md)
-- docs: limitations and verification
-
-## Release 0.7.0
-
-Install the unsigned VSIX locally. Run Scrubline: Open Panel in a trusted single-folder workspace. Configure previewCommand and optional chromiumPath in Settings for rendered history. [Release gates and Human checks](docs/v07-release.md).
-
-History is bound to the canonical folder path. Older unbound history stays on disk and is not automatically reassigned to the current folder; v0.7 starts new bound history. Scrubline Output records the notice. Renaming/moving a folder starts a new binding.
-
-Shipped-build dark/light/high-contrast screenshots are included in the release evidence patch; binary publication through GitHub upload is unavailable in this session.
-
-Retention keeps every checkpoint until explicit deletion. Run Compact unused history data to remove orphan blobs, or Delete workspace history to erase this workspace's store after confirmation. Additional exclusions: scrubline.ignoreAdditions. No telemetry; no runtime browser download.
-
-Replay sharing is on hold. M5 files are an inert prototype, not a shipped feature. The release is private/UNLICENSED; Open VSX publication and licence selection remain the owner's decision.
+- `spikes/host-panel`: extension, panel, storage and tests
+- `fixtures`: test sites and captured regression images
+- `.agents`: sanitized hook recorder; [configuration](docs/hooks.md)
+- `docs`: implementation limits and milestone notes
+- `releases`: locally installable VSIX builds
