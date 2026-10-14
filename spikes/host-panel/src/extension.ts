@@ -1,3 +1,4 @@
+import { replaceActivation } from './lifecycle';
 import { ElementPicker } from './branches/picker';
 import { elementCandidate } from './branches/element';
 import { installMcpRuntime } from './mcp/install';
@@ -33,6 +34,23 @@ import type { HostInfo } from './host-info';
 import type { TimelineState, TimelineInbound } from './bridge/timeline';
 
 export async function activate(context: vscode.ExtensionContext) {
+  let closing: Promise<void> | undefined;
+  const close = () =>
+    (closing ??= (async () => {
+      await cleanup?.();
+      for (const d of context.subscriptions.splice(0))
+        try {
+          d.dispose();
+        } catch {
+          /* Already disposed by host. */
+        }
+    })());
+  const unregister = await replaceActivation(close);
+  shutdown = async () => {
+    await close();
+    unregister();
+  };
+
   const mcpRuntime = await installMcpRuntime(
     context.extensionPath,
     context.globalStorageUri.fsPath
@@ -157,7 +175,10 @@ export async function activate(context: vscode.ExtensionContext) {
     );
     timeline = new Timeline(
       root,
-      new HistoryStore(storeRoot, config.get<number>('quotaMB', 512) * 1024 * 1024),
+      new HistoryStore(storeRoot, config.get<number>('quotaMB', 512) * 1024 * 1024, {
+        identity: vscode.env.sessionId,
+        close
+      }),
       publish,
       {
         maxFiles: config.get<number>('maxFiles', 10000),
@@ -1403,17 +1424,19 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
     vscode.workspace.onDidGrantWorkspaceTrust(() => void start())
   );
-  await start();
-  shutdown = async () => {
+  const cleanup = async () => {
     shutdownPreview = true;
     cancelRender = true;
     await timeline?.dispose();
     await renderJob?.catch(() => {});
     await previewQueue.catch(() => {});
     await targetSession?.stop();
+    await elementPicker.stop();
+    await elementRunner?.stop();
     await mcpBridge?.stop();
     await runner?.stop();
   };
+  await start();
   return {
     getTimeline: () => state,
     getStoreRoot: () => timeline?.store.root,

@@ -9,7 +9,12 @@ exports.run = async () => {
   assert.equal(api.getTimeline().status, 'ready');
   const root = vscode.workspace.workspaceFolders[0].uri.fsPath;
   await fs.writeFile(path.join(root, 'host-edit.txt'), 'saved in extension host\r\n');
-  await new Promise((resolve) => setTimeout(resolve, 1200));
+  const watchDeadline = Date.now() + 10000;
+  while (
+    !api.getTimeline().rows.at(-1)?.changedPaths.includes('host-edit.txt') &&
+    Date.now() < watchDeadline
+  )
+    await new Promise((resolve) => setTimeout(resolve, 100));
   assert.ok(
     api.getTimeline().rows.at(-1).changedPaths.includes('host-edit.txt'),
     'watcher captured save'
@@ -49,7 +54,7 @@ exports.run = async () => {
   const client = new Client({ name: 'scrubline-host-check', version: '1.0.0' });
   try {
     await client.connect(new StdioClientTransport({ command: 'node', args: definition.args }));
-    assert.equal(client.getServerVersion().version, '0.8.7');
+    assert.equal(client.getServerVersion().version, '0.8.8');
     const tools = await client.listTools();
     assert.ok(tools.tools.some((t) => t.name === 'list_checkpoints'));
     const listed = await client.callTool({ name: 'list_checkpoints', arguments: {} });
@@ -98,7 +103,17 @@ exports.run = async () => {
     undefined,
     'config changed invalidates render key without reload'
   );
-  const job = api.prepareRenders();
+  // Configuration refresh is asynchronous in native IDE hosts. Wait for the
+  // render request to be accepted before testing cancellation of that request.
+  let job;
+  const renderDeadline = Date.now() + 10000;
+  do {
+    job = api.prepareRenders();
+    if (api.getTimeline().rendering?.running) break;
+    await job;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  } while (Date.now() < renderDeadline);
+  assert.equal(api.getTimeline().rendering?.running, true, 'render request started');
   api.cancelRenders();
   await job;
   assert.equal(
@@ -122,6 +137,34 @@ exports.run = async () => {
   assert.ok(commands.includes('scrubline.compactHistory'));
   assert.ok(!commands.includes('scrubline.exportReplay'), 'replay deferred');
   await vscode.commands.executeCommand('scrubline.openPanel');
+  // Simulate loading a replacement bundle without restarting this IDE host.
+  const replacement = require(path.join(extension.extensionPath, 'dist', 'extension.js'));
+  const subscriptions = [];
+  const storageUri = vscode.Uri.file(path.dirname(path.dirname(api.getStoreRoot())));
+  const nextApi = await replacement.activate({
+    extensionPath: extension.extensionPath,
+    extensionUri: extension.extensionUri,
+    storageUri,
+    globalStorageUri: vscode.Uri.file(
+      path.join(path.dirname(storageUri.fsPath), 'global-replacement')
+    ),
+    subscriptions
+  });
+  assert.equal(
+    nextApi.getTimeline().status,
+    'ready',
+    'replacement activation owns existing history without IDE restart'
+  );
+  assert.equal(
+    nextApi.getStoreRoot(),
+    api.getStoreRoot(),
+    'history binding preserved across replacement'
+  );
+  await fs.writeFile(path.join(root, 'after-upgrade.txt'), 'captured after hot upgrade');
+  await nextApi.capture();
+  assert.ok(nextApi.getTimeline().rows.at(-1).changedPaths.includes('after-upgrade.txt'));
+  await vscode.commands.executeCommand('scrubline.openPanel');
+  await replacement.deactivate();
   console.log(
     'HOST TEST PASS: activation, storage, edit, timeline, MCP review-only, restore/Undo, panel command'
   );

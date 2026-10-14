@@ -122,3 +122,11 @@ Source snapshots, ignore/limit checks, watcher reconciliation and crash recovery
 - Support exclusively owned simple tag/class/ID descendant CSS rules, preserving their cascade positions; refuse shared/ambiguous ownership.
 - Test no-ID navbar content/style apply and Undo against live web-lab source; add captured-image navigation regression.
 - Refresh README for current setup, MCP upgrade, review, Alternatives, element workflow and safety limits.
+
+## 0.8.8
+
+- Restore smooth single-state veil transitions: fade out, swap the decoded screenshot only under opaque cover, fade in. Coalesce rapid requests and honor reduced motion.
+- Resolve clicked source nodes directly; allow stable repeated-element positions when page identity structure is unchanged, with specific drift refusals.
+- Parse CSS selectors, preserve unchanged shared tokens and support exclusive rules under media/supports/container/layer conditions without changing cascade positions.
+- Drain and dispose prior activations, with same-IDE-session writer handoff and genuine cross-window exclusion. Older installed runtimes may need one window reload to adopt the protocol.
+- Add rich web-lab index fixture, responsive picker, fade opacity, hot activation and writer-handoff regressions.

@@ -45,7 +45,10 @@ const path = require('node:path');
         '--no-sandbox',
         '--disable-gpu'
       ],
-      version: '1.96.4'
+      version: '1.96.4',
+      ...(process.env.SCRUBLINE_TEST_EDITOR
+        ? { vscodeExecutablePath: process.env.SCRUBLINE_TEST_EDITOR }
+        : {})
     });
   } finally {
     await fs.rm(temp, { recursive: true, force: true });

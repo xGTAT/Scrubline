@@ -566,3 +566,12 @@ html {
   max-width: 100%;
   overflow-wrap: anywhere;
 }
+
+.frame-veil {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 2;
+  background: var(--vscode-editor-background, #181818);
+}

@@ -21,6 +21,71 @@ export interface Frame {
 export function FrameView({ frame, requested }: { frame?: Frame; requested?: string }) {
   const [shown, setShown] = useState<Frame>();
   const ticket = useRef(0);
+  const shownRef = useRef<Frame>();
+  const pending = useRef<Frame>();
+  const requestedRef = useRef(requested);
+  requestedRef.current = requested;
+  const veil = useRef<HTMLDivElement>(null);
+  const motion = useRef<Animation>();
+  const swapping = useRef(false);
+  useEffect(
+    () => () => {
+      motion.current?.cancel();
+    },
+    []
+  );
+  const display = (decoded: Frame) => {
+    if (decoded.checkpoint !== requestedRef.current) return;
+    pending.current = decoded;
+    if (swapping.current) return;
+    const commit = () => {
+      const next = pending.current;
+      pending.current = undefined;
+      if (next && next.checkpoint === requestedRef.current) {
+        shownRef.current = next;
+        setShown(next);
+        pending.current = undefined;
+      }
+    };
+    if (
+      !shownRef.current ||
+      matchMedia('(prefers-reduced-motion: reduce)').matches ||
+      !veil.current
+    ) {
+      commit();
+      return;
+    }
+    swapping.current = true;
+    motion.current = veil.current.animate([{ opacity: 0 }, { opacity: 1 }], {
+      duration: 90,
+      easing: 'ease-out',
+      fill: 'forwards'
+    });
+    void motion.current.finished
+      .then(() => {
+        commit();
+        // Keep the veil fully opaque through the React commit and browser paint.
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            motion.current?.cancel();
+            motion.current = veil.current?.animate([{ opacity: 1 }, { opacity: 0 }], {
+              duration: 110,
+              easing: 'ease-in',
+              fill: 'forwards'
+            });
+            void motion.current?.finished
+              .then(() => {
+                motion.current?.cancel();
+                swapping.current = false;
+                const next = pending.current;
+                if (next) display(next);
+              })
+              .catch(() => {});
+          })
+        );
+      })
+      .catch(() => {});
+  };
   const figure = useRef<HTMLElement>(null);
   const [highlights, setHighlights] = useState(false);
   const [focusIndex, setFocusIndex] = useState(0);
@@ -40,7 +105,7 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
       .then(() => {
         if (token !== ticket.current) return;
         const decoded = { ...frame, width: image.naturalWidth, height: image.naturalHeight };
-        setShown(decoded);
+        display(decoded);
       })
       .catch(() => {});
     return () => {
@@ -82,6 +147,7 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
         src={shown.image}
         alt="Checkpoint screenshot"
       />
+      <div ref={veil} className="frame-veil" aria-hidden="true" />
       {highlights && shown.checkpoint === requested && focusRegion && (
         <span
           aria-hidden="true"

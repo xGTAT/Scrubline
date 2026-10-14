@@ -869,6 +869,7 @@ test('focused change review is opt-in, single-area, navigable and reduced-motion
   page
 }) => {
   await page.goto('/');
+  await expect(page.getByText('No checkpoints yet')).toBeVisible();
   await page.evaluate(() => {
     const image =
       'data:image/svg+xml,' +
@@ -936,6 +937,7 @@ test('alternative inspection keeps review controls and returns to the main timel
   page
 }) => {
   await page.goto('/');
+  await expect(page.getByText('No checkpoints yet')).toBeVisible();
   await page.evaluate(() => {
     const rows = ['a', 'b', 'alt'].map((id) => ({
       id,
@@ -967,6 +969,7 @@ test('portrait evidence uses decoded dimensions and shows a bounded render recei
   page
 }) => {
   await page.goto('/');
+  await expect(page.getByText('No checkpoints yet')).toBeVisible();
   await page.evaluate(() => {
     const image =
       'data:image/svg+xml,' +
@@ -1011,6 +1014,7 @@ test('breakpoint map shows sampled failures and unknowns with explicit evidence 
   page
 }) => {
   await page.goto('/');
+  await expect(page.getByText('No checkpoints yet')).toBeVisible();
   await page.evaluate(() => {
     (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
       status: 'ready',
@@ -1067,6 +1071,7 @@ test('CSS investigation evidence reports its bounded claim without an apply cont
   page
 }) => {
   await page.goto('/');
+  await expect(page.getByText('No checkpoints yet')).toBeVisible();
   await page.evaluate(() =>
     (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
       status: 'ready',
@@ -1119,6 +1124,7 @@ test('CSS investigation evidence reports its bounded claim without an apply cont
 
 test('measured repair packet is text-only and copy is inside explicit review', async ({ page }) => {
   await page.goto('/');
+  await expect(page.getByText('No checkpoints yet')).toBeVisible();
   await page.evaluate(() =>
     window.dispatchEvent(
       new MessageEvent('message', {
@@ -1155,6 +1161,7 @@ test('restore confirmation stays in view with expanded alternatives and branches
 }) => {
   await page.setViewportSize({ width: 390, height: 740 });
   await page.goto('/');
+  await expect(page.getByText('No checkpoints yet')).toBeVisible();
   await page.evaluate(() => {
     (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
       status: 'ready',

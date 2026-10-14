@@ -105,7 +105,25 @@ export class HistoryStore {
     const guard = path.join(this.root, 'writer.guard');
     const token = randomUUID();
     const server = net.createServer((socket) => {
-      socket.end(token);
+      socket.write(token + '\n');
+      socket.setTimeout(1000, () => socket.end());
+      let request = '';
+      socket.on('data', (chunk) => {
+        request += chunk.toString();
+        if (request.length > 4096) {
+          socket.destroy();
+          return;
+        }
+        if (!request.includes('\n')) return;
+        try {
+          const message = JSON.parse(request.trim());
+          if (this.owner && message.token === token && message.owner === this.owner.identity) {
+            void this.owner.close().finally(() => socket.end());
+          } else socket.end();
+        } catch {
+          socket.end();
+        }
+      });
     });
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
@@ -138,6 +156,23 @@ export class HistoryStore {
             const old = JSON.parse(raw);
             if (!Number.isInteger(old.pid) || typeof old.token !== 'string')
               throw new Error('Invalid storage lock.');
+            if (this.owner && old.owner === this.owner.identity && Number.isInteger(old.port)) {
+              await new Promise<void>((resolve) => {
+                const socket = net.connect(old.port, '127.0.0.1');
+                const done = () => {
+                  socket.destroy();
+                  resolve();
+                };
+                socket.setTimeout(1000, done);
+                socket.on('error', done);
+                socket.on('close', done);
+                socket.on('connect', () =>
+                  socket.write(
+                    JSON.stringify({ token: old.token, owner: this.owner!.identity }) + '\n'
+                  )
+                );
+              });
+            }
             let alive: boolean;
             if (Number.isInteger(old.port) && old.port > 0 && old.port <= 65535) {
               alive = await new Promise<boolean>((resolve) => {
@@ -150,10 +185,10 @@ export class HistoryStore {
                 socket.setTimeout(300, () => finish(true));
                 socket.on('data', (data) => {
                   result += data.toString();
-                  if (result === old.token) finish(true);
+                  if (result.trim() === old.token) finish(true);
                 });
                 socket.on('error', (e: NodeJS.ErrnoException) => finish(e.code !== 'ECONNREFUSED'));
-                socket.on('end', () => finish(result === old.token));
+                socket.on('end', () => finish(result.trim() === old.token));
               });
             } else {
               try {
@@ -170,9 +205,13 @@ export class HistoryStore {
             }
             await fs.rm(lock, { force: true });
           }
-          await fs.writeFile(lock, JSON.stringify({ pid: process.pid, token, port }), {
-            flag: 'wx'
-          });
+          await fs.writeFile(
+            lock,
+            JSON.stringify({ pid: process.pid, token, port, owner: this.owner?.identity }),
+            {
+              flag: 'wx'
+            }
+          );
           this.lockToken = token;
           this.lockServer = server;
           return;
@@ -204,7 +243,8 @@ export class HistoryStore {
   }
   constructor(
     readonly root: string,
-    readonly quotaBytes = 512 * 1024 * 1024
+    readonly quotaBytes = 512 * 1024 * 1024,
+    readonly owner?: { identity: string; close: () => Promise<void> }
   ) {}
   async open() {
     for (const dir of ['blobs', 'manifests'])

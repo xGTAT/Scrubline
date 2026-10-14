@@ -2,11 +2,17 @@
 
 A local source timeline for agent-edited frontends. Capture disk checkpoints, inspect rendered history, review changes, restore selected files or eligible static HTML elements, and Undo without guessing which source produced a screenshot.
 
-## Install 0.8.7
+## Install 0.8.8
 
-The unsigned VSIX is in [`releases/scrubline-panel-0.8.7.vsix`](releases/scrubline-panel-0.8.7.vsix). In VS Code or Antigravity, run **Extensions: Install from VSIX**, choose the file, then reload the IDE. Open a trusted, single-folder workspace and run **Scrubline: Open Timeline Panel**.
+The unsigned VSIX is in [`releases/scrubline-panel-0.8.8.vsix`](releases/scrubline-panel-0.8.8.vsix). In VS Code or Antigravity, run **Extensions: Install from VSIX**, choose the file, and follow any IDE reload prompt. Open a trusted, single-folder workspace and run **Scrubline: Open Timeline Panel**.
 
-0.8.7 includes the stable MCP runtime update from 0.8.5, review/menu fixes from 0.8.6, mouse element picking, and decoded-frame navigation without screenshot crossfades. Slow scrubbing, Prev, Next and Play all use the same renderer. The last complete image stays visible while the requested image loads; stale decode results cannot replace newer requests. Screenshot transitions are intentionally instantaneous after decoding, avoiding overlapping text and moving crops. Optional change highlights remain available.
+0.8.8 restores smooth navigation without crossfading two screenshots: the old frame fades into the panel background, the single decoded image swaps while fully covered, then the new frame fades in (90ms out, 110ms in). Slow scrubbing, Prev, Next and Play share this path. Fast requests coalesce to the newest decoded frame; reduced-motion users get an immediate decoded swap. Optional change highlights remain available.
+
+### Updating in Antigravity
+
+New activations drain the old capture queue, release its writer, close previews and dispose old commands/webviews before taking ownership. A same-IDE-session endpoint handoff also handles separate extension-host instances. A different IDE window cannot take over an active writer.
+
+The already-installed 0.8.7 runtime cannot gain this handoff protocol retroactively. When upgrading from that older build, one **Developer: Reload Window** may still be needed. Later updates between handoff-capable builds do not require a full IDE quit/restart for Scrubline's writer ownership. If the IDE itself asks for a window reload to load extension code, follow that prompt; Scrubline cannot override the IDE's installer lifecycle.
 
 ## Capture and preview
 
@@ -46,11 +52,13 @@ Confirmation lives directly under Review, before forks, and is viewport-bounded.
 2. A local Chromium window opens the saved webpage at the configured preview route. Hover to see the target boundary and click the element to keep. Escape stops picking.
 3. Return to Scrubline, inspect **Files** and the exact diff, then **Confirm restore**. A configured build/test command must pass before and after selective apply. Undo restores the previous bytes.
 
-This first version supports static HTML source, including elements with no ID. The clicked DOM path identifies the saved source node; tag, stable attributes and ancestor identity must map uniquely into current source. Unrelated current markup stays current. Content and inline styles travel with the subtree. Simple tag/class/ID descendant rules in linked local CSS travel only when every matched element belongs to that subtree. Shared rules must be unchanged, and owned selector order must match; replacements stay at their original CSS positions.
+Static HTML source elements can be picked without IDs. The exact clicked source node is resolved first. Unique IDs or stable tag/attribute/ancestor identities can map into current source; repeated headings/cards use their original source position only when the document's identity structure is unchanged. Ambiguous structural drift is refused rather than silently selecting another card. Unrelated current markup stays current.
+
+Content and inline styles travel with the subtree. Linked local CSS uses parsed selector matching, including child/sibling/attribute selectors, SVG selectors and common hover/focus states. Rules travel only when every possible matched target is inside the selected subtree. Scoped `@media`, `@supports`, `@container` and `@layer` rules retain their conditions and cascade positions. Unchanged shared rules, CSS variables, keyframes and unsupported constructs no longer block an otherwise safe selection. Shared or unsupported CSS changes still require whole-file review; inherited shared styling remains current.
 
 Use the secondary **Hidden element ID** path for source elements you cannot point to on the page. Choose the tracked HTML file and a unique ID without `#`.
 
-Safety limits: ambiguous/missing identity, duplicate IDs, script-bearing pages, active selected markup, framework-generated DOM, embedded stylesheets, stylesheet-list changes, complex selectors, CSS at-rules, shared custom properties/URLs and differing shared CSS are refused. Inherited shared styles remain current. This is not arbitrary React/Vue/component rollback. The older standalone navbar prototype and whole-file review remain available. See [Alternatives notes](docs/m4-branches-selective.md).
+Safety limits: ambiguous/missing source identity, duplicate IDs, script-bearing pages, active selected markup, framework-generated DOM, embedded stylesheets and stylesheet-list changes are refused. Unsupported selector/at-rule changes and differing shared CSS are refused with the filename and reason. Complex dynamic selector ownership and arbitrary React/Vue/component rollback are not claimed. Whole-file review and the older standalone navbar prototype remain available. See [Alternatives notes](docs/m4-branches-selective.md).
 
 ## Alternatives and layout investigation
 
@@ -83,10 +91,10 @@ npm run check:nomock
 npm run test:ui
 npm run test:host
 npm run package
-node scripts/verify-packaged-mcp.cjs scrubline-panel-0.8.7.vsix
+node scripts/verify-packaged-mcp.cjs scrubline-panel-0.8.8.vsix
 ```
 
-The extension-host test downloads VS Code and needs a display (`xvfb-run` on Linux). Windows CI runs the portable checks. 0.8.7 was also tested in Antigravity on Linux against `xGTAT/web-lab` source `299a8e6cfc2b810d8a4f4ba2793c100bee8bb7a5`: no-ID navbar mouse selection, content/CSS restore with newer footer retained, Undo, slow navigation, rapid seeks, and Play. Checked-in navbar image fixtures support the ghost-layer regression; they are test data, not an external-state guarantee.
+The extension-host test downloads VS Code and needs a display (`xvfb-run` on Linux). Windows CI runs the portable checks. 0.8.8 was also tested in Antigravity on Linux against `xGTAT/web-lab` source `299a8e6cfc2b810d8a4f4ba2793c100bee8bb7a5`: rich index-page announcement mouse selection, responsive CSS restore with newer footer retained, Undo, slow/rapid navigation and Play. Repeated headings/cards have source-level regression coverage. Native Antigravity replacement activation, capture and panel reopen passed with its unrelated AI extension disabled; exact VSIX installation and reinstallation through the IDE installer command also passed. The native Install-from-VSIX file-dialog path was not fully verified. Checked-in navbar image fixtures support the ghost-layer regression; they are test data, not an external-state guarantee.
 
 - `spikes/host-panel`: extension, panel, storage and tests
 - `fixtures`: test sites and captured regression images

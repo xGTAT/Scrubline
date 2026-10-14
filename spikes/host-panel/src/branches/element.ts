@@ -1,3 +1,5 @@
+import { adapter } from 'parse5-htmlparser2-tree-adapter';
+import { selectAll } from 'css-select';
 import * as fs from 'node:fs/promises';
 import { parse } from 'parse5';
 import postcss from 'postcss';
@@ -37,7 +39,7 @@ export async function elementCandidate(
   };
   const oldHtml = await read(source, document),
     nowHtml = await read(current, document);
-  function inspect(html: string, sourceIdentity?: string) {
+  function inspect(html: string, sourceIdentity?: string, sourcePath?: number[]) {
     const root = parse(html, { sourceCodeLocationInfo: true });
     const nodes: HtmlNode[] = [];
     const visit = (n: HtmlNode) => {
@@ -60,19 +62,38 @@ export async function elementCandidate(
             : undefined
       ]);
     let matches = nodes.filter((n) => n.attrs?.some((a) => a.name === 'id' && a.value === id));
+    const atPath = (indices: number[]) => {
+      let target = nodes.find((n) => n.tagName === 'body');
+      for (const index of indices) target = target?.childNodes?.filter((n) => n.tagName)[index];
+      return target;
+    };
     if (elementPath) {
-      if (sourceIdentity)
-        matches = nodes.filter((n) => n.tagName && identity(n) === sourceIdentity);
+      const target = atPath(elementPath);
+      if (!sourceIdentity) matches = target ? [target] : [];
       else {
-        let target = nodes.find((n) => n.tagName === 'body');
-        for (const index of elementPath)
-          target = target?.childNodes?.filter((n) => n.tagName)[index];
-        matches = target ? nodes.filter((n) => n.tagName && identity(n) === identity(target!)) : [];
+        const sourceNode = JSON.parse(sourceIdentity) as unknown[];
+        const attrs = sourceNode[1] as { name: string; value: string }[];
+        const uniqueId = attrs?.find((a) => a.name === 'id')?.value;
+        matches = uniqueId
+          ? nodes.filter((n) => n.attrs?.some((a) => a.name === 'id' && a.value === uniqueId))
+          : nodes.filter((n) => n.tagName && identity(n) === sourceIdentity);
+        if (
+          matches.length > 1 &&
+          target &&
+          identity(target) === sourceIdentity &&
+          sourcePath &&
+          JSON.stringify(sourcePath) === JSON.stringify(elementPath)
+        ) {
+          // Repeated cards/headings may use a positional address only when every
+          // element identity in the document is unchanged. Inserts/reorders fail.
+          const structure = nodes.filter((n) => n.tagName).map(identity);
+          if (JSON.stringify(structure) === sourceStructure) matches = [target];
+        }
       }
     }
     if (matches.length !== 1)
       throw new Error(
-        'Element id must appear exactly once or selection must map uniquely in both documents.'
+        `Cannot map the selected <${elementPath ? (atPath(elementPath)?.tagName ?? 'missing') : '#' + id}> into current source: found ${matches.length} matching elements. The page structure or identifying attributes changed. Review the whole file instead.`
       );
     const node = matches[0],
       loc = node.sourceCodeLocation;
@@ -124,11 +145,13 @@ export async function elementCandidate(
       node,
       nodes,
       selected,
+      structure: JSON.stringify(nodes.filter((n) => n.tagName).map(identity)),
       identity: identity(node)
     };
   }
-  const old = inspect(oldHtml),
-    now = inspect(nowHtml, elementPath ? old.identity : undefined);
+  const old = inspect(oldHtml);
+  const sourceStructure = old.structure;
+  const now = inspect(nowHtml, elementPath ? old.identity : undefined, elementPath);
   if (JSON.stringify(old.links) !== JSON.stringify(now.links))
     throw new Error('Stylesheet list changed. Element ownership unresolved.');
   const changes = new Map<string, string>();
@@ -136,71 +159,83 @@ export async function elementCandidate(
     document,
     nowHtml.slice(0, now.start) + oldHtml.slice(old.start, old.end) + nowHtml.slice(now.end)
   );
-  inspect(changes.get(document)!, elementPath ? old.identity : undefined); // Refuse ids introduced by the restored subtree colliding with current markup.
+  inspect(changes.get(document)!, elementPath ? old.identity : undefined, elementPath); // Refuse ids introduced by the restored subtree colliding with current markup.
   for (const href of old.links) {
     const p = path.posix.join(path.posix.dirname(document), href);
     if (!safePath(p)) throw new Error('Unsafe stylesheet.');
     const before = postcss.parse(await read(source, p)),
       after = postcss.parse(await read(current, p));
-    function split(root: postcss.Root, info: ReturnType<typeof inspect>) {
+    function split(root: postcss.Root, info: ReturnType<typeof inspect>, html: string) {
+      const tree = parse(html, { treeAdapter: adapter, sourceCodeLocationInfo: true });
+      const elements = selectAll('*', tree);
+      const selected = new Set(
+        elements.filter((n) => {
+          const l = n.sourceCodeLocation;
+          return l && l.startOffset >= info.start && l.endOffset <= info.end;
+        })
+      );
       const owned: postcss.Rule[] = [];
-      root.walkAtRules(() => {
-        throw new Error('CSS at-rules unsupported.');
-      });
-      root.walkDecls((d) => {
-        if (d.prop.startsWith('--') || /var\(|url\(/i.test(d.value))
-          throw new Error('Shared tokens/URLs unsupported.');
-      });
-      const parents = new Map<HtmlNode, HtmlNode>();
-      for (const n of info.nodes) for (const child of n.childNodes ?? []) parents.set(child, n);
-      const simple = (n: HtmlNode, s: string) => {
-        const m = /^([a-zA-Z][\w-]*)?(#[\w-]+)?((?:\.[\w-]+)*)$/.exec(s);
-        if (!m) return false;
-        return (
-          (!m[1] || n.tagName === m[1]) &&
-          (!m[2] || n.attrs?.some((a) => a.name === 'id' && '#' + a.value === m[2])) &&
-          m[3]
-            .split('.')
-            .filter(Boolean)
-            .every((c) =>
-              n.attrs?.some((a) => a.name === 'class' && a.value.split(/\s+/).includes(c))
-            )
-        );
-      };
-      const matches = (n: HtmlNode, s: string) => {
-        const bits = s.trim().split(/\s+/);
-        let cursor: HtmlNode | undefined = n;
-        if (!simple(n, bits.pop()!)) return false;
-        while (bits.length) {
-          const bit = bits.pop()!;
-          cursor = parents.get(cursor!);
-          while (cursor && !simple(cursor, bit)) cursor = parents.get(cursor);
-          if (!cursor) return false;
-        }
-        return true;
-      };
       root.walkRules((rule) => {
-        if (!rule.selector.split(',').every((s) => /^[\w# .-]+$/.test(s)))
-          throw new Error('Complex CSS selector ownership unsupported.');
-        const matched = info.nodes.filter(
-          (n) => n.tagName && rule.selector.split(',').some((s) => matches(n, s))
-        );
-        if (matched.length && matched.every((n) => info.selected.includes(n))) owned.push(rule);
+        let parent = rule.parent;
+        while (parent && parent.type !== 'root') {
+          if (
+            parent.type !== 'atrule' ||
+            !['media', 'supports', 'container', 'layer'].includes(parent.name.toLowerCase())
+          )
+            return;
+          parent = parent.parent;
+        }
+        // Dynamic pseudo states do not narrow ownership. All potential targets
+        // must be inside the selected source subtree, regardless of hover/focus.
+        if (
+          /:(?:not|is|where|has)\([^)]*:(?:hover|focus|active|visited|checked|disabled|enabled|target)/.test(
+            rule.selector
+          )
+        )
+          return;
+        const selector = rule.selector
+          .replace(/::[\w-]+(?:\([^)]*\))?/g, '')
+          .replace(
+            /:(?:hover|active|focus-visible|focus-within|focus|visited|link|checked|disabled|enabled|target)\b/g,
+            ''
+          );
+        let matched;
+        try {
+          matched = selectAll(selector, tree);
+        } catch {
+          return;
+        }
+        if (matched.length && matched.every((n) => selected.has(n))) owned.push(rule);
       });
+      const key = (r: postcss.Rule) => {
+        const parents: string[] = [];
+        let p = r.parent;
+        while (p && p.type !== 'root') {
+          if (p.type === 'atrule') parents.unshift('@' + p.name + ' ' + p.params);
+          p = p.parent;
+        }
+        return JSON.stringify([...parents, r.selector]);
+      };
       const shared = root.clone();
+      const keys = owned.map(key);
+      let index = 0;
+      // Replace owned declarations with a marker, retaining rule position,
+      // selector and conditional ancestry to preserve cascade semantics.
       shared.walkRules((r) => {
-        if (owned.some((o) => o.selector === r.selector)) r.remove();
+        if (keys.includes(key(r))) {
+          r.removeAll();
+          r.append(postcss.comment({ text: 'scrubline-owned-' + index++ }));
+        }
       });
-      return { owned, shared: shared.toString() };
+      return { owned, keys, shared: shared.toString() };
     }
-    const a = split(before, old),
-      b = split(after, now);
+    const a = split(before, old, oldHtml),
+      b = split(after, now, nowHtml);
     if (a.shared !== b.shared)
-      throw new Error('Shared CSS differs. Cannot cherry-pick styling safely. Use file review.');
-    if (
-      JSON.stringify(a.owned.map((r) => r.selector)) !==
-      JSON.stringify(b.owned.map((r) => r.selector))
-    )
+      throw new Error(
+        `Shared or unsupported CSS changed in ${p}. Only rules exclusive to the selected subtree can be restored; review this file instead.`
+      );
+    if (JSON.stringify(a.keys) !== JSON.stringify(b.keys))
       throw new Error('Owned CSS selector order changed. Use file review.');
     for (let i = 0; i < b.owned.length; i++) b.owned[i].replaceWith(a.owned[i].clone());
     changes.set(p, after.toString());
