@@ -131,7 +131,9 @@ export class HistoryStore {
     });
     server.unref();
     const port = (server.address() as net.AddressInfo).port;
-    const deadline = Date.now() + 3000;
+    let deadline = Date.now() + 3000;
+    let handingOver = false;
+    let reportedToken: string | undefined;
     try {
       while (Date.now() < deadline) {
         try {
@@ -156,7 +158,20 @@ export class HistoryStore {
             const old = JSON.parse(raw);
             if (!Number.isInteger(old.pid) || typeof old.token !== 'string')
               throw new Error('Invalid storage lock.');
+            if (reportedToken !== old.token) {
+              reportedToken = old.token;
+              this.owner?.diagnostic?.(
+                `Existing writer PID ${old.pid}; current PID ${process.pid}; same IDE session: ${old.owner === this.owner.identity}; endpoint present: ${Number.isInteger(old.port)}.`
+              );
+            }
             if (this.owner && old.owner === this.owner.identity && Number.isInteger(old.port)) {
+              // An accepted handoff must drain the previous writer's queue. A scan,
+              // preview or selective-apply operation can legitimately exceed 3s.
+              if (!handingOver) {
+                handingOver = true;
+                deadline = Date.now() + 60000;
+                this.owner.waiting?.();
+              }
               await new Promise<void>((resolve) => {
                 const socket = net.connect(old.port, '127.0.0.1');
                 const done = () => {
@@ -219,7 +234,11 @@ export class HistoryStore {
           await fs.rm(guard, { recursive: true, force: true });
         }
       }
-      throw new Error('History is open in another window. Close its Scrubline window, then Retry.');
+      throw new Error(
+        handingOver
+          ? 'The previous Scrubline instance is still finishing work. Restart extensions, then Retry. History has not been changed.'
+          : 'History is open in another window. Close its Scrubline window, then Retry.'
+      );
     } catch (e) {
       server.close();
       throw e;
@@ -244,7 +263,12 @@ export class HistoryStore {
   constructor(
     readonly root: string,
     readonly quotaBytes = 512 * 1024 * 1024,
-    readonly owner?: { identity: string; close: () => Promise<void> }
+    readonly owner?: {
+      identity: string;
+      close: () => Promise<void>;
+      waiting?: () => void;
+      diagnostic?: (message: string) => void;
+    }
   ) {}
   async open() {
     for (const dir of ['blobs', 'manifests'])

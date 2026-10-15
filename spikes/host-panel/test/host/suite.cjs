@@ -54,7 +54,7 @@ exports.run = async () => {
   const client = new Client({ name: 'scrubline-host-check', version: '1.0.0' });
   try {
     await client.connect(new StdioClientTransport({ command: 'node', args: definition.args }));
-    assert.equal(client.getServerVersion().version, '0.8.10');
+    assert.equal(client.getServerVersion().version, '0.8.11');
     const tools = await client.listTools();
     assert.ok(tools.tools.some((t) => t.name === 'list_checkpoints'));
     const listed = await client.callTool({ name: 'list_checkpoints', arguments: {} });
@@ -142,6 +142,7 @@ exports.run = async () => {
   const subscriptions = [];
   const storageUri = vscode.Uri.file(path.dirname(path.dirname(api.getStoreRoot())));
   const nextApi = await replacement.activate({
+    extension,
     extensionPath: extension.extensionPath,
     extensionUri: extension.extensionUri,
     storageUri,

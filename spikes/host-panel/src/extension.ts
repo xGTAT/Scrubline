@@ -169,6 +169,9 @@ export async function activate(context: vscode.ExtensionContext) {
       return;
     }
     const root = folders[0].uri.fsPath;
+    diagnostics.appendLine(
+      `Scrubline ${context.extension.packageJSON.version}: starting writer in PID ${process.pid}.`
+    );
     const storeRoot = await scopedStore(
       context.storageUri?.fsPath ?? context.globalStorageUri.fsPath,
       root
@@ -177,6 +180,13 @@ export async function activate(context: vscode.ExtensionContext) {
       root,
       new HistoryStore(storeRoot, config.get<number>('quotaMB', 512) * 1024 * 1024, {
         identity: vscode.env.sessionId,
+        diagnostic: (message) => diagnostics.appendLine(message),
+        waiting: () =>
+          publish({
+            ...state,
+            status: 'loading',
+            message: 'Finishing the previous Scrubline instance. History will open automatically.'
+          }),
         close
       }),
       publish,

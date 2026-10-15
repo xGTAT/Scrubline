@@ -143,3 +143,11 @@ Source snapshots, ignore/limit checks, watcher reconciliation and crash recovery
 - Restore full-frame cached screenshot dissolves without background dips, local masks or moving region crops. Interrupted fades continue from current composite pixels, then clear to the exact decoded frame.
 - Clarify that Capture updates a fork and Compare is workspace vs one selected alternative. No two-item storage/menu cap was found; real Studio testing showed four entries, with six-entry persistence/UI regressions.
 - Keep Studio picker fixes and selective-style review limits.
+
+
+## 0.8.11
+
+- Fix a verified slow same-session writer handoff failure: wait up to 60 seconds for the previous instance's in-flight queue instead of misreporting another window after three seconds. Show automatic-opening progress while waiting, with a distinct timeout message.
+- Keep different-window writer exclusion. Add safe PID/session-match diagnostics in Scrubline Output without lock tokens.
+- Add a real Timeline queue regression with a 4.2-second in-flight operation; it fails before the fix and passes afterward. Final gates: 87 unit, 45 UI, native Antigravity host and packaged MCP pass.
+- Verify literal native file-dialog upgrades from 0.8.9 to 0.8.10 and 0.8.10 to 0.8.11 on Linux Antigravity 2.5.5, retaining History. The exact Windows every-update/no-restart error remains un-reproduced; this release does not claim its specific trigger is established.

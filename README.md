@@ -2,9 +2,9 @@
 
 A local source timeline for agent-edited frontends. Capture disk checkpoints, inspect rendered history, review changes, restore selected files or eligible static HTML elements, and Undo without guessing which source produced a screenshot.
 
-## Install 0.8.10
+## Install 0.8.11
 
-The unsigned VSIX is in [`releases/scrubline-panel-0.8.10.vsix`](releases/scrubline-panel-0.8.10.vsix). In VS Code or Antigravity, run **Extensions: Install from VSIX**, choose the file, and follow any IDE reload prompt. Open a trusted, single-folder workspace and run **Scrubline: Open Timeline Panel**.
+The unsigned VSIX is in [`releases/scrubline-panel-0.8.11.vsix`](releases/scrubline-panel-0.8.11.vsix). In VS Code or Antigravity, run **Extensions: Install from VSIX**, choose the file, and follow any IDE reload prompt. Open a trusted, single-folder workspace and run **Scrubline: Open Timeline Panel**.
 
 0.8.10 restores continuous, full-frame 200ms dissolves between cached decoded screenshots. The page does not reload during cached scrubbing. One canvas blends the current visible composite toward the next screenshot; an interrupted fade starts from those on-screen pixels, not an older unblended frame. There are no moving element crops, local masks or fade-through-background steps. The compositor is removed after completion, leaving the exact decoded screenshot.
 
@@ -12,9 +12,11 @@ A true dissolve briefly blends both versions, including changed text, during the
 
 ### Updating in Antigravity
 
+0.8.11 fixes a verified slow-handoff failure: a previous capture queue taking more than three seconds caused the replacement to falsely report "another window". Same-session transfer now waits up to 60 seconds, with an automatic-opening progress message. A timeout names the previous instance, not another window. Writer diagnostics in the Scrubline Output channel record PID and same-session matching without lock tokens.
+
 New activations drain the old capture queue, release its writer, close previews and dispose old commands/webviews before taking ownership. A same-IDE-session endpoint handoff also handles separate extension-host instances. A different IDE window cannot take over an active writer.
 
-The already-installed 0.8.7 runtime cannot gain this handoff protocol retroactively. When upgrading from that older build, one **Developer: Reload Window** may still be needed. Later updates between handoff-capable builds do not require a full IDE quit/restart for Scrubline's writer ownership. If the IDE itself asks for a window reload to load extension code, follow that prompt; Scrubline cannot override the IDE's installer lifecycle.
+The already-installed 0.8.7 runtime cannot gain this handoff protocol retroactively. When upgrading from that older build, one **Developer: Reload Window** may still be needed. The tested idle native VSIX-dialog upgrade from 0.8.9 to 0.8.10 retained History, and the IDE requested Restart Extensions to load the new code. The idle native 0.8.10 to 0.8.11 dialog upgrade also retained all eight checkpoints and four alternatives. The reported every-update no-restart ownership failure on Windows_NT x64 10.0.26300 (Antigravity 2.5.5 / VSCode OSS 1.107.0) has not been reproduced on the Linux bench running those IDE/core versions; the slow-queue regression above reproduces the same error but does not establish the user's exact trigger. If the IDE itself asks for a window reload to load extension code, follow that prompt; Scrubline cannot override the IDE's installer lifecycle.
 
 ## Capture and preview
 
@@ -97,10 +99,12 @@ npm run check:nomock
 npm run test:ui
 npm run test:host
 npm run package
-node scripts/verify-packaged-mcp.cjs scrubline-panel-0.8.10.vsix
+node scripts/verify-packaged-mcp.cjs scrubline-panel-0.8.11.vsix
 ```
 
 The extension-host test downloads VS Code and needs a display (`xvfb-run` on Linux). Windows CI runs the portable checks. 0.8.10 was tested on the actual Studio route in Antigravity: slow Prev/Next, 16 rapid inputs and Play settled on the expected cached frames, using at most one compositor and none after settling. Midpoint and final screenshots were inspected. Four separately created alternatives were visible in the real menu; tests cover six fork/capture/reopen entries and six accessible picker entries. The earlier Studio picker/Undo checks and source regressions remain.
+
+0.8.11 final gates passed: 87 unit tests, 45 UI tests, native Antigravity host, typecheck, lint, formatting, no-mock gate and packaged MCP initialize/list-tools. The new real Timeline queue handoff regression fails on the previous three-second timeout and passes after the change. An extra no-restart panel-close/reopen attempt was not completed because startup automation temporarily disabled extensions; it is not counted as verification.
 
 Source tests cover SVG shapes, repeated elements and current shared-CSS preservation. UI tests cover full-frame intermediate blending, interrupted seeking, compositor cleanup, reduced motion and six-entry Alternatives rendering. Native Antigravity host tests cover activation, replacement ownership, capture, render, review/apply/Undo and panel reopen. These tests do not establish behavior for the owner's exact unshared checkpoint history or every framework page. Checked-in webpage/image fixtures are regression data, not an external-state guarantee.
 
