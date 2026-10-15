@@ -137,3 +137,9 @@ Source snapshots, ignore/limit checks, watcher reconciliation and crash recovery
 - Resolve descendants across ancestor class/theme edits using semantic anchors and guarded source positions. Support self-closing SVG shapes.
 - Preserve current shared/unmatched CSS instead of refusing every element pick. State the selective-style scope in review, and explain no-change selections without offering confirmation.
 - Add current Studio source regressions, local-cover color/unchanged-area checks and real Alternatives picker/apply/Undo plus paused-mid-fade verification.
+
+## 0.8.10
+
+- Restore full-frame cached screenshot dissolves without background dips, local masks or moving region crops. Interrupted fades continue from current composite pixels, then clear to the exact decoded frame.
+- Clarify that Capture updates a fork and Compare is workspace vs one selected alternative. No two-item storage/menu cap was found; real Studio testing showed four entries, with six-entry persistence/UI regressions.
+- Keep Studio picker fixes and selective-style review limits.

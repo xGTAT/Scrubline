@@ -647,6 +647,10 @@ export const App: React.FC = () => {
       {!!state.branches?.length && (
         <details className="alternatives-menu" name="scrubline-tools">
           <summary>Alternatives ({state.branches.length})</summary>
+          <p>
+            Saved forks. Create another with Fork checkpoint; Capture updates that fork, not a new
+            alternative.
+          </p>
           <ul className="paths">
             {state.branches.map((b) => (
               <li key={b.id}>
@@ -714,7 +718,7 @@ export const App: React.FC = () => {
       )}
       {state.comparison && (
         <details open>
-          <summary>Rendered comparison</summary>
+          <summary>Workspace vs selected alternative</summary>
           <div className="comparison">
             <figure>
               <figcaption>Workspace</figcaption>

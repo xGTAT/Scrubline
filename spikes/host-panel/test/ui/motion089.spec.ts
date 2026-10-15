@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-test('only changed screenshot tiles fade, equal pixels stay uncovered and identical frames do not animate', async ({
+test('continuous full-frame dissolve uses one compositor and finishes exact, including interrupted seeks', async ({
   page
 }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -10,16 +10,12 @@ test('only changed screenshot tiles fade, equal pixels stay uncovered and identi
     canvas.width = 480;
     canvas.height = 300;
     const ctx = canvas.getContext('2d')!;
-    const image = (changed: boolean) => {
-      ctx.fillStyle = '#eeeeee';
+    const image = (color: string) => {
+      ctx.fillStyle = color;
       ctx.fillRect(0, 0, 480, 300);
-      ctx.fillStyle = '#225577';
-      ctx.fillRect(20, 20, 120, 40);
-      ctx.fillStyle = changed ? '#bb3322' : '#117744';
-      ctx.fillRect(300, 180, 48, 36);
       return canvas.toDataURL();
     };
-    const images = [image(false), image(true)];
+    const images = [image('#ff0000'), image('#0000ff'), image('#00ff00')];
     const w = window as unknown as {
       __sendTimeline: (v: unknown) => void;
       __f: (id: string) => void;
@@ -36,45 +32,60 @@ test('only changed screenshot tiles fade, equal pixels stay uncovered and identi
         selected: id,
         unsaved: false,
         rendered: ['a', 'b', 'c'],
-        preview: {
-          status: 'ready',
-          checkpoint: id,
-          image: images[id === 'a' ? 0 : 1],
-          receipt: { viewport: { width: 480, height: 300 }, imageHash: id },
-          comparison: { checkpoint: 'a', regions: [] },
-          regions: []
-        }
+        preview: { status: 'ready', checkpoint: id, image: images[['a', 'b', 'c'].indexOf(id)] }
       });
     w.__f('a');
   });
   await expect(page.locator('.frame')).toHaveAttribute('data-checkpoint', 'a');
   await page.getByRole('button', { name: 'Next', exact: true }).click();
-  await page.evaluate(() => {
-    const w = window as unknown as { __f: (id: string) => void; __cover: unknown };
-    const veil = document.querySelector('.frame-veil')!;
-    new MutationObserver(() => {
-      const canvas = veil.querySelector('canvas');
-      if (!canvas) return;
-      const c = canvas.getContext('2d')!;
-      w.__cover = {
-        unchangedAlpha: c.getImageData(40, 40, 1, 1).data[3],
-        changedAlpha: c.getImageData(310, 190, 1, 1).data[3],
-        changedColor: [...c.getImageData(310, 190, 1, 1).data]
-      };
-    }).observe(veil, { childList: true });
-    w.__f('b');
-  });
-  await expect(page.locator('.frame')).toHaveAttribute('data-checkpoint', 'b');
-  expect(await page.evaluate(() => (window as unknown as { __cover: unknown }).__cover)).toEqual({
-    unchangedAlpha: 0,
-    changedAlpha: 255,
-    changedColor: [238, 238, 238, 255]
-  });
-  await expect(page.locator('.frame-veil')).toHaveCSS('opacity', '0');
+  await page.evaluate(() => (window as unknown as { __f: (id: string) => void }).__f('b'));
+  await expect(page.locator('.frame-veil canvas')).toHaveCount(1);
+  await page.waitForTimeout(65);
+  const middle = await page
+    .locator('.frame-veil canvas')
+    .evaluate((e) => [
+      ...(e as HTMLCanvasElement).getContext('2d')!.getImageData(10, 10, 1, 1).data
+    ]);
+  expect(middle[0]).toBeGreaterThan(0);
+  expect(middle[2]).toBeGreaterThan(0);
+  expect(middle[3]).toBe(255);
   await page.getByRole('button', { name: 'Next', exact: true }).click();
   await page.evaluate(() => (window as unknown as { __f: (id: string) => void }).__f('c'));
   await expect(page.locator('.frame')).toHaveAttribute('data-checkpoint', 'c');
-  expect(await page.locator('.frame-veil').evaluate((e) => e.getAnimations().length)).toBe(0);
+  await expect(page.locator('.frame-veil canvas')).toHaveCount(0);
+  await expect(page.locator('.frame-out,.region')).toHaveCount(0);
   await expect(page.locator('.frame-base')).toHaveCount(1);
-  await page.screenshot({ path: '/downloads/scrubline089-local-fade.png' });
+});
+test('all six saved alternatives are accessible, not a two-item list', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByText('No checkpoints yet')).toBeVisible();
+  await page.evaluate(() => {
+    const w = window as unknown as { __sendTimeline: (v: unknown) => void };
+    w.__sendTimeline({
+      status: 'ready',
+      rows: [
+        {
+          id: 'a',
+          createdAt: '2026-10-15T00:00:00Z',
+          changedPaths: [],
+          attribution: { kind: 'unattributed' }
+        }
+      ],
+      selected: 'a',
+      unsaved: false,
+      branches: Array.from({ length: 6 }, (_, i) => ({
+        id: 'branch-' + i,
+        name: 'Studio option ' + (i + 1),
+        checkpoint: 'cp-' + i,
+        base: 'a',
+        directory: '/test/' + i
+      }))
+    });
+  });
+  await page.getByText('Alternatives (6)', { exact: true }).click();
+  await expect(page.locator('.alternatives-menu li')).toHaveCount(6);
+  await expect(page.getByText('Studio option 6', { exact: false })).toBeVisible();
+  await expect(
+    page.locator('.alternatives-menu').getByRole('button', { name: 'Pick on page', exact: true })
+  ).toHaveCount(6);
 });

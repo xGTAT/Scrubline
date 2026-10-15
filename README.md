@@ -2,13 +2,13 @@
 
 A local source timeline for agent-edited frontends. Capture disk checkpoints, inspect rendered history, review changes, restore selected files or eligible static HTML elements, and Undo without guessing which source produced a screenshot.
 
-## Install 0.8.9
+## Install 0.8.10
 
-The unsigned VSIX is in [`releases/scrubline-panel-0.8.9.vsix`](releases/scrubline-panel-0.8.9.vsix). In VS Code or Antigravity, run **Extensions: Install from VSIX**, choose the file, and follow any IDE reload prompt. Open a trusted, single-folder workspace and run **Scrubline: Open Timeline Panel**.
+The unsigned VSIX is in [`releases/scrubline-panel-0.8.10.vsix`](releases/scrubline-panel-0.8.10.vsix). In VS Code or Antigravity, run **Extensions: Install from VSIX**, choose the file, and follow any IDE reload prompt. Open a trusted, single-folder workspace and run **Scrubline: Open Timeline Panel**.
 
-0.8.9 keeps the page still while changed areas fade. It compares the two decoded screenshots, groups nearby changed pixels into local covers, fades the old content into its surrounding surface, swaps the single screenshot behind those opaque covers, then fades the new content in (90ms out, 110ms in). There is no outgoing screenshot layer, moving crop or whole-page veil for a small edit. Identical screenshots do not animate. Slow scrubbing, Prev, Next and Play share this path; rapid requests settle on the newest requested frame.
+0.8.10 restores continuous, full-frame 200ms dissolves between cached decoded screenshots. The page does not reload during cached scrubbing. One canvas blends the current visible composite toward the next screenshot; an interrupted fade starts from those on-screen pixels, not an older unblended frame. There are no moving element crops, local masks or fade-through-background steps. The compositor is removed after completion, leaving the exact decoded screenshot.
 
-These are local screenshot-area fades, not live DOM animations. A changed word can fade without the unchanged navigation, illustration or rest of its heading fading. A broad theme/layout change can cover a broad area. Each changed-area rectangle can include nearby unchanged pixels. If screenshot dimensions differ or image pixels cannot be read, navigation uses an immediate decoded swap instead of guessing a mask. Reduced motion also uses immediate decoded swaps. Optional change highlights remain available.
+A true dissolve briefly blends both versions, including changed text, during the transition. This natural overlap is different from persistent ghost layers or misaligned moving crops; it cannot be eliminated while retaining a full-frame crossfade. Identical images, reduced motion and mismatched dimensions use immediate decoded swaps. Cached playback requires Render history first; uncached interactive preview can still start a preview process. Optional change highlights remain available.
 
 ### Updating in Antigravity
 
@@ -66,6 +66,8 @@ Safety limits: ambiguous/missing source identity, duplicate IDs, script-bearing 
 
 ## Alternatives and layout investigation
 
+Alternatives are saved forks, not automatically generated suggestions. **Fork checkpoint** creates another; **Capture** updates the selected fork. The list has no two-item cap. **Compare** intentionally shows two images: the current workspace and one selected alternative. Other saved alternatives remain in the menu for picking, inspection or a separate comparison. If your menu still shows only two after creating more forks, that specific state needs investigation; it was not reproduced on the Studio test workspace.
+
 Fork a saved checkpoint into a separate folder, capture edits, compare rendered results, and choose files or an eligible element for review. Branch/base/saved identities distinguish same-name alternatives. Fork folders are not security sandboxes; dependencies and backend state are not cloned.
 
 Render history contains opt-in breakpoint/history sampling, bounded static-CSS culprit investigation and guarded inverse rollback. Pass/fail/unknown results describe the approved assertion at sampled widths, not universal correctness. Measured repair packets are reviewed text for manual paste, not automatic repairs. General hunk/framework apply and replay export are not shipped.
@@ -95,12 +97,12 @@ npm run check:nomock
 npm run test:ui
 npm run test:host
 npm run package
-node scripts/verify-packaged-mcp.cjs scrubline-panel-0.8.9.vsix
+node scripts/verify-packaged-mcp.cjs scrubline-panel-0.8.10.vsix
 ```
 
-The extension-host test downloads VS Code and needs a display (`xvfb-run` on Linux). Windows CI runs the portable checks. 0.8.9 was tested in Antigravity on Linux against a fresh `xGTAT/web-lab` clone at `299a8e6cfc2b810d8a4f4ba2793c100bee8bb7a5`, using the actual `Studio | Scrubline lab` root/index route. Alternatives mouse picks on links and the chair SVG reached review despite current ancestor-class/shared-CSS edits; an h1 restore preserved the newer footer and shared CSS, then Undo restored exact bytes. Slow/rapid navigation and Play passed; paused mid-fade screenshots kept navigation and announcement crops pixel-identical while the changed heading word faded. The fresh test profile's unrelated onboarding overlay was hidden for the workbench inspection, and its AI extension was disabled for the native host regression to stay within the test machine's memory budget.
+The extension-host test downloads VS Code and needs a display (`xvfb-run` on Linux). Windows CI runs the portable checks. 0.8.10 was tested on the actual Studio route in Antigravity: slow Prev/Next, 16 rapid inputs and Play settled on the expected cached frames, using at most one compositor and none after settling. Midpoint and final screenshots were inspected. Four separately created alternatives were visible in the real menu; tests cover six fork/capture/reopen entries and six accessible picker entries. The earlier Studio picker/Undo checks and source regressions remain.
 
-Source tests cover SVG shapes, repeated elements and current shared-CSS preservation. UI tests cover local-mask opacity/background color, unchanged areas, identical images, reduced motion and rapid seeking. Native Antigravity host tests cover activation, replacement ownership, capture, render, review/apply/Undo and panel reopen. These tests do not establish behavior for the owner's exact unshared checkpoint history or every framework page. Checked-in webpage/image fixtures are regression data, not an external-state guarantee.
+Source tests cover SVG shapes, repeated elements and current shared-CSS preservation. UI tests cover full-frame intermediate blending, interrupted seeking, compositor cleanup, reduced motion and six-entry Alternatives rendering. Native Antigravity host tests cover activation, replacement ownership, capture, render, review/apply/Undo and panel reopen. These tests do not establish behavior for the owner's exact unshared checkpoint history or every framework page. Checked-in webpage/image fixtures are regression data, not an external-state guarantee.
 
 - `spikes/host-panel`: extension, panel, storage and tests
 - `fixtures`: test sites and captured regression images

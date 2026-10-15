@@ -38,6 +38,29 @@ test('forks isolate bytes, survive restart, retain lineage and original workspac
     await fs.rm(f.temp, { recursive: true, force: true });
   }
 });
+test('six distinct alternatives survive captures and restart without a two-item cap', async () => {
+  const f = await fixture();
+  try {
+    const ids: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      const branch = await f.alternatives.fork(f.base, 'Studio option ' + (i + 1));
+      ids.push(branch.id);
+      await fs.writeFile(path.join(branch.directory, 'navbar.html'), '<nav>Option ' + i + '</nav>');
+      await f.alternatives.capture(branch.id);
+    }
+    expect(
+      f.alternatives
+        .list()
+        .map((b) => b.id)
+        .sort()
+    ).toEqual(ids.sort());
+    const reopened = new HistoryStore(f.store.root);
+    await reopened.open();
+    expect(new Alternatives(reopened, defaultLimits).list()).toHaveLength(6);
+  } finally {
+    await fs.rm(f.temp, { recursive: true, force: true });
+  }
+});
 test('navbar file apply preserves independently changed footer, creates safety and Undo', async () => {
   const f = await fixture();
   try {

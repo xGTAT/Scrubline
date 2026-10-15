@@ -6,7 +6,9 @@ const images = ['before', 'after'].map(
     readFileSync(`../../fixtures/web-lab-navbar-${n}.png`).toString('base64')
 );
 for (const reduce of [false, true])
-  test(`single-state veil fade swaps only while covered (reduced=${reduce})`, async ({ page }) => {
+  test(`decoded full-frame dissolve finishes without extra layers (reduced=${reduce})`, async ({
+    page
+  }) => {
     await page.emulateMedia({ reducedMotion: reduce ? 'reduce' : 'no-preference' });
     await page.goto('/');
     await expect(page.getByText('No checkpoints yet')).toBeVisible();
@@ -42,26 +44,9 @@ for (const reduce of [false, true])
     }, images);
     await expect(page.locator('.frame')).toHaveAttribute('data-checkpoint', 'a');
     await page.getByRole('button', { name: 'Next', exact: true }).click();
-    await page.evaluate(() => {
-      const w = window as unknown as { __f: (id: string) => void };
-      const img = document.querySelector('.frame-base')!;
-      const veil = document.querySelector('.frame-veil')!;
-      (window as unknown as { __swaps: unknown[] }).__swaps = [];
-      new MutationObserver(() => {
-        (window as unknown as { __swaps: unknown[] }).__swaps.push({
-          opacity: Number(getComputedStyle(veil).opacity),
-          src: img.getAttribute('src')
-        });
-      }).observe(img, { attributes: true, attributeFilter: ['src'] });
-      w.__f('b');
-    });
+    await page.evaluate(() => (window as unknown as { __f: (id: string) => void }).__f('b'));
     await expect(page.locator('.frame')).toHaveAttribute('data-checkpoint', 'b');
-    const swaps = await page.evaluate(
-      () => (window as unknown as { __swaps: { opacity: number }[] }).__swaps
-    );
-    expect(swaps).toHaveLength(1);
-    if (!reduce) expect(swaps[0].opacity).toBe(1);
-    await expect(page.locator('.frame-veil')).toHaveCSS('opacity', '0');
+    await expect(page.locator('.frame-veil canvas')).toHaveCount(0);
     await expect(page.locator('.frame-base')).toHaveCount(1);
     await expect(page.locator('.frame-veil')).toHaveCount(1);
     await expect(page.getByRole('button', { name: '0 changes', exact: true })).toBeVisible();

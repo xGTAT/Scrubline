@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { regionChanges, focusedChanges } from './regions';
-import { changedPixelCover } from './pixel-mask';
 export interface Region {
   key: string;
   signature: string;
@@ -23,77 +22,81 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
   const [shown, setShown] = useState<Frame>();
   const ticket = useRef(0);
   const shownRef = useRef<Frame>();
-  const pending = useRef<Frame>();
   const requestedRef = useRef(requested);
   requestedRef.current = requested;
   const veil = useRef<HTMLDivElement>(null);
   const decodedImages = useRef(new Map<string, HTMLImageElement>());
-  const motion = useRef<Animation>();
-  const swapping = useRef(false);
+  const animation = useRef<number>();
+  const composite = useRef<HTMLCanvasElement>();
   useEffect(
     () => () => {
-      motion.current?.cancel();
+      if (animation.current) cancelAnimationFrame(animation.current);
     },
     []
   );
   const display = (decoded: Frame) => {
     if (decoded.checkpoint !== requestedRef.current) return;
-    pending.current = decoded;
-    if (swapping.current) return;
-    const commit = () => {
-      const next = decoded;
-      if (pending.current === decoded) pending.current = undefined;
-      if (next && next.checkpoint === requestedRef.current) {
-        shownRef.current = next;
-        setShown(next);
+    const previous = shownRef.current;
+    const nextImage = decodedImages.current.get(decoded.image);
+    const oldImage = previous && decodedImages.current.get(previous.image);
+    const host = veil.current;
+    const active = composite.current;
+    if (animation.current) cancelAnimationFrame(animation.current);
+    animation.current = undefined;
+    let start: HTMLCanvasElement | HTMLImageElement | undefined = active ?? oldImage;
+    // Continue from the exact on-screen blend when a newer decode interrupts.
+    if (active) {
+      const snapshot = document.createElement('canvas');
+      snapshot.width = active.width;
+      snapshot.height = active.height;
+      snapshot.getContext('2d')?.drawImage(active, 0, 0);
+      start = snapshot;
+    }
+    composite.current = undefined;
+    host?.replaceChildren();
+    shownRef.current = decoded;
+    setShown(decoded);
+    if (
+      !host ||
+      !start ||
+      !nextImage ||
+      !previous ||
+      previous.image === decoded.image ||
+      matchMedia('(prefers-reduced-motion: reduce)').matches ||
+      (start instanceof HTMLImageElement ? start.naturalWidth : start.width) !==
+        nextImage.naturalWidth ||
+      (start instanceof HTMLImageElement ? start.naturalHeight : start.height) !==
+        nextImage.naturalHeight
+    )
+      return;
+    const canvas = document.createElement('canvas');
+    canvas.width = nextImage.naturalWidth;
+    canvas.height = nextImage.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    canvas.setAttribute('aria-hidden', 'true');
+    ctx.drawImage(start, 0, 0);
+    host.append(canvas);
+    composite.current = canvas;
+    const began = performance.now();
+    const from = start;
+    const draw = (now: number) => {
+      const progress = Math.min(1, (now - began) / 200);
+      const blend = 1 - (1 - progress) * (1 - progress);
+      ctx.globalAlpha = 1;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(from, 0, 0);
+      ctx.globalAlpha = blend;
+      ctx.drawImage(nextImage, 0, 0);
+      ctx.globalAlpha = 1;
+      if (progress < 1) animation.current = requestAnimationFrame(draw);
+      else {
+        animation.current = undefined;
+        composite.current = undefined;
+        host.replaceChildren();
       }
     };
-    if (
-      !shownRef.current ||
-      matchMedia('(prefers-reduced-motion: reduce)').matches ||
-      !veil.current
-    ) {
-      commit();
-      return;
-    }
-    const oldImage = decodedImages.current.get(shownRef.current.image);
-    const nextImage = decodedImages.current.get(decoded.image);
-    const cover = oldImage && nextImage ? changedPixelCover(oldImage, nextImage) : undefined;
-    veil.current.replaceChildren(...(cover ? [cover.canvas] : []));
-    if (!cover || !cover.changed) {
-      commit();
-      return;
-    }
-    swapping.current = true;
-    motion.current = veil.current.animate([{ opacity: 0 }, { opacity: 1 }], {
-      duration: 90,
-      easing: 'ease-out',
-      fill: 'forwards'
-    });
-    void motion.current.finished
-      .then(() => {
-        commit();
-        // Keep the veil fully opaque through the React commit and browser paint.
-        requestAnimationFrame(() =>
-          requestAnimationFrame(() => {
-            motion.current?.cancel();
-            motion.current = veil.current?.animate([{ opacity: 1 }, { opacity: 0 }], {
-              duration: 110,
-              easing: 'ease-in',
-              fill: 'forwards'
-            });
-            void motion.current?.finished
-              .then(() => {
-                motion.current?.cancel();
-                swapping.current = false;
-                const next = pending.current;
-                if (next) display(next);
-              })
-              .catch(() => {});
-          })
-        );
-      })
-      .catch(() => {});
+    animation.current = requestAnimationFrame(draw);
   };
   const figure = useRef<HTMLElement>(null);
   const [highlights, setHighlights] = useState(false);
@@ -117,7 +120,13 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
         decodedImages.current.set(decoded.image, image);
         // Retain only shown, pending and newest decoded screenshots.
         for (const key of decodedImages.current.keys())
-          if (![decoded.image, shownRef.current?.image, pending.current?.image].includes(key))
+          if (
+            ![
+              decoded.image,
+              shownRef.current?.image,
+              composite.current ? shownRef.current?.image : undefined
+            ].includes(key)
+          )
             decodedImages.current.delete(key);
         display(decoded);
       })
