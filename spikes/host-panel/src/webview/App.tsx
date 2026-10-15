@@ -36,6 +36,10 @@ export const App: React.FC = () => {
   useEffect(() => {
     const handler = (event: MessageEvent<TimelineOutbound>) => {
       if (event.data.type === 'timeline') setState(event.data.data);
+      if (event.data.type === 'select') {
+        setSelected(event.data.id);
+        bridge?.setState({ selected: event.data.id });
+      }
     };
     window.addEventListener('message', handler);
     bridge?.postMessage({ type: 'request-timeline' });
@@ -411,7 +415,9 @@ export const App: React.FC = () => {
               <span className="preview-message">{state.preview.message}</span>
             )}
             {(frame || state.preview?.checkpoint) && (
-              <button onClick={toggleFullscreen}>Open preview</button>
+              <button onClick={() => bridge?.postMessage({ type: 'open-preview' })}>
+                Open preview
+              </button>
             )}
             {state.preview?.status === 'error' && (
               <div role="alert">

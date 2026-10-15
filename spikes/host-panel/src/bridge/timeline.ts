@@ -112,7 +112,5 @@ export type TimelineInbound =
   | { type: 'undo-restore' }
   | { type: 'open-preview' }
   | { type: 'open-diff'; id: string; path: string };
-export interface TimelineOutbound {
-  type: 'timeline';
-  data: TimelineState;
-}
+export type TimelineOutbound =
+  { type: 'timeline'; data: TimelineState } | { type: 'select'; id: string };

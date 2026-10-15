@@ -151,3 +151,15 @@ Source snapshots, ignore/limit checks, watcher reconciliation and crash recovery
 - Keep different-window writer exclusion. Add safe PID/session-match diagnostics in Scrubline Output without lock tokens.
 - Add a real Timeline queue regression with a 4.2-second in-flight operation; it fails before the fix and passes afterward. Final gates: 87 unit, 45 UI, native Antigravity host and packaged MCP pass.
 - Verify literal native file-dialog upgrades from 0.8.9 to 0.8.10 and 0.8.10 to 0.8.11 on Linux Antigravity 2.5.5, retaining History. The exact Windows every-update/no-restart error remains un-reproduced; this release does not claim its specific trigger is established.
+
+
+## 0.8.12
+
+- Fix investigation false refusals: custom properties, var()/url() values and duplicated ownership are now rejected only when the changed unit actually involves them, not for their mere presence in the file.
+- Fix identical investigation reruns crashing with EEXIST. Records are content-addressed: an identical stored record is a no-op, different content under the same name is still refused, and the 20-record limit no longer counts an already-stored identical record. New same-investigation-twice unit test.
+- Fix preview errors going invisible after any settings change: the settings-refresh rebuild of the preview runner wires the same error callback as activation, so a failing preview shows 'Preview unavailable' with Retry.
+- Fix one settings write firing the configuration refresh twice (two scopes). Refreshes are single-flight with coalescing; a trailing refresh no longer wipes fresh preview state.
+- Fix webview messages (for example Start preview) being silently dropped during a settings refresh; they now wait for the refresh before running.
+- Timeline selection: host-initiated reviews move the panel selection through an explicit select message and stale webview acknowledgements are ignored again, keeping fullscreen seeking immune to stale acks. New UI regression covers both directions.
+- Round-6 full feature audit against the real web-lab repository in Antigravity 2.5.5: every feature exercised end-to-end with intended-output assertions; per-row results in README.
+- Gates: 89 unit, 47 UI, typecheck, eslint, prettier; native Antigravity host verification of the audit fixes.

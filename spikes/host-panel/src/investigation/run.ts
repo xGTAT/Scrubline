@@ -157,14 +157,18 @@ export async function investigate(
       request,
       specification: hashBytes(JSON.stringify(config))
     });
-    if (record.length > 1024 * 1024) throw new Error('Investigation evidence too large.');
-    const files = await fs.readdir(path.join(store.root, 'investigations'));
-    if (files.length >= 20) throw new Error('Investigation record limit reached (20).');
-    await fs.writeFile(
-      path.join(store.root, 'investigations', hashBytes(record) + '.json'),
-      record,
-      { flag: 'wx' }
-    );
+    // Records are content-addressed: an identical rerun already stored its
+    // evidence, so it is a no-op instead of an EEXIST failure. A different
+    // record under the same name means tampering or a collision; keep 'wx'.
+    const file = path.join(store.root, 'investigations', hashBytes(record) + '.json');
+    const existing = await fs.readFile(file, 'utf8').catch(() => undefined);
+    if (existing !== record) {
+      if (record.length > 1024 * 1024) throw new Error('Investigation evidence too large.');
+      const files = await fs.readdir(path.join(store.root, 'investigations'));
+      if (files.length >= 20 && !files.includes(path.basename(file)))
+        throw new Error('Investigation record limit reached (20).');
+      await fs.writeFile(file, record, { flag: 'wx' });
+    }
   } catch (e) {
     state.message = e instanceof Error ? e.message : 'Investigation failed.';
   } finally {

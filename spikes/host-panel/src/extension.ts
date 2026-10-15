@@ -96,6 +96,8 @@ export async function activate(context: vscode.ExtensionContext) {
   let renderJob: Promise<void> | undefined;
   let generation = 0;
   let refreshing = false;
+  let refreshQueued = false;
+  let refreshPromise: Promise<void> | undefined;
   const diagnostics = vscode.window.createOutputChannel('Scrubline');
   context.subscriptions.push(diagnostics);
   let shutdownPreview = false;
@@ -142,6 +144,15 @@ export async function activate(context: vscode.ExtensionContext) {
         void view
           .postMessage({ type: 'timeline', data: state })
           .then(undefined, () => views.delete(view));
+      } catch {
+        views.delete(view);
+      }
+    }
+  };
+  const publishSelection = (id: string) => {
+    for (const view of views) {
+      try {
+        void view.postMessage({ type: 'select', id }).then(undefined, () => views.delete(view));
       } catch {
         views.delete(view);
       }
@@ -490,6 +501,7 @@ export async function activate(context: vscode.ExtensionContext) {
     };
     const listener = view.onDidReceiveMessage(async (message: TimelineInbound) => {
       try {
+        if (refreshPromise) await refreshPromise;
         if (message.type === 'fullscreen') {
           if (!message.active) {
             fullscreenPanel?.dispose();
@@ -838,6 +850,7 @@ export async function activate(context: vscode.ExtensionContext) {
         }
         if (message.type === 'request-timeline') {
           void view.postMessage({ type: 'timeline', data: state });
+          if (review && selected && preview?.checkpoint !== selected) void enqueuePreview(selected);
           return;
         }
         if (message.type === 'retry-capture') {
@@ -1140,6 +1153,7 @@ export async function activate(context: vscode.ExtensionContext) {
             );
           });
           publish(state);
+          await enqueuePreview(target.id);
         }
         if (message.type === 'apply-reviewed' && (target || selectiveTarget?.id === message.id)) {
           const applying = selectiveTarget?.id === message.id ? selectiveTarget : target!;
@@ -1315,6 +1329,7 @@ export async function activate(context: vscode.ExtensionContext) {
           const checked = await timeline!.exclusive(() =>
             restore!.review(target, timeline!.store.checkpoints.at(-1)!, state.unsaved)
           );
+          selected = id;
           review = {
             token: checked.token,
             checkpoint: id,
@@ -1322,6 +1337,7 @@ export async function activate(context: vscode.ExtensionContext) {
             conflicts: checked.conflicts
           };
           publish(state);
+          publishSelection(id);
           await vscode.commands.executeCommand('scrubline.openPanel');
           return {
             status: 'pending_user_confirmation',
@@ -1398,43 +1414,57 @@ export async function activate(context: vscode.ExtensionContext) {
       attach(panelView);
       panel.onDidDispose(() => views.delete(panelView));
     }),
-    vscode.workspace.onDidChangeConfiguration(async (event) => {
+    vscode.workspace.onDidChangeConfiguration((event) => {
       if (!event.affectsConfiguration('scrubline', folders[0]?.uri) || !runner || !timeline) return;
-      refreshing = true;
-      cancelLayout = true;
-      generation++;
-      cancelRender = true;
-      await renderJob?.catch(() => {});
-      await previewQueue.catch(() => {});
-      await runner.stop();
-      await targetSession?.stop();
-      config = vscode.workspace.getConfiguration('scrubline', folders[0]?.uri);
-      runner = new PreviewRunner(
-        {
-          command: config.get<string>('previewCommand', ''),
-          port: config.get<number>('previewPort', 4100),
-          timeoutMs: config.get<number>('previewTimeoutSeconds', 15) * 1000,
-          browserPath: config.get<string>('chromiumPath') || undefined,
-          width: config.get<number>('previewWidth', 960),
-          height: config.get<number>('previewHeight', 600),
-          route: config.get<string>('previewRoute', '/'),
-          readySelector: config.get<string>('previewReadySelector', '')
-        },
-        timeline.store,
-        undefined,
-        (message) => diagnostics.appendLine(message)
-      );
-      Object.assign(runner.config, await identifyBrowser(runner.config));
-      cache = new RenderCache(timeline.store.root, renderKey(runner.config));
-      rendered = await cache.available(timeline.store.checkpoints);
-      preview = undefined;
-      rendering = undefined;
-      refreshing = false;
-      targeting = { status: 'off' };
-      publish(state);
-      diagnostics.appendLine(
-        'Preview configuration refreshed. History rendering uses the current folder settings.'
-      );
+      if (refreshPromise) {
+        // One settings write can fire this event for more than one scope; coalesce.
+        refreshQueued = true;
+        return;
+      }
+      refreshPromise = (async () => {
+        do {
+          refreshQueued = false;
+          refreshing = true;
+          cancelLayout = true;
+          generation++;
+          cancelRender = true;
+          await renderJob?.catch(() => {});
+          await previewQueue.catch(() => {});
+          await runner.stop();
+          await targetSession?.stop();
+          config = vscode.workspace.getConfiguration('scrubline', folders[0]?.uri);
+          runner = new PreviewRunner(
+            {
+              command: config.get<string>('previewCommand', ''),
+              port: config.get<number>('previewPort', 4100),
+              timeoutMs: config.get<number>('previewTimeoutSeconds', 15) * 1000,
+              browserPath: config.get<string>('chromiumPath') || undefined,
+              width: config.get<number>('previewWidth', 960),
+              height: config.get<number>('previewHeight', 600),
+              route: config.get<string>('previewRoute', '/'),
+              readySelector: config.get<string>('previewReadySelector', '')
+            },
+            timeline.store,
+            (message) => {
+              preview = { status: 'error', message };
+              publish(state);
+            },
+            (message) => diagnostics.appendLine(message)
+          );
+          Object.assign(runner.config, await identifyBrowser(runner.config));
+          cache = new RenderCache(timeline.store.root, renderKey(runner.config));
+          rendered = await cache.available(timeline.store.checkpoints);
+          preview = undefined;
+          rendering = undefined;
+          refreshing = false;
+          targeting = { status: 'off' };
+          publish(state);
+          diagnostics.appendLine(
+            'Preview configuration refreshed. History rendering uses the current folder settings.'
+          );
+        } while (refreshQueued);
+        refreshPromise = undefined;
+      })();
     }),
     vscode.workspace.onDidGrantWorkspaceTrust(() => void start())
   );

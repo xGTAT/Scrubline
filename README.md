@@ -2,9 +2,11 @@
 
 A local source timeline for agent-edited frontends. Capture disk checkpoints, inspect rendered history, review changes, restore selected files or eligible static HTML elements, and Undo without guessing which source produced a screenshot.
 
-## Install 0.8.11
+## Install 0.8.12
 
-The unsigned VSIX is in [`releases/scrubline-panel-0.8.11.vsix`](releases/scrubline-panel-0.8.11.vsix). In VS Code or Antigravity, run **Extensions: Install from VSIX**, choose the file, and follow any IDE reload prompt. Open a trusted, single-folder workspace and run **Scrubline: Open Timeline Panel**.
+The unsigned VSIX is in [`releases/scrubline-panel-0.8.12.vsix`](releases/scrubline-panel-0.8.12.vsix). In VS Code or Antigravity, run **Extensions: Install from VSIX**, choose the file, and follow any IDE reload prompt. Open a trusted, single-folder workspace and run **Scrubline: Open Timeline Panel**.
+
+0.8.12 closes the round-6 full feature audit against the real web-lab repository. It fixes investigation false refusals on files containing custom properties or var()/url() values unrelated to the change, an EEXIST crash on identical investigation reruns, preview errors going invisible after any settings change, a double configuration refresh per settings write that wiped fresh preview state, webview messages dropped during a settings refresh, and restores stale-acknowledgement immunity for timeline selection. Audit notes are below.
 
 0.8.10 restores continuous, full-frame 200ms dissolves between cached decoded screenshots. The page does not reload during cached scrubbing. One canvas blends the current visible composite toward the next screenshot; an interrupted fade starts from those on-screen pixels, not an older unblended frame. There are no moving element crops, local masks or fade-through-background steps. The compositor is removed after completion, leaving the exact decoded screenshot.
 
@@ -113,3 +115,13 @@ Source tests cover SVG shapes, repeated elements and current shared-CSS preserva
 - `.agents`: sanitized hook recorder; [configuration](docs/hooks.md)
 - `docs`: implementation limits and milestone notes
 - `releases`: locally installable VSIX builds
+
+## Round-6 audit record (2026-10-15)
+
+Full feature audit against the real web-lab repository in Antigravity 2.5.5, intended-output standard (exact file bytes, decoded frames, real picks), disposable bench. Per-row status:
+
+- Natively verified AFTER the final environment wipe, on the 0.8.12 build: initial capture (14/14 files), preview + render receipt + repeatability, cache clear/rebuild, fullscreen, watcher captures, Prev/Next/Play navigation, render retry, hidden-ID pick apply + exact Undo, real mouse pick, fork checkpoint, branch Capture advance, Compare (two decoded images), Inspect, static navbar restore + Undo, focus, choose-files restore, breakpoint map (real 734px overflow), investigation (7 probes, 1-minimal culprit, repair packet), guarded-inverse containment apply + Undo, cancels, render cancellation visuals, restart recovery, runtime investigation packets, invest-summary, investigate-fix, targeting chain (real pick, crop, packet, validate, copy, stop), MCP list/restore/apply (byte-exact 2-file restore + Undo), MCP-selected frame, map good/bad, highlights geometry + navigation, review UI, unsaved guard, save, stale-token and three-way-drift refusals, branch hidden-ID pick, retry-capture symlink refusal + retry, compact (840 orphan bytes removed), preview invalid-command error + Retry + corrected-command recovery, three named forks, branch Pick on page (byte-exact apply + Undo), stale target detection ('Target changed. Select again.'), delete workspace history (store removed, sources untouched).
+- Carried (passed natively earlier in the session; not re-run after the final wipe per audit protocol): none - every row above was re-verified on the final build.
+- Skipped: one targeting-variant bench script (wide.js) whose planted selector was ambiguous in the bench page; the product path it exercised is covered by the verified targeting chain.
+- Environmental caveat: renders on the 2GB audit box stall or time out under ~150MB free memory; all such failures reproduced as resource pressure, not product defects, and passed with headroom.
+- Deliberate behavior documented, not a defect: guarded CSS rollback refuses properties owned more than once per file ('Overlapping CSS property ownership refused.'); static-CSS guards reject ambiguous rules including url() in comments; the interactive preview runs from an isolated copy, so live-page staleness checks compare against that copy.

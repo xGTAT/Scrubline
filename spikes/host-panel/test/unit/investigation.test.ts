@@ -117,7 +117,57 @@ test('real static CSS investigation isolates overflow while original files stay 
     expect(result.trials).toHaveLength(result.probes);
     expect(result.trials?.some((t) => t.subset?.length === 1 && t.outcome === 'fail')).toBe(true);
     expect(await fs.readFile(path.join(workspace, 'site.css'), 'utf8')).toBe(badCss);
+    // An identical rerun reuses the stored evidence instead of failing EEXIST.
+    const rerun = await investigate(
+      store,
+      {
+        command: 'node server.cjs',
+        port,
+        timeoutMs: 3000,
+        browserPath: chromium.executablePath(),
+        width: 760,
+        height: 600
+      },
+      defaultLimits,
+      {
+        good: good.id,
+        bad: bad.id,
+        budget: 8,
+        guard: { kind: 'horizontal-overflow', tolerance: 1 }
+      },
+      () => false,
+      () => {}
+    );
+    expect(rerun.message).toMatch(/1-minimal/);
+    expect(rerun.units).toHaveLength(1);
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }
 }, 60000);
+
+test('unchanged real-site theme tokens and URL declarations do not veto an independent value change', () => {
+  const before =
+    ':root{--bg:#121316}body{background:var(--bg)}.art{background-image:url(chair.png)}@media(max-width:600px){.hero{padding:12px}}.hero{min-width:0px}';
+  const after = before.replace('min-width:0px', 'min-width:1100px');
+  const units = declarationChanges('site.css', before, after);
+  expect(units).toHaveLength(1);
+  expect(units[0].property).toBe('min-width');
+  expect(applyUnits(before, units)).toBe(after);
+  expect(() =>
+    declarationChanges('site.css', before, before.replace('--bg:#121316', '--bg:#fff'))
+  ).toThrow('Shared');
+  expect(() =>
+    declarationChanges('site.css', before, before.replace('chair.png', 'other.png'))
+  ).toThrow('URLs');
+});
+
+test('unchanged duplicate cascade declarations stay byte-exact while independent changes remain usable', () => {
+  const before = '.secondary{color:red}.secondary{color:blue}.hero{max-height:2000px}';
+  const after = before.replace('max-height:2000px', 'max-height:100px');
+  const units = declarationChanges('site.css', before, after);
+  expect(units).toHaveLength(1);
+  expect(applyUnits(before, units)).toBe(after);
+  expect(() =>
+    declarationChanges('site.css', before, before.replace('color:red', 'color:green'))
+  ).toThrow('Duplicate');
+});
