@@ -8,6 +8,7 @@ import { HistoryStore, hashBytes, atomicWrite, safePath } from '../store/store';
 import type { Checkpoint } from '../bridge/timeline';
 interface HtmlNode {
   tagName?: string;
+  namespaceURI?: string;
   attrs?: { name: string; value: string }[];
   childNodes?: HtmlNode[];
   sourceCodeLocation?: {
@@ -39,7 +40,7 @@ export async function elementCandidate(
   };
   const oldHtml = await read(source, document),
     nowHtml = await read(current, document);
-  function inspect(html: string, sourceIdentity?: string, sourcePath?: number[]) {
+  function inspect(html: string, sourceIdentity?: string) {
     const root = parse(html, { sourceCodeLocationInfo: true });
     const nodes: HtmlNode[] = [];
     const visit = (n: HtmlNode) => {
@@ -53,7 +54,9 @@ export async function elementCandidate(
       JSON.stringify([
         n.tagName,
         n.attrs
-          ?.filter((a) => ['id', 'class', 'href', 'name', 'role', 'data-testid'].includes(a.name))
+          ?.filter((a) =>
+            ['id', 'class', 'href', 'name', 'role', 'data-testid', 'aria-label'].includes(a.name)
+          )
           .sort((a, b) => a.name.localeCompare(b.name)),
         parents.get(n)?.tagName === 'body'
           ? undefined
@@ -61,6 +64,13 @@ export async function elementCandidate(
             ? identity(parents.get(n)!)
             : undefined
       ]);
+    // Classes, href and ancestor styling are restore data, not immutable IDs.
+    // Positional fallback is safe only when the whole tag/ID skeleton agrees.
+    const skeleton = JSON.stringify(
+      nodes
+        .filter((n) => n.tagName)
+        .map((n) => [n.tagName, n.attrs?.find((a) => a.name === 'id')?.value ?? ''])
+    );
     let matches = nodes.filter((n) => n.attrs?.some((a) => a.name === 'id' && a.value === id));
     const atPath = (indices: number[]) => {
       let target = nodes.find((n) => n.tagName === 'body');
@@ -77,17 +87,32 @@ export async function elementCandidate(
         matches = uniqueId
           ? nodes.filter((n) => n.attrs?.some((a) => a.name === 'id' && a.value === uniqueId))
           : nodes.filter((n) => n.tagName && identity(n) === sourceIdentity);
+        if (matches.length !== 1 && !uniqueId) {
+          // Compare semantic anchors without CSS classes on the node or ancestors.
+          const semantic = (value: string): string => {
+            const [tag, attrs, parent] = JSON.parse(value) as [
+              string,
+              { name: string; value: string }[],
+              string?
+            ];
+            return JSON.stringify([
+              tag,
+              attrs?.filter((a) => a.name !== 'class'),
+              parent ? semantic(parent) : undefined
+            ]);
+          };
+          matches = nodes.filter(
+            (n) => n.tagName && semantic(identity(n)) === semantic(sourceIdentity)
+          );
+        }
         if (
-          matches.length > 1 &&
+          matches.length !== 1 &&
+          !uniqueId &&
           target &&
-          identity(target) === sourceIdentity &&
-          sourcePath &&
-          JSON.stringify(sourcePath) === JSON.stringify(elementPath)
+          target.tagName === sourceNode[0] &&
+          skeleton === sourceSkeleton
         ) {
-          // Repeated cards/headings may use a positional address only when every
-          // element identity in the document is unchanged. Inserts/reorders fail.
-          const structure = nodes.filter((n) => n.tagName).map(identity);
-          if (JSON.stringify(structure) === sourceStructure) matches = [target];
+          matches = [target];
         }
       }
     }
@@ -100,6 +125,7 @@ export async function elementCandidate(
     if (
       !loc?.startTag ||
       (!loc.endTag &&
+        node.namespaceURI !== 'http://www.w3.org/2000/svg' &&
         !['img', 'input', 'br', 'hr', 'area', 'source', 'wbr', 'embed', 'track', 'col'].includes(
           node.tagName ?? ''
         )) ||
@@ -145,13 +171,13 @@ export async function elementCandidate(
       node,
       nodes,
       selected,
-      structure: JSON.stringify(nodes.filter((n) => n.tagName).map(identity)),
+      skeleton,
       identity: identity(node)
     };
   }
   const old = inspect(oldHtml);
-  const sourceStructure = old.structure;
-  const now = inspect(nowHtml, elementPath ? old.identity : undefined, elementPath);
+  const sourceSkeleton: string = old.skeleton;
+  const now = inspect(nowHtml, elementPath ? old.identity : undefined);
   if (JSON.stringify(old.links) !== JSON.stringify(now.links))
     throw new Error('Stylesheet list changed. Element ownership unresolved.');
   const changes = new Map<string, string>();
@@ -159,7 +185,7 @@ export async function elementCandidate(
     document,
     nowHtml.slice(0, now.start) + oldHtml.slice(old.start, old.end) + nowHtml.slice(now.end)
   );
-  inspect(changes.get(document)!, elementPath ? old.identity : undefined, elementPath); // Refuse ids introduced by the restored subtree colliding with current markup.
+  inspect(changes.get(document)!, elementPath ? old.identity : undefined); // Refuse ids introduced by the restored subtree colliding with current markup.
   for (const href of old.links) {
     const p = path.posix.join(path.posix.dirname(document), href);
     if (!safePath(p)) throw new Error('Unsafe stylesheet.');
@@ -216,28 +242,20 @@ export async function elementCandidate(
         }
         return JSON.stringify([...parents, r.selector]);
       };
-      const shared = root.clone();
       const keys = owned.map(key);
-      let index = 0;
-      // Replace owned declarations with a marker, retaining rule position,
-      // selector and conditional ancestry to preserve cascade semantics.
-      shared.walkRules((r) => {
-        if (keys.includes(key(r))) {
-          r.removeAll();
-          r.append(postcss.comment({ text: 'scrubline-owned-' + index++ }));
-        }
-      });
-      return { owned, keys, shared: shared.toString() };
+      return { owned, keys, key };
     }
     const a = split(before, old, oldHtml),
       b = split(after, now, nowHtml);
-    if (a.shared !== b.shared)
-      throw new Error(
-        `Shared or unsupported CSS changed in ${p}. Only rules exclusive to the selected subtree can be restored; review this file instead.`
-      );
-    if (JSON.stringify(a.keys) !== JSON.stringify(b.keys))
-      throw new Error('Owned CSS selector order changed. Use file review.');
-    for (let i = 0; i < b.owned.length; i++) b.owned[i].replaceWith(a.owned[i].clone());
+    // Unrelated and shared style edits stay current. Never roll them back merely
+    // because they share a stylesheet with a clicked element.
+    for (let i = 0; i < b.owned.length; i++) {
+      const key = b.keys[i];
+      const oldRules = a.owned.filter((r) => a.key(r) === key);
+      const newRules = b.owned.filter((r) => b.key(r) === key);
+      if (oldRules.length === 1 && newRules.length === 1)
+        b.owned[i].replaceWith(oldRules[0].clone());
+    }
     changes.set(p, after.toString());
   }
   const files = current.files.map((f) => ({ ...f }));

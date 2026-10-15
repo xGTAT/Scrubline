@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { regionChanges, focusedChanges } from './regions';
+import { changedPixelCover } from './pixel-mask';
 export interface Region {
   key: string;
   signature: string;
@@ -26,6 +27,7 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
   const requestedRef = useRef(requested);
   requestedRef.current = requested;
   const veil = useRef<HTMLDivElement>(null);
+  const decodedImages = useRef(new Map<string, HTMLImageElement>());
   const motion = useRef<Animation>();
   const swapping = useRef(false);
   useEffect(
@@ -39,12 +41,11 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
     pending.current = decoded;
     if (swapping.current) return;
     const commit = () => {
-      const next = pending.current;
-      pending.current = undefined;
+      const next = decoded;
+      if (pending.current === decoded) pending.current = undefined;
       if (next && next.checkpoint === requestedRef.current) {
         shownRef.current = next;
         setShown(next);
-        pending.current = undefined;
       }
     };
     if (
@@ -52,6 +53,14 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
       matchMedia('(prefers-reduced-motion: reduce)').matches ||
       !veil.current
     ) {
+      commit();
+      return;
+    }
+    const oldImage = decodedImages.current.get(shownRef.current.image);
+    const nextImage = decodedImages.current.get(decoded.image);
+    const cover = oldImage && nextImage ? changedPixelCover(oldImage, nextImage) : undefined;
+    veil.current.replaceChildren(...(cover ? [cover.canvas] : []));
+    if (!cover || !cover.changed) {
       commit();
       return;
     }
@@ -105,6 +114,11 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
       .then(() => {
         if (token !== ticket.current) return;
         const decoded = { ...frame, width: image.naturalWidth, height: image.naturalHeight };
+        decodedImages.current.set(decoded.image, image);
+        // Retain only shown, pending and newest decoded screenshots.
+        for (const key of decodedImages.current.keys())
+          if (![decoded.image, shownRef.current?.image, pending.current?.image].includes(key))
+            decodedImages.current.delete(key);
         display(decoded);
       })
       .catch(() => {});

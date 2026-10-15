@@ -10,6 +10,7 @@ export interface Review {
   current: TrackedFile[];
   paths: string[];
   conflicts: string[];
+  note?: string;
 }
 interface JournalEntry {
   path: string;

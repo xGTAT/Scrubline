@@ -2,11 +2,13 @@
 
 A local source timeline for agent-edited frontends. Capture disk checkpoints, inspect rendered history, review changes, restore selected files or eligible static HTML elements, and Undo without guessing which source produced a screenshot.
 
-## Install 0.8.8
+## Install 0.8.9
 
-The unsigned VSIX is in [`releases/scrubline-panel-0.8.8.vsix`](releases/scrubline-panel-0.8.8.vsix). In VS Code or Antigravity, run **Extensions: Install from VSIX**, choose the file, and follow any IDE reload prompt. Open a trusted, single-folder workspace and run **Scrubline: Open Timeline Panel**.
+The unsigned VSIX is in [`releases/scrubline-panel-0.8.9.vsix`](releases/scrubline-panel-0.8.9.vsix). In VS Code or Antigravity, run **Extensions: Install from VSIX**, choose the file, and follow any IDE reload prompt. Open a trusted, single-folder workspace and run **Scrubline: Open Timeline Panel**.
 
-0.8.8 restores smooth navigation without crossfading two screenshots: the old frame fades into the panel background, the single decoded image swaps while fully covered, then the new frame fades in (90ms out, 110ms in). Slow scrubbing, Prev, Next and Play share this path. Fast requests coalesce to the newest decoded frame; reduced-motion users get an immediate decoded swap. Optional change highlights remain available.
+0.8.9 keeps the page still while changed areas fade. It compares the two decoded screenshots, groups nearby changed pixels into local covers, fades the old content into its surrounding surface, swaps the single screenshot behind those opaque covers, then fades the new content in (90ms out, 110ms in). There is no outgoing screenshot layer, moving crop or whole-page veil for a small edit. Identical screenshots do not animate. Slow scrubbing, Prev, Next and Play share this path; rapid requests settle on the newest requested frame.
+
+These are local screenshot-area fades, not live DOM animations. A changed word can fade without the unchanged navigation, illustration or rest of its heading fading. A broad theme/layout change can cover a broad area. Each changed-area rectangle can include nearby unchanged pixels. If screenshot dimensions differ or image pixels cannot be read, navigation uses an immediate decoded swap instead of guessing a mask. Reduced motion also uses immediate decoded swaps. Optional change highlights remain available.
 
 ### Updating in Antigravity
 
@@ -52,13 +54,15 @@ Confirmation lives directly under Review, before forks, and is viewport-bounded.
 2. A local Chromium window opens the saved webpage at the configured preview route. Hover to see the target boundary and click the element to keep. Escape stops picking.
 3. Return to Scrubline, inspect **Files** and the exact diff, then **Confirm restore**. A configured build/test command must pass before and after selective apply. Undo restores the previous bytes.
 
-Static HTML source elements can be picked without IDs. The exact clicked source node is resolved first. Unique IDs or stable tag/attribute/ancestor identities can map into current source; repeated headings/cards use their original source position only when the document's identity structure is unchanged. Ambiguous structural drift is refused rather than silently selecting another card. Unrelated current markup stays current.
+Static HTML source elements can be picked without IDs. The exact clicked source node is resolved first. Unique IDs or stable semantic anchors can map into current source even when ancestor CSS classes changed; repeated headings/cards use their source position only when the tag/ID skeleton is unchanged. Ambiguous structural drift is refused rather than silently selecting another card. Unrelated current markup stays current.
 
-Content and inline styles travel with the subtree. Linked local CSS uses parsed selector matching, including child/sibling/attribute selectors, SVG selectors and common hover/focus states. Rules travel only when every possible matched target is inside the selected subtree. Scoped `@media`, `@supports`, `@container` and `@layer` rules retain their conditions and cascade positions. Unchanged shared rules, CSS variables, keyframes and unsupported constructs no longer block an otherwise safe selection. Shared or unsupported CSS changes still require whole-file review; inherited shared styling remains current.
+Content and inline styles travel with the subtree. Complete SVGs and self-closing SVG shapes are supported. Paired, unambiguous local CSS rules travel only when each rule matches elements exclusively inside the selected subtree in both versions. This includes common selectors and scoped `@media`, `@supports`, `@container` and `@layer` rules; their positions and conditions stay intact.
+
+Shared CSS changes no longer veto every pick. Shared rules, theme variables, unmatched/unsupported rules and unrelated current edits stay current. The review states this limit before confirmation: a selective element restore is not a promise of the complete historical appearance. Use whole-file review if you intend to restore shared styling too. A matching element with no content or paired exclusive-style delta shows a no-change review with confirmation disabled.
 
 Use the secondary **Hidden element ID** path for source elements you cannot point to on the page. Choose the tracked HTML file and a unique ID without `#`.
 
-Safety limits: ambiguous/missing source identity, duplicate IDs, script-bearing pages, active selected markup, framework-generated DOM, embedded stylesheets and stylesheet-list changes are refused. Unsupported selector/at-rule changes and differing shared CSS are refused with the filename and reason. Complex dynamic selector ownership and arbitrary React/Vue/component rollback are not claimed. Whole-file review and the older standalone navbar prototype remain available. See [Alternatives notes](docs/m4-branches-selective.md).
+Safety limits: ambiguous/missing source identity, duplicate IDs, script-bearing pages, active selected markup, framework-generated DOM, embedded stylesheets and stylesheet-list changes are refused. Shared and unsupported rules are preserved, not silently rolled back. Complex dynamic selector ownership and arbitrary React/Vue/component rollback are not claimed. Whole-file review and the older standalone navbar prototype remain available. See [Alternatives notes](docs/m4-branches-selective.md).
 
 ## Alternatives and layout investigation
 
@@ -91,10 +95,12 @@ npm run check:nomock
 npm run test:ui
 npm run test:host
 npm run package
-node scripts/verify-packaged-mcp.cjs scrubline-panel-0.8.8.vsix
+node scripts/verify-packaged-mcp.cjs scrubline-panel-0.8.9.vsix
 ```
 
-The extension-host test downloads VS Code and needs a display (`xvfb-run` on Linux). Windows CI runs the portable checks. 0.8.8 was also tested in Antigravity on Linux against `xGTAT/web-lab` source `299a8e6cfc2b810d8a4f4ba2793c100bee8bb7a5`: rich index-page announcement mouse selection, responsive CSS restore with newer footer retained, Undo, slow/rapid navigation and Play. Repeated headings/cards have source-level regression coverage. Native Antigravity replacement activation, capture and panel reopen passed with its unrelated AI extension disabled; exact VSIX installation and reinstallation through the IDE installer command also passed. The native Install-from-VSIX file-dialog path was not fully verified. Checked-in navbar image fixtures support the ghost-layer regression; they are test data, not an external-state guarantee.
+The extension-host test downloads VS Code and needs a display (`xvfb-run` on Linux). Windows CI runs the portable checks. 0.8.9 was tested in Antigravity on Linux against a fresh `xGTAT/web-lab` clone at `299a8e6cfc2b810d8a4f4ba2793c100bee8bb7a5`, using the actual `Studio | Scrubline lab` root/index route. Alternatives mouse picks on links and the chair SVG reached review despite current ancestor-class/shared-CSS edits; an h1 restore preserved the newer footer and shared CSS, then Undo restored exact bytes. Slow/rapid navigation and Play passed; paused mid-fade screenshots kept navigation and announcement crops pixel-identical while the changed heading word faded. The fresh test profile's unrelated onboarding overlay was hidden for the workbench inspection, and its AI extension was disabled for the native host regression to stay within the test machine's memory budget.
+
+Source tests cover SVG shapes, repeated elements and current shared-CSS preservation. UI tests cover local-mask opacity/background color, unchanged areas, identical images, reduced motion and rapid seeking. Native Antigravity host tests cover activation, replacement ownership, capture, render, review/apply/Undo and panel reopen. These tests do not establish behavior for the owner's exact unshared checkpoint history or every framework page. Checked-in webpage/image fixtures are regression data, not an external-state guarantee.
 
 - `spikes/host-panel`: extension, panel, storage and tests
 - `fixtures`: test sites and captured regression images

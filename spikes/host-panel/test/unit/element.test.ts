@@ -41,9 +41,10 @@ test('plain HTML element restores content and owned CSS, preserving unrelated cu
       '<link rel="stylesheet" href="site.css"><section id="hero">New</section>',
       'body{margin:20px}#hero{color:blue}'
     );
-    await expect(elementCandidate(store, old, shared, 'index.html', 'hero')).rejects.toThrow(
-      'Shared or unsupported CSS changed'
-    );
+    const sharedTarget = await elementCandidate(store, old, shared, 'index.html', 'hero');
+    expect(
+      (await store.readBlob(sharedTarget.files.find((f) => f.path === 'site.css')!.hash)).toString()
+    ).toContain('margin:20px');
     const duplicate = await capture('<section id="hero">A</section><div id="hero">B</div>', '');
     await expect(elementCandidate(store, old, duplicate, 'index.html', 'hero')).rejects.toThrow(
       'Cannot map'
@@ -189,6 +190,56 @@ test('actual web-lab index accepts ordinary visible elements, repeated card head
     expect(
       (await store.readBlob(candidate.files.find((f) => f.path === 'site.css')!.hash)).toString()
     ).toBe(css);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+test('Studio ancestor theme edits, shared CSS edits and SVG shapes do not veto ordinary mouse picks', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'scrubline-studio-'));
+  const work = path.join(root, 'work');
+  await fs.mkdir(work);
+  const store = new HistoryStore(path.join(root, 'history'));
+  await store.open();
+  try {
+    const html = await fs.readFile('../../fixtures/web-lab-studio/index.html', 'utf8');
+    const css = await fs.readFile('../../fixtures/web-lab-studio/site.css', 'utf8');
+    const capture = async (h: string, c: string) => {
+      await fs.writeFile(path.join(work, 'index.html'), h);
+      await fs.writeFile(path.join(work, 'site.css'), c);
+      const s = await scan(work, store.root);
+      return store.commit(s.files, s.contents, 'save', { kind: 'unattributed' });
+    };
+    const old = await capture(html.replace('theme-charcoal theme-amber', 'theme-light'), css);
+    const current = await capture(
+      html
+        .replace('A calmer place to work.', 'Current title')
+        .replace('Natural textures. More room to think.', 'Keep current card'),
+      css.replace('--bg-page: #121316', '--bg-page: #eeeeee')
+    );
+    const { parse } = await import('parse5');
+    const tree = parse(html) as unknown as { tagName?: string; childNodes?: unknown[] };
+    const paths: { tag: string; path: number[] }[] = [];
+    const visit = (n: typeof tree, path: number[]) => {
+      if (n.tagName) paths.push({ tag: n.tagName, path });
+      for (const [i, child] of (n.childNodes ?? [])
+        .filter((n) => (n as typeof tree).tagName)
+        .entries())
+        visit(child as typeof tree, [...path, i]);
+    };
+    const findBody = (n: typeof tree): typeof tree | undefined =>
+      n.tagName === 'body'
+        ? n
+        : (n.childNodes ?? []).map((n) => findBody(n as typeof tree)).find(Boolean);
+    visit(findBody(tree)!, []);
+    for (const { tag, path: indices } of paths.filter((p) =>
+      ['a', 'svg', 'ellipse', 'rect', 'path', 'h1', 'h2', 'p'].includes(p.tag)
+    )) {
+      const result = await elementCandidate(store, old, current, 'index.html', '', indices);
+      const resultCss = (
+        await store.readBlob(result.files.find((f) => f.path === 'site.css')!.hash)
+      ).toString();
+      expect(resultCss, tag).toContain('--bg-page: #eeeeee');
+    }
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

@@ -130,3 +130,10 @@ Source snapshots, ignore/limit checks, watcher reconciliation and crash recovery
 - Parse CSS selectors, preserve unchanged shared tokens and support exclusive rules under media/supports/container/layer conditions without changing cascade positions.
 - Drain and dispose prior activations, with same-IDE-session writer handoff and genuine cross-window exclusion. Older installed runtimes may need one window reload to adopt the protocol.
 - Add rich web-lab index fixture, responsive picker, fade opacity, hot activation and writer-handoff regressions.
+
+## 0.8.9
+
+- Keep unchanged screenshot areas still. Group actual pixel differences into local fade covers with surrounding-surface fills; skip identical-image fades and use atomic swaps for incompatible images.
+- Resolve descendants across ancestor class/theme edits using semantic anchors and guarded source positions. Support self-closing SVG shapes.
+- Preserve current shared/unmatched CSS instead of refusing every element pick. State the selective-style scope in review, and explain no-change selections without offering confirmation.
+- Add current Studio source regressions, local-cover color/unchanged-area checks and real Alternatives picker/apply/Undo plus paused-mid-fade verification.

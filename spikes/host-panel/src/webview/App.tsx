@@ -550,6 +550,7 @@ export const App: React.FC = () => {
       )}
       {state.review && (
         <section role="region" aria-label="Restore confirmation" className="restore-confirmation">
+          {state.review.note && <p className="element-review-note">{state.review.note}</p>}
           {state.review.conflicts.length > 0 ? (
             <>
               <span>Workspace drift. Restore blocked.</span>
@@ -591,8 +592,14 @@ export const App: React.FC = () => {
                 </section>
               )}
               <span>
-                Restore {state.review.paths.length} file{state.review.paths.length === 1 ? '' : 's'}
-                ?
+                {state.review.paths.length ? (
+                  <>
+                    Restore {state.review.paths.length} file
+                    {state.review.paths.length === 1 ? '' : 's'}?
+                  </>
+                ) : (
+                  'No content or exclusive CSS changes to restore.'
+                )}
               </span>
               <details>
                 <summary>Files</summary>

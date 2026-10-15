@@ -1,0 +1,365 @@
+* {
+    box-sizing: border-box;
+}
+
+:root {
+    --bg-page: #121316;
+    --bg-surface: #181a20;
+    --bg-card: #1a1d24;
+    --bg-nav: #16181d;
+    --border-subtle: #262a33;
+    --border-card: #282c35;
+    --text-primary: #f3f4f6;
+    --text-secondary: #9ca3af;
+    --text-muted: #6b7280;
+    --accent: #34d399;
+    --primary-btn: #277a66;
+    --primary-btn-hover: #32967e;
+    --art-bg: #181b22;
+}
+
+body {
+    margin: 0;
+    background: var(--bg-page);
+    color: var(--text-primary);
+    font: 16px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+}
+
+a {
+    color: inherit;
+}
+
+nav {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 18px;
+    padding: 20px max(24px, calc((100vw - 1120px) / 2));
+    background: var(--bg-nav);
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+nav strong {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: -0.3px;
+}
+
+nav div {
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+}
+
+nav a {
+    text-decoration: none;
+    font-size: 14px;
+    color: var(--text-secondary);
+    transition: color 0.15s ease;
+}
+
+nav a:hover,
+nav a.active {
+    color: var(--text-primary);
+}
+
+main {
+    max-width: 1120px;
+    margin: auto;
+    padding: 40px 24px;
+}
+
+h1 {
+    font-size: clamp(30px, 5vw, 56px);
+    line-height: 1.08;
+    letter-spacing: -1.5px;
+    margin: 12px 0 24px;
+    color: #f9fafb;
+    text-wrap: balance;
+}
+
+h2 {
+    font-size: 23px;
+    margin: 0 0 14px;
+    color: var(--text-primary);
+    letter-spacing: -0.4px;
+}
+
+.eyebrow {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--accent);
+}
+
+p {
+    color: var(--text-secondary);
+}
+
+.hero {
+    display: grid;
+    grid-template-columns: 1fr 1.2fr;
+    gap: 48px;
+    align-items: center;
+    padding: 30px 0 54px;
+}
+
+.art {
+    height: 300px;
+    border-radius: 22px;
+    background: var(--art-bg);
+    border: 1px solid var(--border-card);
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.art svg {
+    width: 82%;
+    height: 82%;
+}
+
+.art svg ellipse {
+    fill: #1f2d26;
+    transition: fill 0.3s ease;
+}
+
+.art svg rect {
+    fill: #2d6b5c;
+    transition: fill 0.3s ease;
+}
+
+.art svg path:nth-of-type(1) {
+    fill: #43967f;
+    transition: fill 0.3s ease;
+}
+
+.art svg path:nth-of-type(2) {
+    stroke: #253d33;
+    transition: stroke 0.3s ease;
+}
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+}
+
+.card {
+    background: var(--bg-card);
+    padding: 24px;
+    border: 1px solid var(--border-card);
+    border-radius: 14px;
+    box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.4);
+    transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(255, 255, 255, 0.16);
+    box-shadow: 0 8px 24px -2px rgba(0, 0, 0, 0.6);
+}
+
+.card strong {
+    display: block;
+    font-size: 26px;
+    color: var(--text-primary);
+}
+
+.primary,
+button {
+    background: var(--primary-btn);
+    color: #ffffff;
+    border: 0;
+    border-radius: 8px;
+    padding: 12px 18px;
+    font: inherit;
+    font-weight: 500;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+    transition: background-color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+.primary:hover,
+button:hover {
+    background: var(--primary-btn-hover);
+    box-shadow: 0 4px 14px rgba(39, 122, 102, 0.35);
+}
+
+.primary:active,
+button:active {
+    transform: scale(0.98);
+}
+
+.secondary {
+    background: #252831;
+    color: var(--text-primary);
+    border: 1px solid #343a46;
+}
+
+.secondary:hover {
+    background: #2f3440;
+}
+
+footer {
+    max-width: 1120px;
+    margin: 30px auto;
+    padding: 20px 24px;
+    border-top: 1px solid var(--border-subtle);
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.stats {
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+}
+
+.stats .card {
+    flex: 1;
+    min-width: 150px;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+td,
+th {
+    text-align: left;
+    padding: 15px 8px;
+    border-bottom: 1px solid var(--border-subtle);
+    font-size: 14px;
+    color: var(--text-primary);
+}
+
+th {
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.pill {
+    padding: 4px 9px;
+    background: rgba(52, 211, 153, 0.15);
+    border-radius: 30px;
+    color: var(--accent);
+    font-size: 12px;
+}
+
+.two {
+    display: grid;
+    grid-template-columns: 1.3fr 1fr;
+    gap: 24px;
+}
+
+label {
+    display: block;
+    font-weight: 600;
+    margin: 14px 0 6px;
+    color: var(--text-primary);
+}
+
+input,
+select,
+textarea {
+    width: 100%;
+    border: 1px solid #2e3238;
+    padding: 12px;
+    border-radius: 7px;
+    font: inherit;
+    background: #16181d;
+    color: var(--text-primary);
+    transition: border-color 0.15s ease;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+    border-color: var(--accent);
+}
+
+input[type=checkbox] {
+    width: auto;
+}
+
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+#feedback {
+    min-height: 26px;
+    color: var(--accent);
+    font-weight: 600;
+}
+
+@media(max-width:700px) {
+    .hero,
+    .grid,
+    .two {
+        grid-template-columns: 1fr;
+    }
+
+    .hero {
+        gap: 24px;
+    }
+
+    nav {
+        align-items: start;
+        flex-direction: column;
+    }
+
+    main {
+        padding-top: 24px;
+    }
+
+    .art {
+        height: 230px;
+    }
+}
+
+@media(prefers-reduced-motion:reduce) {
+    * {
+        scroll-behavior: auto;
+    }
+}
+/* A second, visible action for the Scrubline demo's first checkpoint. */
+.hero-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.secondary { display: inline-flex; align-items: center; gap: 12px; padding: 12px 18px; border: 1px solid var(--accent); border-radius: 8px; text-decoration: none; color: var(--accent); background: transparent; }
+.secondary:hover { background: var(--bg-card); }
+.secondary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+
+/* Warm palette for the third visual checkpoint, scoped to the studio page. */
+.theme-amber {
+    --accent: #fbbf24;
+    --primary-btn: #a6500c;
+    --primary-btn-hover: #b85c0e;
+    --art-bg: #29211a;
+}
+.theme-amber .art svg ellipse { fill: #49331e; }
+.theme-amber .art svg rect { fill: #b76b25; }
+.theme-amber .art svg path:nth-of-type(1) { fill: #e5a447; }
+.theme-amber .art svg path:nth-of-type(2) { stroke: #76502b; }
+.theme-amber .primary:hover { box-shadow: 0 4px 14px rgba(166, 80, 12, 0.35); }
+
+/* Featured collection layout for the fourth visual checkpoint. */
+.featured-collection { grid-template-columns: 1.6fr 1fr; }
+.collection-feature { grid-row: span 2; min-height: 290px; display: flex; flex-direction: column; justify-content: center; padding: 36px; background: #352718; border-color: #705020; }
+.collection-feature h2 { font-size: clamp(30px, 4vw, 44px); margin: 14px 0 6px; }
+.collection-detail { color: #e5a447; font-size: 14px; margin-top: 18px; }
+@media(max-width:700px) { .featured-collection { grid-template-columns: 1fr; } .collection-feature { grid-row: auto; min-height: 250px; padding: 28px; } }
+
+/* Announcement strip for the fifth visual checkpoint. */
+.studio-announcement { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 24px 28px; margin-bottom: 12px; border-radius: 14px; background: #fbbf24; color: #241b0e; }
+.studio-announcement div { display: flex; flex-direction: column; gap: 4px; }
+.announcement-label { font-size: 11px; font-weight: 800; letter-spacing: 2px; }
+.studio-announcement strong { font-size: clamp(20px, 2.5vw, 26px); line-height: 1.2; }
+.studio-announcement a { display: inline-flex; gap: 18px; align-items: center; font-weight: 700; white-space: nowrap; text-underline-offset: 4px; }
+.studio-announcement a:focus-visible { outline: 2px solid #241b0e; outline-offset: 5px; }
+@media(max-width:700px) { .studio-announcement { align-items: flex-start; flex-direction: column; gap: 16px; padding: 24px; } }

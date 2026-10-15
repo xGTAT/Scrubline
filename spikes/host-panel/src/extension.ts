@@ -960,6 +960,8 @@ export async function activate(context: vscode.ExtensionContext) {
                 review = await timeline!.exclusive(() =>
                   restore!.review(candidate, current, state.unsaved)
                 );
+                review.note =
+                  'Element content, inline styles and paired exclusive CSS only. Shared styles and unmatched rules stay current; this may differ from the historical appearance.';
                 selectiveTarget = candidate;
                 selected = pickedSource.id;
                 publish(state);
@@ -1009,6 +1011,8 @@ export async function activate(context: vscode.ExtensionContext) {
           review = await timeline.exclusive(() =>
             restore!.review(candidate, current, state.unsaved)
           );
+          review.note =
+            'Element content, inline styles and paired exclusive CSS only. Shared styles and unmatched rules stay current; this may differ from the historical appearance.';
           selectiveTarget = candidate;
           selected = target.id;
           publish(state);

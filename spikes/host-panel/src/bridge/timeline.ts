@@ -52,7 +52,13 @@ export interface TimelineState {
     label?: string;
     message?: string;
   };
-  review?: { token: string; checkpoint: string; paths: string[]; conflicts: string[] };
+  review?: {
+    token: string;
+    checkpoint: string;
+    paths: string[];
+    conflicts: string[];
+    note?: string;
+  };
   measuredPacket?: import('../targeting/measured').MeasuredPacket;
   rollback?: { message: string; changes?: import('../investigation/change-units').CssUnit[] };
   canUndo?: boolean;
