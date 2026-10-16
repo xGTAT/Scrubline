@@ -275,3 +275,63 @@ test('assertSplicePreserves throws when parse recovery silently drops an outside
     /would vanish/
   );
 });
+
+import { mergePreservingAdditions } from '../../src/branches/element';
+
+test('mergePreservingAdditions restores old children and keeps added elements', () => {
+  const oldSlice =
+    '<section id="hero"><h1 id="title">Old title</h1><button id="cta">Buy</button></section>';
+  const nowSlice =
+    '<section id="hero"><h1 id="title">New title</h1><button id="cta">Buy now</button><a id="promo" href="/sale">Sale</a></section>';
+  const merged = mergePreservingAdditions(oldSlice, nowSlice);
+  expect(merged).toContain('Old title'); // matched child reverts to the old version
+  expect(merged).not.toContain('New title');
+  expect(merged).toContain('id="promo"'); // the added element survives
+  expect(merged.indexOf('id="promo"')).toBeGreaterThan(merged.indexOf('id="cta"')); // appended after restored children
+});
+
+test('mergePreservingAdditions keeps added elements without ids (tag+index matching)', () => {
+  const oldSlice = '<ul><li>One</li></ul>';
+  const nowSlice = '<ul><li>One changed</li><li>Two added</li></ul>';
+  const merged = mergePreservingAdditions(oldSlice, nowSlice);
+  expect(merged).toBe('<ul><li>One</li><li>Two added</li></ul>');
+});
+
+test('mergePreservingAdditions returns the old slice unchanged when nothing was added', () => {
+  const oldSlice = '<div><p>Same</p></div>';
+  const nowSlice = '<div><p>Same but edited</p></div>';
+  expect(mergePreservingAdditions(oldSlice, nowSlice)).toBe(oldSlice);
+});
+
+test('element revert keeps elements added inside the target after the old checkpoint', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'scrubline-threeway-'));
+  try {
+    const work = path.join(root, 'project');
+    await fs.mkdir(work);
+    const store = new HistoryStore(path.join(root, 'history'));
+    await store.open();
+    const capture = async (html: string, css: string) => {
+      await fs.writeFile(path.join(work, 'index.html'), html);
+      await fs.writeFile(path.join(work, 'site.css'), css);
+      const s = await scan(work, store.root);
+      return store.commit(s.files, s.contents, 'save', { kind: 'unattributed' });
+    };
+    const old = await capture(
+      '<link rel="stylesheet" href="site.css"><main><section id="hero" style="padding:8px"><b>Old</b></section></main>',
+      'body{margin:0}#hero{color:red}'
+    );
+    const now = await capture(
+      '<link rel="stylesheet" href="site.css"><main><section id="hero" style="padding:20px">New<a id="promo" href="/sale">Sale</a></section></main>',
+      'body{margin:0}#hero{color:blue}'
+    );
+    const target = await elementCandidate(store, old, now, 'index.html', 'hero');
+    const html = (
+      await store.readBlob(target.files.find((f) => f.path === 'index.html')!.hash)
+    ).toString();
+    expect(html).toContain('<b>Old</b>'); // reverted content
+    expect(html).toContain('id="promo"'); // addition kept
+    expect(html).not.toContain('>New<');
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

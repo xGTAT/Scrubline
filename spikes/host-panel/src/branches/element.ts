@@ -14,8 +14,8 @@ interface HtmlNode {
   sourceCodeLocation?: {
     startOffset: number;
     endOffset: number;
-    startTag?: unknown;
-    endTag?: unknown;
+    startTag?: { startOffset: number; endOffset: number };
+    endTag?: { startOffset: number; endOffset: number };
   } | null;
 }
 // Plain HTML with explicit ownership. Never infer framework or shared-style ownership.
@@ -70,6 +70,57 @@ export function assertSplicePreserves(
         `Revert refused: ${count} <${tag}> element(s) outside the reverted element would become ${afterCount}.`
       );
   }
+}
+
+/**
+ * Three-way revert: restore the old version of the subtree while keeping
+ * elements added inside it since the old checkpoint. Children of the target
+ * match by id when both sides have one, else by tag plus occurrence index
+ * among same-tag siblings. Matched children revert to the old version;
+ * unmatched current children are additions and are kept, appended after the
+ * restored children (their position may move; they must never vanish).
+ */
+export function mergePreservingAdditions(oldSlice: string, nowSlice: string): string {
+  const rootOf = (html: string) => {
+    const doc = parse(html, { sourceCodeLocationInfo: true });
+    let found: HtmlNode | undefined;
+    const visit = (n: HtmlNode) => {
+      if (!found && n.tagName && n.sourceCodeLocation?.startTag) found = n;
+      for (const c of n.childNodes ?? []) visit(c);
+    };
+    visit(doc);
+    return found;
+  };
+  const oldRoot = rootOf(oldSlice);
+  const nowRoot = rootOf(nowSlice);
+  const oldLoc = oldRoot?.sourceCodeLocation;
+  if (!oldRoot || !oldLoc?.startTag || !oldLoc.endTag || !nowRoot) return oldSlice;
+
+  const elementChildren = (n: HtmlNode) => (n.childNodes ?? []).filter((c) => c.tagName);
+  const oldChildren = elementChildren(oldRoot);
+  const nowChildren = elementChildren(nowRoot);
+
+  const keyOf = (n: HtmlNode, siblings: HtmlNode[]): string => {
+    const idAttr = n.attrs?.find((a) => a.name === 'id')?.value;
+    if (idAttr) return `id:${idAttr}`;
+    const sameTag = siblings.filter((s) => s.tagName === n.tagName);
+    return `tag:${n.tagName}:${sameTag.indexOf(n)}`;
+  };
+  const oldKeys = new Set(oldChildren.map((c) => keyOf(c, oldChildren)));
+  const additions = nowChildren.filter((c) => !oldKeys.has(keyOf(c, nowChildren)));
+  if (!additions.length) return oldSlice;
+
+  let additionsHtml = '';
+  for (const a of additions) {
+    const loc = a.sourceCodeLocation;
+    if (!loc) return oldSlice; // Cannot bound an addition: refuse to merge, keep pure restore.
+    additionsHtml += nowSlice.slice(loc.startOffset, loc.endOffset);
+  }
+  return (
+    oldSlice.slice(0, oldLoc.endTag.startOffset) +
+    additionsHtml +
+    oldSlice.slice(oldLoc.endTag.startOffset)
+  );
 }
 
 export async function elementCandidate(
@@ -234,9 +285,12 @@ export async function elementCandidate(
   if (JSON.stringify(old.links) !== JSON.stringify(now.links))
     throw new Error('Stylesheet list changed. Element ownership unresolved.');
   const changes = new Map<string, string>();
-  const spliced =
-    nowHtml.slice(0, now.start) + oldHtml.slice(old.start, old.end) + nowHtml.slice(now.end);
-  assertSplicePreserves(nowHtml, now.start, now.end, spliced, old.end - old.start);
+  const restored = mergePreservingAdditions(
+    oldHtml.slice(old.start, old.end),
+    nowHtml.slice(now.start, now.end)
+  );
+  const spliced = nowHtml.slice(0, now.start) + restored + nowHtml.slice(now.end);
+  assertSplicePreserves(nowHtml, now.start, now.end, spliced, restored.length);
   changes.set(document, spliced);
   inspect(changes.get(document)!, elementPath ? old.identity : undefined); // Refuse ids introduced by the restored subtree colliding with current markup.
   for (const href of old.links) {
