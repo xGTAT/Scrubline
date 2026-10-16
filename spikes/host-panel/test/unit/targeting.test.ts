@@ -253,3 +253,80 @@ test('sanitized crop preserves inherited dark background and white heading contr
     await new Promise<void>((r) => server.close(() => r()));
   }
 }, 15000);
+
+test('overlay all list is source of truth, reload cannot invert state, and removing last selection clears packet', async () => {
+  const { createServer } = await import('node:http');
+  const server = createServer((_req, res) => {
+    res.setHeader('content-type', 'text/html');
+    res.end('<body><button id="btn1">Button 1</button><button id="btn2">Button 2</button></body>');
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const port = (server.address() as import('node:net').AddressInfo).port;
+  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'scrubline-multitarget-'));
+  dirs.push(temp);
+  const { TargetSession } = await import('../../src/targeting/session');
+  const notifications: Array<{
+    selection?: import('../../src/targeting/packet').Selection;
+    crop?: string;
+    all?: import('../../src/targeting/packet').Selection[];
+  }> = [];
+
+  const session = new TargetSession(
+    chromium.executablePath(),
+    temp,
+    (s, c, a) => {
+      notifications.push({ selection: s, crop: c, all: a });
+    },
+    () => {}
+  );
+
+  try {
+    await session.start(`http://127.0.0.1:${port}`, [], true);
+    const page = (session as unknown as { page: import('playwright-core').Page }).page;
+
+    // 1. Select btn1
+    await page.locator('#btn1').click();
+    await expect.poll(() => notifications.length, { timeout: 5000 }).toBe(1);
+    expect(notifications[0].selection?.selector).toBe('#btn1');
+    expect(notifications[0].all).toHaveLength(1);
+    expect(session.currentSelections).toHaveLength(1);
+
+    // 2. Select btn2
+    await page.locator('#btn2').click();
+    await expect.poll(() => notifications.length, { timeout: 5000 }).toBe(2);
+    expect(notifications[1].selection?.selector).toBe('#btn2');
+    expect(notifications[1].all).toHaveLength(2);
+    expect(session.currentSelections).toHaveLength(2);
+
+    // 3. Deselect btn2
+    await page.locator('#btn2').click();
+    await expect.poll(() => notifications.length, { timeout: 5000 }).toBe(3);
+    expect(notifications[2].selection?.selector).toBe('#btn1');
+    expect(notifications[2].all).toHaveLength(1);
+    expect(session.currentSelections).toHaveLength(1);
+
+    // 4. Deselect btn1 (last selection removed -> notify undefined)
+    await page.locator('#btn1').click();
+    await expect.poll(() => notifications.length, { timeout: 5000 }).toBe(4);
+    expect(notifications[3].selection).toBeUndefined();
+    expect(notifications[3].all).toEqual([]);
+    expect(session.currentSelections).toEqual([]);
+
+    // 5. Select btn1 again
+    await page.locator('#btn1').click();
+    await expect.poll(() => notifications.length, { timeout: 5000 }).toBe(5);
+    expect(notifications[4].selection?.selector).toBe('#btn1');
+    expect(session.currentSelections).toHaveLength(1);
+
+    // 6. Reload page - overlay resets to empty. Next click selects btn1 without inversion.
+    await page.reload();
+    await page.locator('#btn1').click();
+    await expect.poll(() => notifications.length, { timeout: 5000 }).toBe(6);
+    expect(notifications[5].selection?.selector).toBe('#btn1');
+    expect(notifications[5].all).toHaveLength(1);
+    expect(session.currentSelections).toHaveLength(1);
+  } finally {
+    await session.stop();
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+}, 15000);

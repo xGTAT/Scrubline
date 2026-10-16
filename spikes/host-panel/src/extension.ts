@@ -1569,18 +1569,14 @@ export async function activate(context: vscode.ExtensionContext) {
 
           const resolved = await resolveElementFiles(timeline.store, elementSelections);
 
-          for (const sel of elementSelections) {
-            await staticSectionPaths(timeline.store, sel.base, sel.document);
-            await staticSectionPaths(timeline.store, current, sel.document);
-          }
-
           const multiItems = resolved.map((r) => ({
             base: r.selection.base,
             selected: r.selection.checkpoint,
             paths: r.paths,
+            document: r.document,
             selector: r.selection.selector
           }));
-          const merged = mergeMultiElements(current, multiItems);
+          const merged = await mergeMultiElements(current, multiItems, timeline.store);
           if (merged.conflicts.length) {
             throw new Error(
               `Both sides changed in ${merged.conflicts.join(', ')}. Multi-element apply blocked.`
@@ -1601,8 +1597,14 @@ export async function activate(context: vscode.ExtensionContext) {
         if (message.type === 'clear-target-selections') {
           await targetSession?.clear();
           if (targeting) {
-            targeting.selections = [];
-            targeting.selection = undefined;
+            targeting = {
+              status: 'on',
+              packet: undefined,
+              summary: undefined,
+              crop: undefined,
+              selection: undefined,
+              selections: []
+            };
             publish(state);
           }
         }
@@ -1620,6 +1622,18 @@ export async function activate(context: vscode.ExtensionContext) {
             executable,
             timeline.store.root,
             (selection, crop, all) => {
+              if (!selection || !all || all.length === 0) {
+                targeting = {
+                  status: 'on',
+                  packet: undefined,
+                  summary: undefined,
+                  crop: undefined,
+                  selection: undefined,
+                  selections: []
+                };
+                publish(state);
+                return;
+              }
               const packet = makePacket(cp, previous, selection, redactions);
               targeting = {
                 status: 'ready',
@@ -1627,7 +1641,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 summary: packet.summary,
                 crop: crop ? view.asWebviewUri(vscode.Uri.file(crop)).toString() : undefined,
                 selection,
-                selections: all ?? (selection ? [selection] : [])
+                selections: all
               };
               publish(state);
             },

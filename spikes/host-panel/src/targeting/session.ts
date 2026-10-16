@@ -14,7 +14,7 @@ export class TargetSession {
   constructor(
     readonly executable: string,
     readonly storeRoot: string,
-    readonly notify: (value: Selection, crop?: string, all?: Selection[]) => void,
+    readonly notify: (value?: Selection, crop?: string, all?: Selection[]) => void,
     readonly unavailable: (message: string) => void
   ) {}
   get currentSelections(): Selection[] {
@@ -55,64 +55,105 @@ export class TargetSession {
     this.page = await this.browser.newPage({ viewport });
     const page = this.page;
     await page.exposeBinding('__scrublineStopped', () => this.unavailable('Targeting stopped.'));
-    await page.exposeBinding('__scrublineSelect', async (source, value: Selection) => {
-      if (source.frame !== page.mainFrame() || new URL(page.url()).origin !== this.activeOrigin)
-        return;
-      if (
-        !value ||
-        typeof value.selector !== 'string' ||
-        value.selector.length > 1000 ||
-        typeof value.fingerprint !== 'string' ||
-        !['tag', 'name', 'snippet', 'route'].every(
-          (k) => typeof (value as unknown as Record<string, unknown>)[k] === 'string'
+    await page.exposeBinding(
+      '__scrublineSelect',
+      async (source, value: Selection, all?: Selection[]) => {
+        if (source.frame !== page.mainFrame() || new URL(page.url()).origin !== this.activeOrigin)
+          return;
+        if (
+          !value ||
+          typeof value.selector !== 'string' ||
+          value.selector.length > 1000 ||
+          typeof value.fingerprint !== 'string' ||
+          !['tag', 'name', 'snippet', 'route'].every(
+            (k) => typeof (value as unknown as Record<string, unknown>)[k] === 'string'
+          )
         )
-      )
-        return;
-      const existingIdx = this.selections.findIndex((s) => s.selector === value.selector);
-      if (existingIdx >= 0) {
-        this.selections.splice(existingIdx, 1);
-        this.selection = this.selections.at(-1);
-        if (this.page === page) {
-          if (this.selection) {
-            this.notify(this.selection, undefined, [...this.selections]);
-          } else {
-            this.notify(
-              { selector: '', tag: '', name: '', snippet: '', route: '', fingerprint: '' },
-              undefined,
-              []
-            );
+          return;
+
+        // Treat overlay's all list as the source of truth
+        this.selections = all ? [...all] : [value];
+
+        if (this.selections.length === 0) {
+          this.selection = undefined;
+          if (this.page === page) {
+            this.notify(undefined, undefined, []);
           }
+          return;
         }
-        return;
-      }
-      this.selections.push(value);
-      this.selection = value;
-      let crop: string | undefined;
-      let cropPage: Page | undefined;
-      try {
-        const element = page.locator(value.selector);
-        const source = await element.evaluate((el) => {
-          const clone = el.cloneNode(true) as Element;
-          const originals = [el, ...el.querySelectorAll('*')];
-          const copies = [clone, ...clone.querySelectorAll('*')];
-          const properties = [
-            'color',
-            'background-color',
-            'font-size',
-            'font-weight',
-            'font-family',
-            'line-height',
-            'padding',
-            'border-radius',
-            'display',
-            'text-align'
-          ];
-          for (let i = 0; i < copies.length; i++) {
-            const copy = copies[i],
-              original = originals[i];
-            for (const attr of [...copy.attributes]) copy.removeAttribute(attr.name);
-            if (
-              ![
+
+        const isSelected = this.selections.some((s) => s.selector === value.selector);
+        if (!isSelected) {
+          this.selection = this.selections.at(-1);
+          if (this.page === page && this.selection) {
+            this.notify(this.selection, undefined, [...this.selections]);
+          }
+          return;
+        }
+
+        this.selection = value;
+        let crop: string | undefined;
+        let cropPage: Page | undefined;
+        try {
+          const element = page.locator(value.selector);
+          const source = await element.evaluate((el) => {
+            const clone = el.cloneNode(true) as Element;
+            const originals = [el, ...el.querySelectorAll('*')];
+            const copies = [clone, ...clone.querySelectorAll('*')];
+            const properties = [
+              'color',
+              'background-color',
+              'font-size',
+              'font-weight',
+              'font-family',
+              'line-height',
+              'padding',
+              'border-radius',
+              'display',
+              'text-align'
+            ];
+            for (let i = 0; i < copies.length; i++) {
+              const copy = copies[i],
+                original = originals[i];
+              for (const attr of [...copy.attributes]) copy.removeAttribute(attr.name);
+              if (
+                ![
+                  'DIV',
+                  'SPAN',
+                  'P',
+                  'BUTTON',
+                  'A',
+                  'H1',
+                  'H2',
+                  'H3',
+                  'H4',
+                  'UL',
+                  'OL',
+                  'LI',
+                  'STRONG',
+                  'EM',
+                  'SMALL',
+                  'LABEL'
+                ].includes(copy.tagName)
+              ) {
+                copy.textContent = '[media or control hidden]';
+                for (const child of [...copy.children]) child.remove();
+              }
+              const styles = getComputedStyle(original);
+              const safeStyle = properties
+                .map((p) => `${p}:${styles.getPropertyValue(p)}`)
+                .join(';');
+              copy.setAttribute('style', safeStyle);
+            }
+            // Serialize only inert tags. Unknown tags become spans; no URLs, scripts or CSS content.
+            const inert = document.createElement('div');
+            function append(node: Node, parent: Element) {
+              if (node.nodeType === Node.TEXT_NODE) {
+                parent.append(document.createTextNode(node.textContent ?? ''));
+                return;
+              }
+              if (!(node instanceof Element)) return;
+              const allowed = [
                 'DIV',
                 'SPAN',
                 'P',
@@ -129,107 +170,74 @@ export class TargetSession {
                 'EM',
                 'SMALL',
                 'LABEL'
-              ].includes(copy.tagName)
-            ) {
-              copy.textContent = '[media or control hidden]';
-              for (const child of [...copy.children]) child.remove();
+              ];
+              const safe = document.createElement(
+                allowed.includes(node.tagName) ? node.tagName.toLowerCase() : 'span'
+              );
+              safe.setAttribute('style', node.getAttribute('style') ?? '');
+              parent.append(safe);
+              for (const child of [...node.childNodes]) append(child, safe);
             }
-            const styles = getComputedStyle(original);
-            const safeStyle = properties.map((p) => `${p}:${styles.getPropertyValue(p)}`).join(';');
-            copy.setAttribute('style', safeStyle);
-          }
-          // Serialize only inert tags. Unknown tags become spans; no URLs, scripts or CSS content.
-          const inert = document.createElement('div');
-          function append(node: Node, parent: Element) {
-            if (node.nodeType === Node.TEXT_NODE) {
-              parent.append(document.createTextNode(node.textContent ?? ''));
-              return;
+            append(clone, inert);
+            // Keep inherited solid background without copying URLs or page content.
+            const layers: number[][] = [];
+            for (let node: Element | null = el; node; node = node.parentElement) {
+              const channels = getComputedStyle(node)
+                .backgroundColor.match(/[\d.]+/g)
+                ?.map(Number);
+              if (channels && channels.length >= 3) layers.push(channels);
             }
-            if (!(node instanceof Element)) return;
-            const allowed = [
-              'DIV',
-              'SPAN',
-              'P',
-              'BUTTON',
-              'A',
-              'H1',
-              'H2',
-              'H3',
-              'H4',
-              'UL',
-              'OL',
-              'LI',
-              'STRONG',
-              'EM',
-              'SMALL',
-              'LABEL'
-            ];
-            const safe = document.createElement(
-              allowed.includes(node.tagName) ? node.tagName.toLowerCase() : 'span'
-            );
-            safe.setAttribute('style', node.getAttribute('style') ?? '');
-            parent.append(safe);
-            for (const child of [...node.childNodes]) append(child, safe);
+            let background = [255, 255, 255];
+            for (const layer of layers.reverse()) {
+              const alpha = Math.min(1, Math.max(0, layer[3] ?? 1));
+              background = background.map((v, i) => Math.round(layer[i] * alpha + v * (1 - alpha)));
+            }
+            return {
+              background: `rgb(${background.join(',')})`,
+              html: inert.innerHTML,
+              width: Math.min(960, Math.max(100, el.getBoundingClientRect().width))
+            };
+          });
+          cropPage = await this.browser!.newPage({
+            viewport: { width: Math.ceil(source.width) + 32, height: 600 }
+          });
+          await cropPage.setContent(
+            '<!doctype html><meta charset="utf-8"><body style="margin:16px"></body>'
+          );
+          await cropPage.evaluate((source) => {
+            document.body.style.backgroundColor = source.background;
+            document.body.innerHTML = source.html;
+          }, source);
+          const texts = await cropPage.locator('body').evaluate((el) => {
+            const words: string[] = [];
+            const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+            let node: Node | null;
+            while ((node = walk.nextNode())) words.push(node.textContent ?? '');
+            return words;
+          });
+          let replacements = texts.map((text) => redact(text, secrets));
+          const joined = texts.join('');
+          if (redact(joined, secrets) !== joined) {
+            replacements = [redact(joined, secrets), ...texts.slice(1).map(() => '')];
           }
-          append(clone, inert);
-          // Keep inherited solid background without copying URLs or page content.
-          const layers: number[][] = [];
-          for (let node: Element | null = el; node; node = node.parentElement) {
-            const channels = getComputedStyle(node)
-              .backgroundColor.match(/[\d.]+/g)
-              ?.map(Number);
-            if (channels && channels.length >= 3) layers.push(channels);
-          }
-          let background = [255, 255, 255];
-          for (const layer of layers.reverse()) {
-            const alpha = Math.min(1, Math.max(0, layer[3] ?? 1));
-            background = background.map((v, i) => Math.round(layer[i] * alpha + v * (1 - alpha)));
-          }
-          return {
-            background: `rgb(${background.join(',')})`,
-            html: inert.innerHTML,
-            width: Math.min(960, Math.max(100, el.getBoundingClientRect().width))
-          };
-        });
-        cropPage = await this.browser!.newPage({
-          viewport: { width: Math.ceil(source.width) + 32, height: 600 }
-        });
-        await cropPage.setContent(
-          '<!doctype html><meta charset="utf-8"><body style="margin:16px"></body>'
-        );
-        await cropPage.evaluate((source) => {
-          document.body.style.backgroundColor = source.background;
-          document.body.innerHTML = source.html;
-        }, source);
-        const texts = await cropPage.locator('body').evaluate((el) => {
-          const words: string[] = [];
-          const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-          let node: Node | null;
-          while ((node = walk.nextNode())) words.push(node.textContent ?? '');
-          return words;
-        });
-        let replacements = texts.map((text) => redact(text, secrets));
-        const joined = texts.join('');
-        if (redact(joined, secrets) !== joined) {
-          replacements = [redact(joined, secrets), ...texts.slice(1).map(() => '')];
+          await cropPage.locator('body').evaluate((el, replacements) => {
+            const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+            let node: Node | null;
+            let i = 0;
+            while ((node = walk.nextNode())) node.textContent = replacements[i++];
+          }, replacements);
+          const bytes = await cropPage.locator('body').screenshot({ timeout: 3000 });
+          crop = path.join(this.storeRoot, 'targets', `${Date.now()}.png`);
+          await atomicWrite(crop, bytes);
+        } catch {
+          /* Text packet remains available when sanitized crop cannot be made. */
+        } finally {
+          await cropPage?.close().catch(() => {});
         }
-        await cropPage.locator('body').evaluate((el, replacements) => {
-          const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-          let node: Node | null;
-          let i = 0;
-          while ((node = walk.nextNode())) node.textContent = replacements[i++];
-        }, replacements);
-        const bytes = await cropPage.locator('body').screenshot({ timeout: 3000 });
-        crop = path.join(this.storeRoot, 'targets', `${Date.now()}.png`);
-        await atomicWrite(crop, bytes);
-      } catch {
-        /* Text packet remains available when sanitized crop cannot be made. */
-      } finally {
-        await cropPage?.close().catch(() => {});
+        if (this.page === page && this.selection === value)
+          this.notify(value, crop, [...this.selections]);
       }
-      if (this.page === page && this.selection === value)
-        this.notify(value, crop, [...this.selections]);
-    });
+    );
     await page.addInitScript({
       content: `const __name=(fn)=>fn;if(window===window.top&&location.origin===${JSON.stringify(parsed.origin)})(${installOverlay.toString()})();`
     });

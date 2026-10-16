@@ -1144,8 +1144,8 @@ html {
   width: 100%;
   border-collapse: collapse;
   margin: 8px 0;
-  table-layout: fixed;
 }
+table-layout: fixed;
 .multi-table th,
 .multi-table td {
   text-align: left;
@@ -1163,4 +1163,14 @@ html {
 }
 .multi-note {
   margin: 8px 0;
+}
+.target-selections select {
+  font-size: 11px;
+  padding: 2px 4px;
+  background: var(--vscode-dropdown-background, #252526);
+  color: var(--vscode-dropdown-foreground, #ccc);
+  border: 1px solid var(--vscode-dropdown-border, #454545);
+  border-radius: 3px;
+  margin-top: 4px;
+  max-width: 100%;
 }
