@@ -6,11 +6,15 @@ the workspace source.
 
 ## What it shows
 
-- **Waterfall** — every HTTP request the preview browser made while rendering
-  the checkpoint (method, URL path, status, duration), oldest first. Observed
-  from the real Chromium renderer, so it reflects the browser's view: it is
+- **Waterfall** — the HTTP(S) requests the renderer issued while rendering
+  the checkpoint (method, URL path, status, duration), oldest first, capped at
+  `scrubline.backendMaxRequests` per render. Observed from the real Chromium
+  renderer via page request events, so it reflects the browser's view: it is
   not evidence of server-side behavior, database access, or ordering beyond
-  what the browser observed.
+  what the browser observed. WebSocket/SSE traffic and requests served
+  entirely by a service worker are not captured; requests fired after the
+  screenshot (lazy or interaction-triggered) are absent. The same bounds are
+  stated in the artifact's own coverage field.
 - **Routes** — API-style routes declared in the workspace source, from a
   static scan of common frameworks (Express-style `.get`/`.post`/..., fetch
   and axios call sites, and similar literal patterns). Static analysis only:
@@ -45,10 +49,11 @@ in the URL are rejected outright (never recorded). Fragments are never sent
 over the wire, but the recorder strips them regardless.
 
 Capture is bounded: at most `scrubline.backendMaxRequests` requests per
-render (default 60). Loopback hosts are labeled separately from external
-hosts. Failed and aborted requests are recorded with a failure class (DNS,
-refused, TLS, HTTP error, aborted) rather than silently dropped; the failure
-class string is fixed-vocabulary and never includes server-provided text.
+render (default 200, maximum 1000); when the cap is hit the artifact is marked
+truncated. Same-origin entries are distinguished from third-party hosts.
+Failed and aborted requests are recorded with a fixed-vocabulary failure class
+(`failed` or `aborted`) rather than silently dropped; the class never includes
+server-provided text.
 
 Webview rendering escapes all captured strings before inserting them into the
 panel (no raw HTML from capture data).
@@ -57,19 +62,24 @@ panel (no raw HTML from capture data).
 
 - `scrubline.backendCapture` (default `true`) — record the backend artifact
   alongside each render screenshot.
-- `scrubline.backendCaptureFilter` — substring filter; when set, only
-  requests whose URL contains it are recorded.
-- `scrubline.backendMaxRequests` (default `60`) — per-render request cap.
+- `scrubline.backendCaptureFilter` — optional glob (for example
+  `**/api/**`); when set, only requests whose URL matches are recorded.
+- `scrubline.backendMaxRequests` (default `200`, maximum `1000`) — per-render
+  request cap.
 - `scrubline.backendDiagrams` (default `true`) — compute the routes and
   import-graph views.
 
 ## Storage
 
-The sanitized artifact is written next to each render as
-`.scrubline/screenshots/<renderKey>/<checkpointId>.backend.json`. Interactive
-renders and pre-rendered history both land there; the panel reads that file on
-demand, computes the static route scan, import graph and parent diff, and
-caches the result per checkpoint.
+The sanitized artifact is written next to each render screenshot as
+`screenshots/<renderKey>/<checkpointId>.backend.json` inside the extension's
+workspace-scoped storage (VS Code `storageUri`, falling back to
+`globalStorageUri`, keyed by a hash of the workspace path). That storage lives
+under the editor's user-data directory, outside the project folder, so the
+artifact never enters the user's git repository and cannot be committed by
+accident. Interactive renders and pre-rendered history both land there; the
+panel reads that file on demand, computes the static route scan, import graph
+and parent diff, and caches the result per checkpoint.
 
 ## Evidence
 
