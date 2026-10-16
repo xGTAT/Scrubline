@@ -11,7 +11,8 @@ export async function applySelective(
   token: string,
   unsaved: boolean,
   command: string,
-  dirty: () => boolean = () => unsaved
+  dirty: () => boolean = () => unsaved,
+  attribution?: import('../bridge/timeline').Attribution
 ) {
   const directory = path.join(restore.store.root, 'validate', randomUUID());
   await restore.store.materialize(target, directory);
@@ -23,7 +24,7 @@ export async function applySelective(
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }
-  const accepted = await restore.apply(token, target, dirty());
+  const accepted = await restore.apply(token, target, dirty(), undefined, undefined, attribution);
   try {
     await validateCandidate(command, restore.workspace);
     const actual = await scan(restore.workspace, restore.store.root, restore.limits);

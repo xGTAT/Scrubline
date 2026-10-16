@@ -28,6 +28,7 @@ import * as fs from 'node:fs/promises';
 import { RenderCache, renderKey, prepareHistory } from './preview/cache';
 import { scopedStore } from './store/identity';
 import { Alternatives, mainlineBase, mergeFiles } from './branches/alternatives';
+import { composeCheckpoints } from './branches/multi';
 import { changedPaths } from './capture/scanner';
 import { applySelective } from './branches/apply';
 import { staticNavbarPaths } from './branches/static-mapping';
@@ -74,6 +75,41 @@ export async function activate(context: vscode.ExtensionContext) {
     extensionPath: context.extensionPath
   };
   const views = new Set<vscode.Webview>();
+
+  // Combined-candidate preview: one render of the synthetic target, receipt
+  // bound to its exact content; the label names set/order/mode. Degrades to
+  // the per-file review table when no panel view exists, the runner is
+  // unavailable, or the render fails. Caller publishes after.
+  const renderCombinedPreview = async (
+    target: import('./bridge/timeline').Checkpoint,
+    count: number,
+    mode: 'combine' | 'revert' | 'mosaic'
+  ) => {
+    const view = [...views][0];
+    if (!view || !runner || !vscode.workspace.isTrusted) return;
+    try {
+      const rendered = await timeline!.exclusive(() => runner!.historical(target, true));
+      preview = rendered.screenshot
+        ? {
+            status: 'ready',
+            checkpoint: target.id,
+            image: view.asWebviewUri(vscode.Uri.file(rendered.screenshot)).toString(),
+            label: `Combined candidate: ${count} checkpoint${count === 1 ? '' : 's'} (${mode}), in selection order`,
+            receipt: rendered.receipt
+          }
+        : {
+            status: 'error',
+            checkpoint: target.id,
+            message: `${rendered.error ?? 'Preview unavailable.'} Review the file table.`
+          };
+    } catch (e) {
+      preview = {
+        status: 'error',
+        checkpoint: target.id,
+        message: `Preview failed: ${e instanceof Error ? e.message : String(e)}. Review the file table.`
+      };
+    }
+  };
   let state: TimelineState = {
     status: 'empty',
     rows: [],
@@ -82,6 +118,10 @@ export async function activate(context: vscode.ExtensionContext) {
   };
   let preview: TimelineState['preview'];
   let review: TimelineState['review'];
+  let selection: TimelineState['selection'];
+  /** Composition conflicts for the pending multi review; blocks apply. */
+  let multiConflicts: string[] = [];
+  let multiAttribution: import('./bridge/timeline').Attribution | undefined;
   let canUndo = false;
   let alternatives: Alternatives | undefined;
   let layout: import('./layout/types').LayoutMatrix | undefined;
@@ -144,6 +184,7 @@ export async function activate(context: vscode.ExtensionContext) {
       rendering,
       preview,
       review,
+      selection,
       canUndo,
       targeting,
       branches: alternatives?.list(),
@@ -227,6 +268,8 @@ export async function activate(context: vscode.ExtensionContext) {
     const current = timeline.store.checkpoints.filter((c) => !c.branch).at(-1)!;
     review = undefined;
     selectiveTarget = undefined;
+    multiConflicts = [];
+    multiAttribution = undefined;
     const merged = mergeFiles(base, current, target, picked);
     if (merged.conflicts.length) throw new Error('Both sides changed. Selective apply blocked.');
     selectiveTarget = merged.target;
@@ -694,6 +737,8 @@ export async function activate(context: vscode.ExtensionContext) {
           rollbackCandidate = undefined;
           review = undefined;
           selectiveTarget = undefined;
+          multiConflicts = [];
+          multiAttribution = undefined;
           const active = timeline!;
           const result = investigation;
           const request = result.request!;
@@ -728,6 +773,10 @@ export async function activate(context: vscode.ExtensionContext) {
                   throw new Error('Rollback review cancelled or stale.');
                 rollbackCandidate = candidate;
                 selectiveTarget = candidate.target;
+                multiConflicts = [];
+                multiAttribution = undefined;
+                multiConflicts = [];
+                multiAttribution = undefined;
                 review = reviewed;
                 rollback = {
                   message:
@@ -971,6 +1020,8 @@ export async function activate(context: vscode.ExtensionContext) {
           preview = undefined;
           review = undefined;
           selectiveTarget = undefined;
+          multiConflicts = [];
+          multiAttribution = undefined;
           activePage = page.route;
           void context.workspaceState.update('scrubline.activePage', page.route);
           publish(state);
@@ -1009,6 +1060,8 @@ export async function activate(context: vscode.ExtensionContext) {
           preview = undefined;
           review = undefined;
           selectiveTarget = undefined;
+          multiConflicts = [];
+          multiAttribution = undefined;
           activePage = route;
           void context.workspaceState.update('scrubline.activePage', route);
           publish(state);
@@ -1040,8 +1093,75 @@ export async function activate(context: vscode.ExtensionContext) {
           selected = target.id;
           review = undefined;
           selectiveTarget = undefined;
+          multiConflicts = [];
+          multiAttribution = undefined;
+          multiConflicts = [];
+          multiAttribution = undefined;
           publish(state);
           await enqueuePreview(target.id);
+        }
+        if (message.type === 'set-selection') {
+          const cap = Math.min(50, config.get<number>('multiSelectLimit') ?? 20);
+          const known = new Set(timeline?.store.checkpoints.map((c) => c.id) ?? []);
+          const ids = message.ids.filter((id) => known.has(id));
+          selection = {
+            ids: [...new Set(ids)].slice(0, cap),
+            mode: message.mode
+          };
+          publish(state);
+        }
+        if (message.type === 'review-multi' && timeline && restore) {
+          const cap = Math.min(50, config.get<number>('multiSelectLimit') ?? 20);
+          const current = timeline.store.checkpoints.filter((c) => !c.branch).at(-1)!;
+          const composed = await composeCheckpoints(
+            timeline.store.checkpoints,
+            current,
+            message.ids,
+            message.mode,
+            message.overrides ?? {},
+            cap,
+            timeline.store
+          );
+          review = undefined;
+          selectiveTarget = undefined;
+          multiConflicts = [];
+          multiAttribution = undefined;
+          multiConflicts = composed.conflicts;
+          multiAttribution = {
+            kind: 'composed',
+            mode: message.mode,
+            sources: message.ids
+          };
+          selection = { ids: message.ids, mode: message.mode };
+          selectiveTarget = composed.target;
+          const reviewed = await timeline.exclusive(() =>
+            restore!.review(composed.target, current, state.unsaved)
+          );
+          reviewed.note = `${
+            message.mode === 'combine'
+              ? 'Combine changes'
+              : message.mode === 'revert'
+                ? 'Revert changes'
+                : 'Pick per file'
+          } from ${message.ids.length} checkpoint${
+            message.ids.length === 1 ? '' : 's'
+          } (${message.ids.map((id) => id.slice(0, 8)).join(', ')}), in this order. Changes only; single-checkpoint Restore (go to X) is unchanged.${
+            composed.warnings.length ? ' ' + composed.warnings.join(' ') : ''
+          }`;
+          reviewed.multi = {
+            mode: message.mode,
+            sources: message.ids,
+            decisions: composed.decisions,
+            warnings: composed.warnings,
+            hints: composed.hints,
+            blocked: composed.conflicts,
+            overrides: message.overrides,
+            compositionId: composed.compositionId
+          };
+          review = reviewed;
+          publish(state);
+          await renderCombinedPreview(composed.target, message.ids.length, message.mode);
+          publish(state);
         }
         if (message.type === 'fork-checkpoint' && target && alternatives) {
           const name = await vscode.window.showInputBox({
@@ -1199,6 +1319,10 @@ export async function activate(context: vscode.ExtensionContext) {
                   'Element content, inline styles and paired exclusive CSS only. Shared styles and unmatched rules stay current; this may differ from the historical appearance.' +
                   (notes.length ? ' ' + notes.join(' ') : '');
                 selectiveTarget = candidate;
+                multiConflicts = [];
+                multiAttribution = undefined;
+                multiConflicts = [];
+                multiAttribution = undefined;
                 selected = pickedSource.id;
                 publish(state);
                 void vscode.window.showInformationMessage(
@@ -1272,6 +1396,8 @@ export async function activate(context: vscode.ExtensionContext) {
             'Element content, inline styles and paired exclusive CSS only. Shared styles and unmatched rules stay current; this may differ from the historical appearance.' +
             (frameworkNotes.length ? ' ' + frameworkNotes.join(' ') : '');
           selectiveTarget = candidate;
+          multiConflicts = [];
+          multiAttribution = undefined;
           selected = target.id;
           publish(state);
           return;
@@ -1311,10 +1437,14 @@ export async function activate(context: vscode.ExtensionContext) {
           }
           review = undefined;
           selectiveTarget = undefined;
+          multiConflicts = [];
+          multiAttribution = undefined;
           const merged = mergeFiles(alternatives.base(target), current, target, paths);
           if (merged.conflicts.length)
             throw new Error('Both sides changed. Selective apply blocked.');
           selectiveTarget = merged.target;
+          multiConflicts = [];
+          multiAttribution = undefined;
           review = await timeline.exclusive(() =>
             restore!.review(selectiveTarget!, current, state.unsaved)
           );
@@ -1380,6 +1510,8 @@ export async function activate(context: vscode.ExtensionContext) {
         if (message.type === 'review-checkpoint' && target) {
           selected = target.id;
           selectiveTarget = undefined;
+          multiConflicts = [];
+          multiAttribution = undefined;
           await timeline.exclusive(async () => {
             review = await restore!.review(
               target,
@@ -1417,19 +1549,41 @@ export async function activate(context: vscode.ExtensionContext) {
               } finally {
                 layoutJob = undefined;
               }
-            } else if (selectiveTarget?.id === message.id)
+            } else if (selectiveTarget?.id === message.id) {
+              if (multiConflicts.length)
+                throw new Error(
+                  'Composition conflicts. Untick a checkpoint, reorder, or pick winners first.'
+                );
+              if (multiAttribution?.kind === 'composed' && review?.multi) {
+                const cap = Math.min(50, config.get<number>('multiSelectLimit') ?? 20);
+                const head = timeline!.store.checkpoints.filter((c) => !c.branch).at(-1)!;
+                const recheck = await composeCheckpoints(
+                  timeline!.store.checkpoints,
+                  head,
+                  selection?.ids ?? [],
+                  multiAttribution.mode,
+                  (review.multi.overrides ?? {}) as import('./branches/multi').MosaicOverrides,
+                  cap,
+                  timeline!.store
+                );
+                if (recheck.compositionId !== review.multi.compositionId)
+                  throw new Error('Selection changed since review. Review again.');
+              }
               await applySelective(
                 restore!,
                 applying,
                 message.token,
                 state.unsaved,
                 config.get<string>('postApplyCommand') ?? '',
-                () => state.unsaved
+                () => state.unsaved,
+                multiAttribution
               );
-            else await restore!.apply(message.token, applying, state.unsaved);
+            } else await restore!.apply(message.token, applying, state.unsaved);
           });
           review = undefined;
           selectiveTarget = undefined;
+          multiConflicts = [];
+          multiAttribution = undefined;
           rollbackCandidate = undefined;
           rollback = undefined;
           canUndo = true;
@@ -1504,6 +1658,8 @@ export async function activate(context: vscode.ExtensionContext) {
         if (message.type === 'apply-reviewed') {
           review = undefined;
           selectiveTarget = undefined;
+          multiConflicts = [];
+          multiAttribution = undefined;
           rollbackCandidate = undefined;
           rollback = undefined;
           canUndo = true;
@@ -1579,6 +1735,61 @@ export async function activate(context: vscode.ExtensionContext) {
             checkpoint: id,
             changedPaths: checked.paths.map((p) => redact(p, redactions)),
             conflicts: checked.conflicts.map((p) => redact(p, redactions)),
+            message: 'Review exact paths and confirm in the Scrubline panel. No files restored.'
+          };
+        },
+        reviewMulti: async (ids, mode, overrides) => {
+          if (!vscode.workspace.isTrusted) throw new Error('Workspace not trusted.');
+          const redactions = await secrets();
+          const cap = Math.min(50, config.get<number>('multiSelectLimit') ?? 20);
+          const current = timeline!.store.checkpoints.filter((c) => !c.branch).at(-1)!;
+          const composed = await composeCheckpoints(
+            timeline!.store.checkpoints,
+            current,
+            ids,
+            mode,
+            overrides ?? {},
+            cap,
+            timeline!.store
+          );
+          review = undefined;
+          selectiveTarget = undefined;
+          multiConflicts = [];
+          multiAttribution = undefined;
+          multiConflicts = composed.conflicts;
+          multiAttribution = { kind: 'composed', mode, sources: ids };
+          selection = { ids, mode };
+          selectiveTarget = composed.target;
+          const checked = await timeline!.exclusive(() =>
+            restore!.review(composed.target, current, state.unsaved)
+          );
+          checked.multi = {
+            mode,
+            sources: ids,
+            decisions: composed.decisions,
+            warnings: composed.warnings,
+            hints: composed.hints,
+            blocked: composed.conflicts,
+            overrides,
+            compositionId: composed.compositionId
+          };
+          review = checked;
+          publish(state);
+          await vscode.commands.executeCommand('scrubline.openPanel');
+          await renderCombinedPreview(composed.target, ids.length, mode);
+          publish(state);
+          return {
+            status: 'pending_user_confirmation',
+            mode,
+            sources: ids,
+            changedPaths: checked.paths.map((p) => redact(p, redactions)),
+            driftConflicts: checked.conflicts.map((p) => redact(p, redactions)),
+            compositionConflicts: composed.conflicts.map((p) => redact(p, redactions)),
+            decisions: composed.decisions.map((d) => ({
+              ...d,
+              path: redact(d.path, redactions)
+            })),
+            warnings: composed.warnings,
             message: 'Review exact paths and confirm in the Scrubline panel. No files restored.'
           };
         }

@@ -1,0 +1,28 @@
+.selection-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 8px;
+  margin: 6px 0;
+  border: 1px solid var(--vscode-panel-border, #3c3c3c);
+  border-radius: 4px;
+}
+.selection-tray ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.selection-tray li {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+}
+.timeline li {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}

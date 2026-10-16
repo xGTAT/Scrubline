@@ -1,3 +1,14 @@
+## 0.10.0
+
+- Multi-checkpoint composition: check any number of checkpoint cards (cap `scrubline.multiSelectLimit`, default 20, max 50), order them in the selection tray, and review one combined candidate.
+- Three modes: Combine changes (ordered per-checkpoint deltas onto the current workspace; divergence is a whole-file conflict), Revert changes (latest-first inverse deltas; dependent later changes are named and block), Pick per file (mosaic winner per touched file, current kept otherwise).
+- Composition plugs into the existing review/apply/Undo transaction: exact-path review, drift/dirty/concurrent-edit guards, safety snapshot, journal crash recovery, post-apply verification, and Undo of the whole combined apply.
+- Combined candidate renders a preview with a receipt before confirmation; the review names the checkpoint set, order and mode, degrades to the per-file table when rendering is unavailable.
+- Dependency hints name unselected checkpoints a selected change sits on, with one-click Add; composition conflicts disable confirmation.
+- Selection persists across panel reloads; shift-click extends ranges.
+- Read-only MCP `review_checkpoints` tool composes and opens the same review; apply stays panel-confirmed.
+- Limits: mosaic picks are file-level (no per-element picks), Shift+Arrow range selection is not implemented, combine folds whole files (no hunk merge).
+
 ## 0.9.0
 
 - Element pick and selective apply now cover framework sources: JSX/TSX (React, Preact, Solid, Next.js), Vue, Svelte and Astro single-file components, and Angular templates through the static HTML path.

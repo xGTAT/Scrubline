@@ -7,13 +7,14 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
-test('MCP advertises exactly two tools; restore only requests reviewed confirmation', async () => {
+test('MCP advertises exactly three tools; restore and multi review only request reviewed confirmation', async () => {
   const requests: unknown[] = [];
-  const server = createMcpServer(async (name, id) => {
-    requests.push({ name, id });
-    return name === 'list_checkpoints'
-      ? { checkpoints: [{ id: 'a'.repeat(64) }] }
-      : { status: 'pending_user_confirmation', checkpoint: id };
+  const server = createMcpServer(async (name, id, extra) => {
+    requests.push({ name, id, extra });
+    if (name === 'list_checkpoints') return { checkpoints: [{ id: 'a'.repeat(64) }] };
+    if (name === 'review_checkpoints')
+      return { status: 'pending_user_confirmation', ...(extra as object) };
+    return { status: 'pending_user_confirmation', checkpoint: id };
   });
   const [a, b] = InMemoryTransport.createLinkedPair();
   await server.connect(a);
@@ -21,19 +22,55 @@ test('MCP advertises exactly two tools; restore only requests reviewed confirmat
   await client.connect(b);
   try {
     const tools = await client.listTools();
-    expect(tools.tools.map((t) => t.name)).toEqual(['list_checkpoints', 'restore_checkpoint']);
+    expect(tools.tools.map((t) => t.name)).toEqual([
+      'list_checkpoints',
+      'restore_checkpoint',
+      'review_checkpoints'
+    ]);
+    const multiTool = tools.tools.find((t) => t.name === 'review_checkpoints')!;
+    expect(multiTool.annotations?.readOnlyHint).toBe(true);
     const result = await client.callTool({
       name: 'restore_checkpoint',
       arguments: { checkpoint: 'a'.repeat(64) }
     });
     expect(JSON.stringify(result)).toContain('pending_user_confirmation');
-    expect(requests).toEqual([{ name: 'restore_checkpoint', id: 'a'.repeat(64) }]);
+    expect(requests).toEqual([
+      { name: 'restore_checkpoint', id: 'a'.repeat(64), extra: undefined }
+    ]);
+    const multi = await client.callTool({
+      name: 'review_checkpoints',
+      arguments: {
+        checkpoints: ['a'.repeat(64), 'b'.repeat(64)],
+        mode: 'combine',
+        overrides: { 'index.html': 'a'.repeat(64) }
+      }
+    });
+    expect(JSON.stringify(multi)).toContain('pending_user_confirmation');
+    expect(requests.at(-1)).toEqual({
+      name: 'review_checkpoints',
+      id: undefined,
+      extra: {
+        checkpoints: ['a'.repeat(64), 'b'.repeat(64)],
+        mode: 'combine',
+        overrides: { 'index.html': 'a'.repeat(64) }
+      }
+    });
     const invalid = await client.callTool({
       name: 'restore_checkpoint',
       arguments: { checkpoint: '../../escape' }
     });
     expect(invalid.isError).toBe(true);
-    expect(requests).toHaveLength(1);
+    const badMulti = await client.callTool({
+      name: 'review_checkpoints',
+      arguments: { checkpoints: ['../../escape'], mode: 'combine' }
+    });
+    expect(badMulti.isError).toBe(true);
+    const badMode = await client.callTool({
+      name: 'review_checkpoints',
+      arguments: { checkpoints: ['a'.repeat(64)], mode: 'wipe' }
+    });
+    expect(badMode.isError).toBe(true);
+    expect(requests).toHaveLength(2);
   } finally {
     await client.close();
     await server.close();

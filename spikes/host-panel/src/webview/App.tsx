@@ -18,8 +18,13 @@ declare global {
     __SCRUBLINE_FULLSCREEN__?: boolean;
     acquireVsCodeApi?: () => {
       postMessage: (m: TimelineInbound) => void;
-      getState: () => { selected?: string } | undefined;
-      setState: (s: { selected?: string }) => void;
+      getState: () =>
+        | { selected?: string; multi?: { ids: string[]; mode: 'combine' | 'revert' | 'mosaic' } }
+        | undefined;
+      setState: (s: {
+        selected?: string;
+        multi?: { ids: string[]; mode: 'combine' | 'revert' | 'mosaic' };
+      }) => void;
     };
   }
 }
@@ -33,6 +38,52 @@ export const App: React.FC = () => {
   const [packetReviewed, setPacketReviewed] = useState(false);
   useEffect(() => setPacketReviewed(false), [state.targeting?.packet]);
   const [selected, setSelected] = useState<string | undefined>(bridge?.getState()?.selected);
+  const [multi, setMulti] = useState<{ ids: string[]; mode: 'combine' | 'revert' | 'mosaic' }>(
+    bridge?.getState()?.multi ?? { ids: [], mode: 'combine' }
+  );
+  const anchor = useRef<string | undefined>(undefined);
+  const checkboxRefs = useRef(new Map<string, HTMLInputElement>());
+  useEffect(() => {
+    if (state.selection) setMulti(state.selection);
+  }, [state.selection]);
+  const persistMulti = (next: { ids: string[]; mode: 'combine' | 'revert' | 'mosaic' }) => {
+    setMulti(next);
+    bridge?.setState({ selected, multi: next });
+    bridge?.postMessage({ type: 'set-selection', ids: next.ids, mode: next.mode });
+  };
+  const toggleMulti = (id: string, shift: boolean) => {
+    const order = state.rows.map((r) => r.id);
+    let ids: string[];
+    if (shift && anchor.current && order.includes(anchor.current)) {
+      const a = order.indexOf(anchor.current);
+      const b = order.indexOf(id);
+      const range = order.slice(Math.min(a, b), Math.max(a, b) + 1);
+      ids = [...new Set([...multi.ids, ...range])];
+    } else {
+      anchor.current = id;
+      ids = multi.ids.includes(id) ? multi.ids.filter((x) => x !== id) : [...multi.ids, id];
+    }
+    ids = ids.filter((x) => order.includes(x)).sort((x, y) => order.indexOf(x) - order.indexOf(y));
+    persistMulti({ ids, mode: multi.mode });
+  };
+  const moveMulti = (id: string, delta: number) => {
+    const ids = [...multi.ids];
+    const from = ids.indexOf(id);
+    const to = from + delta;
+    if (from < 0 || to < 0 || to >= ids.length) return;
+    [ids[from], ids[to]] = [ids[to], ids[from]];
+    persistMulti({ ids, mode: multi.mode });
+  };
+  const reviewMulti = (
+    overrides?: Record<string, string | { source: string; element: string }>
+  ) => {
+    bridge?.postMessage({
+      type: 'review-multi',
+      ids: multi.ids,
+      mode: multi.mode,
+      overrides
+    });
+  };
   useEffect(() => {
     const handler = (event: MessageEvent<TimelineOutbound>) => {
       if (event.data.type === 'timeline') setState(event.data.data);
@@ -473,11 +524,98 @@ export const App: React.FC = () => {
           </button>
         ) : null}
       </section>
+      {visible.length > 0 && multi.ids.length > 0 && (
+        <section className="selection-tray" aria-label="Selected checkpoints">
+          <span>{multi.ids.length} selected</span>
+          <select
+            aria-label="Apply mode"
+            value={multi.mode}
+            onChange={(e) =>
+              persistMulti({
+                ids: multi.ids,
+                mode: e.target.value as 'combine' | 'revert' | 'mosaic'
+              })
+            }
+          >
+            <option value="combine">Combine changes</option>
+            <option value="revert">Revert changes</option>
+            <option value="mosaic">Pick per file</option>
+          </select>
+          <ol aria-label="Selection order">
+            {multi.ids.map((id, i) => (
+              <li key={id}>
+                <code>{id.slice(0, 8)}</code>
+                <button
+                  aria-label={`Move ${id.slice(0, 8)} earlier`}
+                  disabled={i === 0}
+                  onClick={() => moveMulti(id, -1)}
+                >
+                  ↑
+                </button>
+                <button
+                  aria-label={`Move ${id.slice(0, 8)} later`}
+                  disabled={i === multi.ids.length - 1}
+                  onClick={() => moveMulti(id, 1)}
+                >
+                  ↓
+                </button>
+                <button
+                  aria-label={`Remove ${id.slice(0, 8)} from selection`}
+                  onClick={() =>
+                    persistMulti({ ids: multi.ids.filter((x) => x !== id), mode: multi.mode })
+                  }
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ol>
+          <button onClick={() => persistMulti({ ids: [], mode: multi.mode })}>Clear</button>
+          <button disabled={state.unsaved || multi.ids.length === 0} onClick={() => reviewMulti()}>
+            <ShieldCheck size={14} strokeWidth={1.5} aria-hidden="true" />
+            Review {multi.ids.length} checkpoint{multi.ids.length === 1 ? '' : 's'}
+          </button>
+        </section>
+      )}
       {visible.length > 0 && (
         <>
           <ol className="timeline" aria-label="Checkpoints">
             {visible.map((r) => (
               <li key={r.id}>
+                <input
+                  ref={(el) => {
+                    if (el) checkboxRefs.current.set(r.id, el);
+                    else checkboxRefs.current.delete(r.id);
+                  }}
+                  type="checkbox"
+                  aria-label={`Select checkpoint ${r.id.slice(0, 8)} for multi-apply`}
+                  checked={multi.ids.includes(r.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleMulti(r.id, (e as React.MouseEvent).shiftKey);
+                  }}
+                  onKeyDown={(e) => {
+                    if (!e.shiftKey || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
+                    e.preventDefault();
+                    const order = state.rows.map((x) => x.id);
+                    const i = order.indexOf(r.id);
+                    const j = e.key === 'ArrowDown' ? i + 1 : i - 1;
+                    if (i < 0 || j < 0 || j >= order.length) return;
+                    const a =
+                      anchor.current && order.includes(anchor.current)
+                        ? order.indexOf(anchor.current)
+                        : i;
+                    const range = order.slice(Math.min(a, j), Math.max(a, j) + 1);
+                    const ids = [...new Set([...multi.ids, ...range])]
+                      .filter((x) => order.includes(x))
+                      .sort((x, y) => order.indexOf(x) - order.indexOf(y));
+                    persistMulti({ ids, mode: multi.mode });
+                    choose(order[j]);
+                    // Focus follows the extended edge so repeated Shift+Arrow keeps walking.
+                    setTimeout(() => checkboxRefs.current.get(order[j])?.focus(), 0);
+                  }}
+                  onChange={() => {}}
+                />
                 <button
                   className="row"
                   aria-pressed={selected === r.id}
@@ -577,6 +715,121 @@ export const App: React.FC = () => {
       {state.review && (
         <section role="region" aria-label="Restore confirmation" className="restore-confirmation">
           {state.review.note && <p className="element-review-note">{state.review.note}</p>}
+          {state.review.multi && (
+            <section aria-label="Multi-checkpoint review">
+              {state.review.multi.warnings.map((w) => (
+                <p key={w} role="alert">
+                  {w}
+                </p>
+              ))}
+              {state.review.multi.hints.length > 0 && (
+                <ul className="paths">
+                  {state.review.multi.hints.map((h) => (
+                    <li key={`${h.missing}:${h.neededBy}:${h.path}`}>
+                      Checkpoint {h.missing.slice(0, 8)} also edits {h.path} after{' '}
+                      {h.neededBy.slice(0, 8)}.{' '}
+                      <button
+                        onClick={() => {
+                          const ids = [...new Set([...multi.ids, h.missing])].sort(
+                            (x, y) =>
+                              state.rows.findIndex((r) => r.id === x) -
+                              state.rows.findIndex((r) => r.id === y)
+                          );
+                          persistMulti({ ids, mode: multi.mode });
+                          bridge?.postMessage({
+                            type: 'review-multi',
+                            ids,
+                            mode: multi.mode,
+                            overrides: state.review!.multi!.overrides
+                          });
+                        }}
+                      >
+                        Add {h.missing.slice(0, 8)}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <table>
+                <thead>
+                  <tr>
+                    <th>File</th>
+                    <th>From checkpoints</th>
+                    <th>Status</th>
+                    {state.review.multi.mode === 'mosaic' && <th>Use</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {state.review.multi.decisions.map((d) => (
+                    <tr key={d.path}>
+                      <td title={d.path}>{d.path}</td>
+                      <td>{d.sources.map((id) => id.slice(0, 8)).join(', ')}</td>
+                      <td>
+                        {d.status === 'conflict'
+                          ? (d.reason ?? 'Conflict')
+                          : d.status === 'clean'
+                            ? 'Apply'
+                            : 'Unchanged'}
+                      </td>
+                      {state.review!.multi!.mode === 'mosaic' && (
+                        <td>
+                          {(() => {
+                            const current = state.review!.multi!.overrides?.[d.path];
+                            const value =
+                              typeof current === 'object' ? current.source : (current ?? 'current');
+                            const element = typeof current === 'object' ? current.element : '';
+                            return (
+                              <>
+                                <select
+                                  aria-label={`Source for ${d.path}`}
+                                  value={value}
+                                  onChange={(e) =>
+                                    reviewMulti({
+                                      ...(state.review!.multi!.overrides ?? {}),
+                                      [d.path]: e.target.value
+                                    })
+                                  }
+                                >
+                                  <option value="current">Keep current</option>
+                                  {d.sources.map((id) => (
+                                    <option key={id} value={id}>
+                                      {id.slice(0, 8)}
+                                    </option>
+                                  ))}
+                                </select>
+                                {d.path.endsWith('.html') && value !== 'current' && (
+                                  <input
+                                    aria-label={`Element id in ${d.path} (optional)`}
+                                    placeholder="element id (optional)"
+                                    defaultValue={element}
+                                    onBlur={(e) => {
+                                      const el = e.target.value.trim();
+                                      const overrides = {
+                                        ...(state.review!.multi!.overrides ?? {})
+                                      };
+                                      if (el) overrides[d.path] = { source: value, element: el };
+                                      else overrides[d.path] = value;
+                                      reviewMulti(overrides);
+                                    }}
+                                  />
+                                )}
+                              </>
+                            );
+                          })()}
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          )}
+          {(state.review.multi?.blocked.length ?? 0) > 0 && (
+            <span role="alert">
+              Composition conflicts block apply. Untick a checkpoint, reorder, or pick per-file
+              winners in Pick per file mode.
+            </span>
+          )}
           {state.review.conflicts.length > 0 ? (
             <>
               <span>Workspace drift. Restore blocked.</span>
@@ -649,7 +902,15 @@ export const App: React.FC = () => {
                 </ul>
               </details>
               <button
-                disabled={state.unsaved || state.review.paths.length === 0}
+                disabled={
+                  state.unsaved ||
+                  state.review.paths.length === 0 ||
+                  (state.review.multi?.blocked.length ?? 0) > 0 ||
+                  (state.review.multi
+                    ? state.review.multi.sources.join(',') !== multi.ids.join(',') ||
+                      state.review.multi.mode !== multi.mode
+                    : false)
+                }
                 onClick={() =>
                   bridge?.postMessage({
                     type: 'apply-reviewed',
@@ -658,7 +919,7 @@ export const App: React.FC = () => {
                   })
                 }
               >
-                Confirm restore
+                {state.review.multi ? 'Confirm combined apply' : 'Confirm restore'}
               </button>
             </>
           )}
