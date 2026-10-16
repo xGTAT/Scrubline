@@ -1,3 +1,7 @@
+## 0.9.1
+
+- Checkpoints and render history are now page-scoped: a checkpoint only appears (and renders) on pages whose own files changed. Page file sets cover the HTML document plus its local stylesheets, scripts and media, including recursive CSS @import/url() targets; changes to shared assets still appear on every page that uses them, and changes no page maps (config, framework sources) stay visible everywhere. Server-rendered routes without a static document keep the full timeline.
+
 ## 0.9.0
 
 - Element pick and selective apply now cover framework sources: JSX/TSX (React, Preact, Solid, Next.js), Vue, Svelte and Astro single-file components, and Angular templates through the static HTML path.

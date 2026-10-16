@@ -61,3 +61,96 @@ export async function listPages(root: string): Promise<PageInfo[]> {
 export function isPickableDocument(document: string, files: { path: string }[]) {
   return document.endsWith('.html') && files.some((f) => f.path === document);
 }
+
+const REFERENCE_ATTRIBUTES = /\b(?:href|src)\s*=\s*["']([^"']+)["']/gi;
+const SRCSET_ATTRIBUTE = /\bsrcset\s*=\s*["']([^"']+)["']/gi;
+const CSS_REFERENCES =
+  /@import\s+(?:url\(\s*)?["']([^"']+)["']\s*\)?|url\(\s*["']?([^"')]+)["']?\s*\)/gi;
+const MAX_PAGE_FILES = 500;
+
+/** True when a reference points outside the workspace's local files. */
+function isExternalReference(reference: string) {
+  return /^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i.test(reference);
+}
+
+/** Workspace-relative path for a local reference, or undefined when it escapes the root. */
+function resolveReference(fromFile: string, reference: string) {
+  const clean = reference.split(/[?#]/, 1)[0].trim();
+  if (!clean || isExternalReference(clean)) return undefined;
+  const joined = clean.startsWith('/')
+    ? clean.slice(1)
+    : path.posix.normalize(path.posix.join(path.posix.dirname(fromFile), clean));
+  if (joined.startsWith('../') || joined === '..' || path.posix.isAbsolute(joined))
+    return undefined;
+  return joined;
+}
+
+function htmlReferences(html: string) {
+  const references: string[] = [];
+  for (const match of html.matchAll(REFERENCE_ATTRIBUTES)) references.push(match[1]);
+  for (const match of html.matchAll(SRCSET_ATTRIBUTE))
+    for (const candidate of match[1].split(',')) {
+      const url = candidate.trim().split(/\s+/, 1)[0];
+      if (url) references.push(url);
+    }
+  return references;
+}
+
+function cssReferences(css: string) {
+  const references: string[] = [];
+  for (const match of css.matchAll(CSS_REFERENCES)) references.push(match[1] ?? match[2]);
+  return references;
+}
+
+/**
+ * Local workspace files a page depends on: its HTML document plus every local
+ * asset the document references (stylesheets, scripts, images, media), and
+ * recursively the local @import/url() targets of those stylesheets. Missing
+ * files stay listed so creating them later still counts as a page change.
+ * Server-rendered routes without a static document resolve to an empty set,
+ * which callers must treat as "cannot prove irrelevance".
+ */
+export async function pageFiles(root: string, document: string): Promise<Set<string>> {
+  const files = new Set<string>();
+  const pending: string[] = [];
+  const visit = async (file: string) => {
+    if (files.size >= MAX_PAGE_FILES || files.has(file)) return;
+    files.add(file);
+    let content: string;
+    try {
+      if ((await fs.stat(path.join(root, file))).size > 1024 * 1024) return;
+      content = await fs.readFile(path.join(root, file), 'utf8');
+    } catch {
+      return; // Missing or unreadable file; the path still identifies the dependency.
+    }
+    const references = file.endsWith('.html')
+      ? htmlReferences(content)
+      : file.endsWith('.css')
+        ? cssReferences(content)
+        : [];
+    for (const reference of references) {
+      const resolved = resolveReference(file, reference);
+      if (resolved) pending.push(resolved);
+    }
+  };
+  await visit(document);
+  while (pending.length && files.size < MAX_PAGE_FILES) await visit(pending.shift()!);
+  return files;
+}
+
+/**
+ * Whether a checkpoint row belongs on a page. A row is hidden only when its
+ * changed paths provably belong to a different page: they touch no file this
+ * page depends on, but do touch a file some known page depends on. Rows that
+ * touch no mapped page file at all stay visible everywhere, and pages without
+ * a mapped document (server routes) keep every row.
+ */
+export function rowRelevantToPage(
+  changed: string[],
+  ownFiles: Set<string>,
+  allPageFiles: Set<string>
+) {
+  if (!ownFiles.size) return true;
+  if (changed.some((file) => ownFiles.has(file))) return true;
+  return !changed.some((file) => allPageFiles.has(file));
+}

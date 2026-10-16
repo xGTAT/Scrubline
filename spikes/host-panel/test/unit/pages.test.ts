@@ -1,5 +1,12 @@
 import { test, expect } from 'vitest';
-import { listPages, documentToRoute, routeToDocument, isPickableDocument } from '../../src/pages';
+import {
+  listPages,
+  documentToRoute,
+  routeToDocument,
+  isPickableDocument,
+  pageFiles,
+  rowRelevantToPage
+} from '../../src/pages';
 import { mainlineBase } from '../../src/branches/alternatives';
 import type { Checkpoint } from '../../src/bridge/timeline';
 import { specification } from '../../src/preview/spec';
@@ -86,4 +93,76 @@ test('mainlineBase resolves the parent for timeline checkpoints only', () => {
   expect(mainlineBase(root, checkpoints)).toBeUndefined();
   expect(mainlineBase(branchCp, checkpoints)).toBeUndefined();
   expect(mainlineBase(cp('d'.repeat(64), 'f'.repeat(64)), checkpoints)).toBeUndefined();
+});
+
+test('pageFiles maps a page to its document and local asset graph', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'scrubline-pagemap-'));
+  try {
+    await fs.mkdir(path.join(root, 'css'), { recursive: true });
+    await fs.mkdir(path.join(root, 'js'), { recursive: true });
+    await fs.writeFile(
+      path.join(root, 'index.html'),
+      `<!doctype html><link rel="stylesheet" href="css/index.css?v=2"><script src="js/app.js"></script><img src="logo.png"><script src="https://cdn.example.com/lib.js"></script>`
+    );
+    await fs.writeFile(
+      path.join(root, 'css/index.css'),
+      `@import 'shared.css'; .a { background: url('../logo.png#icon'); }`
+    );
+    await fs.writeFile(
+      path.join(root, 'css/shared.css'),
+      `.b { background: url('data:image/png;base64,x'); }`
+    );
+    await fs.writeFile(path.join(root, 'js/app.js'), 'console.log(1)');
+    await fs.writeFile(path.join(root, 'logo.png'), 'png');
+    const files = await pageFiles(root, 'index.html');
+    expect([...files].sort()).toEqual([
+      'css/index.css',
+      'css/shared.css',
+      'index.html',
+      'js/app.js',
+      'logo.png'
+    ]);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('pageFiles keeps missing referenced files and resolves root-absolute references', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'scrubline-pagemap-'));
+  try {
+    await fs.writeFile(
+      path.join(root, 'booking.html'),
+      `<!doctype html><link rel="stylesheet" href="/css/booking.css"><img srcset="a.png 1x, b.png 2x">`
+    );
+    const files = await pageFiles(root, 'booking.html');
+    expect([...files].sort()).toEqual(['a.png', 'b.png', 'booking.html', 'css/booking.css']);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('checkpoints surface only on the pages they change', async () => {
+  // Shravan's report: editing index.html must not create a visible checkpoint
+  // on booking.html, and vice versa.
+  const index = new Set(['index.html', 'css/index.css', 'css/shared.css', 'logo.png']);
+  const booking = new Set(['booking.html', 'css/booking.css', 'css/shared.css', 'logo.png']);
+  const all = new Set([...index, ...booking]);
+
+  // A change to index.html only shows on the index page.
+  expect(rowRelevantToPage(['index.html'], index, all)).toBe(true);
+  expect(rowRelevantToPage(['index.html'], booking, all)).toBe(false);
+  // A change to booking's own stylesheet only shows on booking.
+  expect(rowRelevantToPage(['css/booking.css'], index, all)).toBe(false);
+  expect(rowRelevantToPage(['css/booking.css'], booking, all)).toBe(true);
+  // Shared assets show on both pages.
+  expect(rowRelevantToPage(['css/shared.css', 'logo.png'], index, all)).toBe(true);
+  expect(rowRelevantToPage(['css/shared.css', 'logo.png'], booking, all)).toBe(true);
+  // Files no page maps (config, framework sources) stay visible everywhere.
+  expect(rowRelevantToPage(['vite.config.ts', 'src/App.tsx'], index, all)).toBe(true);
+  expect(rowRelevantToPage(['vite.config.ts', 'src/App.tsx'], booking, all)).toBe(true);
+  // A server route with no static document keeps every row.
+  expect(rowRelevantToPage(['index.html'], new Set(), all)).toBe(true);
+  // The baseline checkpoint (everything changed) shows everywhere.
+  expect(rowRelevantToPage([...all], index, all)).toBe(true);
+  expect(rowRelevantToPage([...all], booking, all)).toBe(true);
 });

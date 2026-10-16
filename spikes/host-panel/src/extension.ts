@@ -13,7 +13,13 @@ import {
 import { installMcpRuntime } from './mcp/install';
 import { measuredPacket } from './targeting/measured';
 import { specification, specificationKey } from './preview/spec';
-import { listPages, routeToDocument, isPickableDocument } from './pages';
+import {
+  listPages,
+  routeToDocument,
+  isPickableDocument,
+  pageFiles,
+  rowRelevantToPage
+} from './pages';
 import { prepareRollback, applyRollback, type RollbackCandidate } from './investigation/rollback';
 import { investigate } from './investigation/run';
 import { sweep } from './layout/sweep';
@@ -116,8 +122,10 @@ export async function activate(context: vscode.ExtensionContext) {
     state = {
       ...next,
       rows: [
-        ...next.rows.filter(
-          (row) => !timeline?.store.checkpoints.some((c) => c.id === row.id && c.branch)
+        ...visibleRows(
+          next.rows.filter(
+            (row) => !timeline?.store.checkpoints.some((c) => c.id === row.id && c.branch)
+          )
         ),
         ...(selected && timeline?.store.checkpoints.some((c) => c.id === selected && c.branch)
           ? (timeline?.store.checkpoints
@@ -178,6 +186,8 @@ export async function activate(context: vscode.ExtensionContext) {
   let selected: string | undefined;
   let pages: import('./pages').PageInfo[] = [];
   let activePage: string | undefined;
+  let pageDeps = new Map<string, Set<string>>();
+  let allPageFiles = new Set<string>();
   let previewQueue = Promise.resolve();
   const discoverPages = async (root: string) => {
     if (!runner) return;
@@ -196,6 +206,23 @@ export async function activate(context: vscode.ExtensionContext) {
     if (!merged.some((p) => p.route === configuredRoute))
       merged.push({ route: configuredRoute, document: routeToDocument(configuredRoute) });
     pages = merged;
+    pageDeps = new Map();
+    for (const page of merged) pageDeps.set(page.route, await pageFiles(root, page.document));
+    allPageFiles = new Set([...pageDeps.values()].flatMap((files) => [...files]));
+  };
+
+  /** Rows that belong on the active page; rows mapped only to other pages stay hidden. */
+  const visibleRows = (rows: TimelineState['rows']) =>
+    rows.filter((row) =>
+      rowRelevantToPage(row.changedPaths, pageDeps.get(activePage ?? '') ?? new Set(), allPageFiles)
+    );
+
+  /** Checkpoint changed-paths for relevance checks outside publish. */
+  const checkpointChanges = (id: string) => {
+    const checkpoint = timeline?.store.checkpoints.find((c) => c.id === id);
+    if (!checkpoint) return [];
+    const parent = timeline?.store.checkpoints.find((c) => c.id === checkpoint.parentId);
+    return changedPaths(parent?.files ?? [], checkpoint.files);
   };
   /**
    * File-level cherry-pick fallback for pages without a pickable static HTML
@@ -414,7 +441,16 @@ export async function activate(context: vscode.ExtensionContext) {
     if (renderJob || layoutJob || !cache || !runner || !timeline || shutdownPreview || refreshing)
       return;
     cancelRender = false;
-    const checkpoints = timeline!.store.checkpoints.filter((c) => !c.branch);
+    const parents = new Map(timeline!.store.checkpoints.map((c) => [c.id, c]));
+    const checkpoints = timeline!.store.checkpoints.filter(
+      (c) =>
+        !c.branch &&
+        rowRelevantToPage(
+          changedPaths(parents.get(c.parentId ?? '')?.files ?? [], c.files),
+          pageDeps.get(activePage ?? '') ?? new Set(),
+          allPageFiles
+        )
+    );
     const activeCache = cache!;
     const background = new PreviewRunner(
       { ...runner!.config, port: runner!.config.port + 3 },
@@ -973,6 +1009,15 @@ export async function activate(context: vscode.ExtensionContext) {
           selectiveTarget = undefined;
           activePage = page.route;
           void context.workspaceState.update('scrubline.activePage', page.route);
+          if (
+            selected &&
+            !rowRelevantToPage(
+              checkpointChanges(selected),
+              pageDeps.get(activePage) ?? new Set(),
+              allPageFiles
+            )
+          )
+            selected = undefined;
           publish(state);
           if (selected) await enqueuePreview(selected);
           return;
@@ -1011,6 +1056,15 @@ export async function activate(context: vscode.ExtensionContext) {
           selectiveTarget = undefined;
           activePage = route;
           void context.workspaceState.update('scrubline.activePage', route);
+          if (
+            selected &&
+            !rowRelevantToPage(
+              checkpointChanges(selected),
+              pageDeps.get(activePage) ?? new Set(),
+              allPageFiles
+            )
+          )
+            selected = undefined;
           publish(state);
           if (selected) await enqueuePreview(selected);
           return;
