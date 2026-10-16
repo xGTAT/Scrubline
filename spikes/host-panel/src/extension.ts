@@ -1,6 +1,11 @@
 import { DualVerificationEngine } from './verification/engine';
+import { diffPerf } from './preview/perf';
 import { replaceActivation } from './lifecycle';
 import { ChatbotController } from './chatbot/controller';
+import { DesignAdvisorService, DeterministicAdvisorProvider } from './chatbot/advisor';
+import { AgyCliAdvisorProvider } from './advisor/agy-cli';
+import { AntigravityLmAdvisorProvider, ChainedAdvisorProvider } from './advisor/lm';
+import { LockRegistry } from './locks/registry';
 import { ElementPicker } from './branches/picker';
 import { elementCandidate } from './branches/element';
 import {
@@ -150,6 +155,9 @@ export async function activate(context: vscode.ExtensionContext) {
   let selectiveMeta: { targetSelector?: string; documentPath?: string } | undefined;
   let comparison: TimelineState['comparison'];
   let mcpBridge: McpBridge | undefined;
+  let lockRegistry: LockRegistry | undefined;
+  let lockDrift: TimelineState['lockDrift'];
+  let lastNewestRowId: string | undefined;
   let chatbotController: ChatbotController | undefined;
   const elementPicker = new ElementPicker();
   let elementRunner: PreviewRunner | undefined;
@@ -169,8 +177,18 @@ export async function activate(context: vscode.ExtensionContext) {
   let shutdownPreview = false;
   let fullscreenPanel: vscode.WebviewPanel | undefined;
   const publish = (next: TimelineState) => {
+    const newest = next.rows.at(-1);
+    if (lockRegistry && newest && newest.id !== lastNewestRowId) {
+      lastNewestRowId = newest.id;
+      const touched = lockRegistry.touchedBy(newest.changedPaths);
+      lockDrift = touched.length
+        ? touched.map((l) => ({ selector: l.selector, document: l.document, label: l.label }))
+        : undefined;
+    }
     state = {
       ...next,
+      locks: lockRegistry?.list().slice() ?? [],
+      lockDrift,
       rows: [
         ...visibleRows(
           next.rows.filter(
@@ -189,6 +207,11 @@ export async function activate(context: vscode.ExtensionContext) {
                   timeline!.store.checkpoints.find((parent) => parent.id === c.parentId)?.files ??
                     [],
                   c.files
+                ),
+                perf: c.perf,
+                perfDelta: diffPerf(
+                  timeline!.store.checkpoints.find((parent) => parent.id === c.parentId)?.perf,
+                  c.perf
                 )
               })) ?? [])
           : [])
@@ -474,13 +497,49 @@ export async function activate(context: vscode.ExtensionContext) {
     await timeline.start();
     rendered = await cache!.available(timeline.store.checkpoints);
     alternatives = new Alternatives(timeline.store, timeline.limits);
+    lockRegistry = new LockRegistry(timeline.store.root);
+    await lockRegistry.open();
+    lockDrift = undefined;
+    lastNewestRowId = undefined;
+    const advisorBackend = config.get<string>('advisorBackend') ?? 'auto';
+    const deterministicAdvisor = new DeterministicAdvisorProvider();
+    let advisorService: DesignAdvisorService;
+    if (advisorBackend === 'deterministic') {
+      advisorService = new DesignAdvisorService(deterministicAdvisor);
+    } else {
+      const cliAdvisor = new AgyCliAdvisorProvider({
+        agyPath: config.get<string>('agyPath') || undefined,
+        timeoutMs: config.get<number>('advisorTimeoutMs') || undefined,
+        model: config.get<string>('advisorModel') || undefined
+      });
+      const ideAdvisor = new AntigravityLmAdvisorProvider(
+        vscode.lm,
+        (text) => vscode.LanguageModelChatMessage.User(text),
+        {
+          timeoutMs: config.get<number>('advisorTimeoutMs') || undefined,
+          model: config.get<string>('advisorModel') || undefined
+        }
+      );
+      const primary =
+        advisorBackend === 'agy'
+          ? cliAdvisor
+          : advisorBackend === 'ide'
+            ? ideAdvisor
+            : new ChainedAdvisorProvider([ideAdvisor, cliAdvisor]);
+      advisorService =
+        advisorBackend === 'auto'
+          ? new DesignAdvisorService(primary, deterministicAdvisor)
+          : new DesignAdvisorService(primary);
+    }
     chatbotController = new ChatbotController(
       timeline.store,
       () => cache,
       secrets,
       (cState) => {
         publish({ ...state, chatbot: cState });
-      }
+      },
+      advisorService,
+      () => lockRegistry?.list() ?? []
     );
     publish(state);
     dirty();
@@ -1174,6 +1233,32 @@ export async function activate(context: vscode.ExtensionContext) {
           publish(state);
           await enqueuePreview(target.id);
         }
+        if (message.type === 'lock-element') {
+          if (!lockRegistry) return;
+          if (!selectiveMeta?.targetSelector || !selectiveMeta.documentPath) {
+            publish({
+              ...state,
+              message: 'Pick one specific element first; only a pinned element can be locked.'
+            });
+            return;
+          }
+          const lockSelector = selectiveMeta.targetSelector;
+          const lockDocument = selectiveMeta.documentPath;
+          await lockRegistry.add({
+            selector: lockSelector,
+            document: lockDocument,
+            label: message.label
+          });
+          publish({
+            ...state,
+            message: `Locked ${lockSelector} in ${lockDocument}. It must not be changed.`
+          });
+        }
+        if (message.type === 'unlock-element') {
+          if (!lockRegistry) return;
+          await lockRegistry.remove(message.selector, message.document);
+          publish({ ...state, message: `Unlocked ${message.selector} in ${message.document}.` });
+        }
         if (message.type === 'set-selection') {
           const cap = Math.min(50, config.get<number>('multiSelectLimit') ?? 20);
           const known = new Set(timeline?.store.checkpoints.map((c) => c.id) ?? []);
@@ -1758,7 +1843,8 @@ export async function activate(context: vscode.ExtensionContext) {
                     historical,
                     current,
                     targetSelector: selectiveMeta?.targetSelector || '',
-                    documentPath: selectiveMeta?.documentPath || 'index.html'
+                    documentPath: selectiveMeta?.documentPath || 'index.html',
+                    protectAllElements: Boolean(selectiveMeta?.targetSelector)
                   }
                 },
                 multiAttribution
@@ -1923,6 +2009,19 @@ export async function activate(context: vscode.ExtensionContext) {
         throw new Error('Open one trusted local workspace first.');
       await mcpBridge?.stop();
       mcpBridge = new McpBridge(timeline.store.root, {
+        listLocked: async () => {
+          if (!vscode.workspace.isTrusted) throw new Error('Workspace not trusted.');
+          return {
+            locks: (lockRegistry?.list() ?? []).map((l) => ({
+              selector: l.selector,
+              document: l.document,
+              label: l.label,
+              lockedAt: l.lockedAt
+            })),
+            message:
+              'These elements are locked by the user. Do not modify them, their owning documents, or their scoped styles. Advise instead.'
+          };
+        },
         list: async () => {
           if (!vscode.workspace.isTrusted) throw new Error('Workspace not trusted.');
           const values = await secrets();

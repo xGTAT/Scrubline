@@ -174,6 +174,37 @@
           "minimum": 2,
           "maximum": 50,
           "description": "Maximum checkpoints selectable for one multi-checkpoint review."
+        },
+        "scrubline.advisorBackend": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "ide",
+            "agy",
+            "deterministic"
+          ],
+          "default": "auto",
+          "description": "UI Advisor backend. auto: Antigravity IDE models (vscode.lm) first, agy CLI as fallback, offline heuristics last; ide: IDE models only; agy: agy CLI only; deterministic: offline heuristics only.",
+          "scope": "resource"
+        },
+        "scrubline.agyPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the Antigravity CLI executable. Empty resolves \"agy\" via PATH.",
+          "scope": "machine"
+        },
+        "scrubline.advisorTimeoutMs": {
+          "type": "number",
+          "default": 90000,
+          "minimum": 5000,
+          "description": "Milliseconds to wait for the Antigravity CLI answer before falling back.",
+          "scope": "resource"
+        },
+        "scrubline.advisorModel": {
+          "type": "string",
+          "default": "",
+          "description": "Optional model override passed to the agy CLI as --model for UI Advisor queries.",
+          "scope": "resource"
         }
       }
     }

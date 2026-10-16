@@ -4,6 +4,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 export interface McpBackend {
   list: () => Promise<unknown>;
+  listLocked: () => Promise<unknown>;
   review: (checkpoint: string) => Promise<unknown>;
   reviewMulti: (
     checkpoints: string[],
@@ -59,6 +60,7 @@ export class McpBridge {
         const body = JSON.parse(Buffer.concat(chunks).toString());
         let result: unknown;
         if (body.name === 'list_checkpoints') result = await this.backend.list();
+        else if (body.name === 'list_locked_elements') result = await this.backend.listLocked();
         else if (body.name === 'restore_checkpoint' && /^[a-f0-9]{64}$/.test(body.checkpoint ?? ''))
           result = await this.backend.review(body.checkpoint);
         else if (

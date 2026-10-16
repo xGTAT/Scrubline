@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as net from 'node:net';
 import type { Checkpoint, TrackedFile, Attribution } from '../bridge/timeline';
+import { computePerfMetrics } from '../preview/perf';
 
 export const hashBytes = (bytes: Uint8Array | string) =>
   createHash('sha256').update(bytes).digest('hex');
@@ -329,6 +330,33 @@ export class HistoryStore {
     if (hashBytes(bytes) !== hash) throw new Error('History blob checksum failed.');
     return bytes;
   }
+  /** Render timings live outside the immutable manifests (render time is not
+   * a deterministic function of content), keyed by checkpoint id. */
+  async renderTimings(): Promise<Record<string, number>> {
+    try {
+      const parsed = JSON.parse(await fs.readFile(this.renderTimingFile, 'utf8')) as unknown;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+      const out: Record<string, number> = {};
+      for (const [id, ms] of Object.entries(parsed as Record<string, unknown>))
+        if (typeof ms === 'number' && Number.isFinite(ms) && ms >= 0) out[id] = ms;
+      return out;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      return {};
+    }
+  }
+
+  async recordRenderTiming(checkpoint: string, renderMs: number): Promise<void> {
+    if (!Number.isFinite(renderMs) || renderMs < 0) return;
+    const timings = await this.renderTimings();
+    timings[checkpoint] = Math.round(renderMs);
+    await atomicWrite(this.renderTimingFile, JSON.stringify(timings));
+  }
+
+  private get renderTimingFile(): string {
+    return path.join(this.root, 'render-timings.json');
+  }
+
   async commit(
     files: TrackedFile[],
     contents: Map<string, Buffer>,
@@ -362,7 +390,8 @@ export class HistoryStore {
       createdAt: new Date().toISOString(),
       trigger,
       files,
-      attribution
+      attribution,
+      perf: computePerfMetrics(files, contents)
     };
     const c: Checkpoint = { id: checkpointId(body), ...body };
     const json = JSON.stringify(c);

@@ -30,12 +30,13 @@ export const KEY_STRUCTURAL_SELECTORS = [
 export async function captureStructuralFingerprint(
   page: Page,
   targetSelector?: string,
-  extraSelectors: string[] = []
+  extraSelectors: string[] = [],
+  includeAllElements?: boolean
 ): Promise<StructuralFingerprint> {
   const combinedSelectors = Array.from(new Set([...KEY_STRUCTURAL_SELECTORS, ...extraSelectors]));
 
   return page.evaluate(
-    ({ selectors, targetSel }) => {
+    ({ selectors, targetSel, includeAll }) => {
       const targetEl = targetSel ? document.querySelector(targetSel) : null;
       const targetSiblings = targetEl?.parentElement
         ? Array.from(targetEl.parentElement.children).filter((el) => el !== targetEl)
@@ -48,6 +49,10 @@ export async function captureStructuralFingerprint(
         } catch {
           // Ignore invalid selector
         }
+      }
+
+      if (includeAll) {
+        document.querySelectorAll('*').forEach((el) => queryMatches.add(el));
       }
 
       // Also gather elements with IDs
@@ -111,7 +116,13 @@ export async function captureStructuralFingerprint(
         const computed: ComputedStyles = {
           display: style.display,
           visibility: style.visibility,
-          opacity: Number(style.opacity || '1')
+          opacity: Number(style.opacity || '1'),
+          position: style.position,
+          zIndex: style.zIndex,
+          fontSize: style.fontSize,
+          fontWeight: style.fontWeight,
+          color: style.color,
+          backgroundColor: style.backgroundColor
         };
 
         // Hash content
@@ -141,7 +152,11 @@ export async function captureStructuralFingerprint(
         nodes
       };
     },
-    { selectors: combinedSelectors, targetSel: targetSelector }
+    {
+      selectors: combinedSelectors,
+      targetSel: targetSelector,
+      includeAll: includeAllElements ?? false
+    }
   );
 }
 
@@ -249,6 +264,7 @@ export function validateStructuralInvariants(
     if (baseNode.isTarget) continue;
 
     // Only protect key structural elements, siblings, or explicit landmarks
+    // (protectAllElements: every non-target element is protected).
     const isKeyStructural =
       ['header', 'nav', 'main', 'footer', 'aside'].includes(baseNode.tag) ||
       baseNode.isSibling ||
@@ -258,7 +274,7 @@ export function validateStructuralInvariants(
         )) ||
       baseNode.selector.includes('role=');
 
-    if (!isKeyStructural && !baseNode.id) continue;
+    if (!options.protectAllElements && !isKeyStructural && !baseNode.id) continue;
 
     // Find candidate counterpart
     let candNode = candidateBySelector.get(baseNode.selector);
@@ -342,6 +358,52 @@ export function validateStructuralInvariants(
           actual: { present: true, box: candNode.box, styles: candNode.styles }
         });
       }
+    }
+
+    // 5. Computed-style drift (only when both fingerprints carry the widened
+    // set - offline markup captures skip it). Font size allows 1px of noise;
+    // weight allows browser normalization (400 === normal etc. by then);
+    // colors compare normalized.
+    const changedStyles: string[] = [];
+    const bs = baseNode.styles;
+    const cs = candNode.styles;
+    if (bs.position !== undefined && cs.position !== undefined && bs.position !== cs.position)
+      changedStyles.push(`position ${bs.position} -> ${cs.position}`);
+    if (bs.zIndex !== undefined && cs.zIndex !== undefined && bs.zIndex !== cs.zIndex)
+      changedStyles.push(`z-index ${bs.zIndex} -> ${cs.zIndex}`);
+    if (bs.fontSize !== undefined && cs.fontSize !== undefined) {
+      const diff = Math.abs(parseFloat(bs.fontSize) - parseFloat(cs.fontSize));
+      if (!Number.isFinite(diff) || diff > 1)
+        changedStyles.push(`font-size ${bs.fontSize} -> ${cs.fontSize}`);
+    }
+    if (
+      bs.fontWeight !== undefined &&
+      cs.fontWeight !== undefined &&
+      bs.fontWeight !== cs.fontWeight
+    )
+      changedStyles.push(`font-weight ${bs.fontWeight} -> ${cs.fontWeight}`);
+    const normColor = (v?: string) => v?.replace(/\s+/g, '').toLowerCase();
+    if (
+      bs.color !== undefined &&
+      cs.color !== undefined &&
+      normColor(bs.color) !== normColor(cs.color)
+    )
+      changedStyles.push(`color ${bs.color} -> ${cs.color}`);
+    if (
+      bs.backgroundColor !== undefined &&
+      cs.backgroundColor !== undefined &&
+      normColor(bs.backgroundColor) !== normColor(cs.backgroundColor)
+    )
+      changedStyles.push(`background-color ${bs.backgroundColor} -> ${cs.backgroundColor}`);
+    if (changedStyles.length) {
+      violations.push({
+        kind: 'restyled',
+        selector: baseNode.selector,
+        tag: baseNode.tag,
+        message: `Invariant Violation: <${baseNode.tag}> computed style changed unexpectedly (${changedStyles.join('; ')})`,
+        expected: { box: baseNode.box, styles: baseNode.styles },
+        actual: { present: true, box: candNode.box, styles: candNode.styles }
+      });
     }
   }
 

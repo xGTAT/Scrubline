@@ -1,0 +1,9 @@
+.hero {
+  padding: 8px;
+}
+.hero h1 {
+  color: gray;
+}
+#top-nav a {
+  text-decoration: none;
+}

@@ -14,7 +14,39 @@ import {
 import { FrameView } from './Frame';
 import { ChatbotView } from './ChatbotView';
 import type { HostInfo } from '../host-info';
-import type { TimelineState, TimelineOutbound, TimelineInbound } from '../bridge/timeline';
+import type {
+  TimelineState,
+  TimelineOutbound,
+  TimelineInbound,
+  PerfDelta
+} from '../bridge/timeline';
+
+const formatBytes = (n: number) =>
+  Math.abs(n) >= 1024 * 1024
+    ? `${(n / (1024 * 1024)).toFixed(1)} MB`
+    : Math.abs(n) >= 1024
+      ? `${(n / 1024).toFixed(1)} kB`
+      : `${n} B`;
+
+const formatPerfDelta = (d: PerfDelta) => {
+  const bytes =
+    d.metric === 'htmlBytes' ||
+    d.metric === 'cssBytes' ||
+    d.metric === 'assetBytes' ||
+    d.metric === 'totalBytes';
+  const sign = d.delta > 0 ? '+' : '-';
+  const magnitude = bytes ? formatBytes(Math.abs(d.delta)) : String(Math.abs(d.delta));
+  return `${d.label} ${sign}${magnitude}`;
+};
+
+const formatPerfValue = (d: PerfDelta, which: 'before' | 'after') => {
+  const bytes =
+    d.metric === 'htmlBytes' ||
+    d.metric === 'cssBytes' ||
+    d.metric === 'assetBytes' ||
+    d.metric === 'totalBytes';
+  return bytes ? formatBytes(d[which]) : String(d[which]);
+};
 declare global {
   interface Window {
     __SCRUBLINE_HOST_INFO__?: HostInfo;
@@ -56,6 +88,16 @@ export const App: React.FC = () => {
   );
   const anchor = useRef<string | undefined>(undefined);
   const checkboxRefs = useRef(new Map<string, HTMLInputElement>());
+  // Focus target set by Shift+Arrow extend; applied after the render commit so
+  // it wins against any re-render the state change triggers (see keydown below).
+  const pendingCheckboxFocus = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const focusId = pendingCheckboxFocus.current;
+    if (focusId) {
+      pendingCheckboxFocus.current = undefined;
+      checkboxRefs.current.get(focusId)?.focus();
+    }
+  });
   useEffect(() => {
     if (state.selection) setMulti(state.selection);
   }, [state.selection]);
@@ -644,8 +686,11 @@ export const App: React.FC = () => {
                       .sort((x, y) => order.indexOf(x) - order.indexOf(y));
                     persistMulti({ ids, mode: multi.mode });
                     choose(order[j]);
-                    // Focus follows the extended edge so repeated Shift+Arrow keeps walking.
-                    setTimeout(() => checkboxRefs.current.get(order[j])?.focus(), 0);
+                    // Focus follows the extended edge so repeated Shift+Arrow keeps
+                    // walking. Applied post-commit (effect above), not via a raw
+                    // timer: a timer can fire before the React commit or before a
+                    // state echo re-render, dropping the key sequence under load.
+                    pendingCheckboxFocus.current = order[j];
                   }}
                   onChange={() => {}}
                 />
@@ -666,6 +711,11 @@ export const App: React.FC = () => {
                   </time>
                   <span>{r.changedPaths.length} files changed</span>
                   <small>{r.attribution.kind === 'hook' ? 'Hook matched' : 'Unattributed'}</small>
+                  {r.perfDelta && r.perfDelta.length > 0 && (
+                    <small title="Performance change vs the previous checkpoint">
+                      {r.perfDelta.slice(0, 2).map(formatPerfDelta).join(' · ')}
+                    </small>
+                  )}
                 </button>
               </li>
             ))}
@@ -743,6 +793,26 @@ export const App: React.FC = () => {
               ))}
             </ul>
           </details>
+          {row.perf && (
+            <details>
+              <summary>Performance vs previous checkpoint</summary>
+              {row.perfDelta && row.perfDelta.length > 0 ? (
+                <ul className="paths">
+                  {row.perfDelta.map((d) => (
+                    <li key={d.metric}>
+                      {d.label}: {formatPerfValue(d, 'before')} → {formatPerfValue(d, 'after')} (
+                      {formatPerfDelta(d)})
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>No measurable change in DOM size, CSS weight or asset bytes.</p>
+              )}
+              {typeof row.renderMs === 'number' && (
+                <p>Last preview render: {(row.renderMs / 1000).toFixed(1)} s.</p>
+              )}
+            </details>
+          )}
         </section>
       )}
       {state.review && (
@@ -1039,9 +1109,52 @@ export const App: React.FC = () => {
               >
                 {state.review.multi ? 'Confirm combined apply' : 'Confirm restore'}
               </button>
+              <button
+                className="lock-button"
+                title="Lock the picked element: it must never be changed, by restores or by the agent"
+                onClick={() => bridge?.postMessage({ type: 'lock-element' })}
+              >
+                Lock element
+              </button>
             </>
           )}
         </section>
+      )}
+      {!!state.lockDrift?.length && (
+        <section className="lock-drift" role="alert">
+          <p className="failure">
+            Locked elements were touched by the latest change:{' '}
+            {state.lockDrift.map((l) => `${l.selector} (${l.document})`).join(', ')}
+          </p>
+        </section>
+      )}
+      {!!state.locks?.length && (
+        <details className="locks-panel" name="scrubline-tools">
+          <summary>Locked elements ({state.locks.length})</summary>
+          <p className="locks-note">
+            Locked elements must never be changed by restores or by the agent. The agent sees this
+            list through the Scrubline MCP tools.
+          </p>
+          <ul className="paths">
+            {state.locks.map((l) => (
+              <li key={`${l.document}::${l.selector}`}>
+                <code>{l.selector}</code> in <code>{l.document}</code>
+                {l.label ? ` (${l.label})` : ''}
+                <button
+                  onClick={() =>
+                    bridge?.postMessage({
+                      type: 'unlock-element',
+                      selector: l.selector,
+                      document: l.document
+                    })
+                  }
+                >
+                  Unlock
+                </button>
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
       {row && (
         <button onClick={() => bridge?.postMessage({ type: 'fork-checkpoint', id: row.id })}>

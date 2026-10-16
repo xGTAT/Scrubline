@@ -1174,3 +1174,21 @@ table-layout: fixed;
   margin-top: 4px;
   max-width: 100%;
 }
+
+/* Locked elements */
+.lock-button {
+  margin-left: 8px;
+}
+.locks-panel {
+  margin-top: 8px;
+}
+.locks-note {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #888);
+}
+.lock-drift {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
+  border-radius: 4px;
+}
