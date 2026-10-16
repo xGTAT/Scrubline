@@ -1175,6 +1175,106 @@ table-layout: fixed;
   max-width: 100%;
 }
 
+/* Backend visuals */
+.backend-panel {
+  margin-top: 8px;
+  text-align: left;
+  min-width: 0;
+}
+.backend-view {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px 0;
+  min-width: 0;
+}
+.backend-waterfall {
+  overflow-x: auto;
+  min-width: 0;
+}
+.backend-waterfall svg {
+  width: 100%;
+  min-width: 560px;
+  height: auto;
+  display: block;
+}
+.waterfall-row {
+  cursor: pointer;
+}
+.waterfall-row:hover .waterfall-label {
+  fill: var(--vscode-textLink-foreground, #3794ff);
+}
+.waterfall-label {
+  fill: var(--vscode-foreground, #ccc);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.waterfall-status {
+  fill: var(--vscode-descriptionForeground, #999);
+  font-size: 10px;
+  text-anchor: end;
+}
+.waterfall-bar.status-ok {
+  fill: var(--vscode-testing-iconPassed, #4caf7d);
+}
+.waterfall-bar.status-redirect {
+  fill: var(--vscode-charts-blue, #3794ff);
+}
+.waterfall-bar.status-error {
+  fill: var(--vscode-testing-iconFailed, #f14c4c);
+}
+.waterfall-bar.status-failed {
+  fill: var(--vscode-disabledForeground, #777);
+}
+.waterfall-bar.mutation {
+  stroke: var(--vscode-editorWarning-foreground, #e5c07b);
+  stroke-width: 1.5;
+}
+.waterfall-detail {
+  border-left: 2px solid var(--vscode-textLink-foreground, #3794ff);
+  padding-left: 8px;
+  margin: 4px 0;
+}
+.backend-mutation {
+  color: var(--vscode-editorWarning-foreground, #e5c07b);
+  margin: 0;
+}
+.backend-coverage,
+.backend-note {
+  color: var(--vscode-descriptionForeground, #999);
+  display: block;
+}
+.backend-endpoints ul,
+.backend-diff ul {
+  list-style: none;
+  padding-left: 0;
+  margin: 4px 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.backend-endpoints code {
+  background: var(--vscode-textCodeBlock-background, rgba(255, 255, 255, 0.06));
+  padding: 0 4px;
+  border-radius: 3px;
+}
+.backend-graph {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.backend-graph-node {
+  fill: var(--vscode-badge-background, #4d4d4d);
+}
+.backend-graph-label {
+  fill: var(--vscode-badge-foreground, #fff);
+  font-size: 9px;
+}
+.backend-graph-edge {
+  stroke: var(--vscode-descriptionForeground, #888);
+  stroke-width: 1;
+  opacity: 0.6;
+}
+
 /* Locked elements */
 .lock-button {
   margin-left: 8px;

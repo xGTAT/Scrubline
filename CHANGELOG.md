@@ -1,3 +1,11 @@
+## Unreleased
+
+- Backend visuals: a new **Backend** tab in the checkpoint panel shows the HTTP requests the page made during rendering (waterfall), API routes found by static source scan, a backend import graph, and a request-count diff against the parent checkpoint.
+- Capture is metadata-only: paths, status, timing and protocol only; bodies, headers, cookies and query values are never stored. Heuristic redaction of token-looking path segments and secret-looking query keys (bounded, not guaranteed - see docs/backend-visuals.md).
+- Observed browser requests are labeled separately from static scan results; neither claims server-side or database causality.
+- New settings: scrubline.backendCapture (default on), scrubline.backendCaptureFilter, scrubline.backendMaxRequests (default 60), scrubline.backendDiagrams.
+- Waterfall scrolls internally at narrow panel widths.
+
 ## 0.10.0
 
 - Multi-checkpoint composition: check any number of checkpoint cards (cap `scrubline.multiSelectLimit`, default 20, max 50), order them in the selection tray, and review one combined candidate.

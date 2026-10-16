@@ -38,11 +38,16 @@ import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
 import { RenderCache, renderKey, prepareHistory } from './preview/cache';
 import { scopedStore } from './store/identity';
 import { Alternatives, mainlineBase, mergeFiles } from './branches/alternatives';
 import { composeCheckpoints } from './branches/multi';
 import { changedPaths } from './capture/scanner';
+import { scanEndpoints, matchRoute } from './backend/endpoints';
+import { buildImportGraph } from './backend/graph';
+import { diffCaptures } from './backend/diff';
+import type { BackendCapture } from './backend/types';
 import { applySelective } from './branches/apply';
 import { staticSectionPaths } from './branches/static-mapping';
 import {
@@ -154,6 +159,8 @@ export async function activate(context: vscode.ExtensionContext) {
   let verificationReport: TimelineState['verificationReport'];
   let selectiveMeta: { targetSelector?: string; documentPath?: string } | undefined;
   let comparison: TimelineState['comparison'];
+  let backend: TimelineState['backend'];
+  const backendCache = new Map<string, TimelineState['backend']>();
   let mcpBridge: McpBridge | undefined;
   let lockRegistry: LockRegistry | undefined;
   let lockDrift: TimelineState['lockDrift'];
@@ -230,6 +237,7 @@ export async function activate(context: vscode.ExtensionContext) {
       targeting,
       branches: alternatives?.list(),
       comparison,
+      backend,
       pages,
       activePage,
       chatbot: chatbotController?.getState(),
@@ -397,7 +405,10 @@ export async function activate(context: vscode.ExtensionContext) {
         width: config.get<number>('previewWidth', 960),
         height: config.get<number>('previewHeight', 600),
         route: config.get<string>('previewRoute', '/'),
-        readySelector: config.get<string>('previewReadySelector', '')
+        readySelector: config.get<string>('previewReadySelector', ''),
+        backendCapture: config.get<boolean>('backendCapture', true),
+        backendFilter: config.get<string>('backendCaptureFilter', ''),
+        backendMaxRequests: config.get<number>('backendMaxRequests', 200)
       },
       timeline.store,
       (message) => {
@@ -588,6 +599,23 @@ export async function activate(context: vscode.ExtensionContext) {
           async (c) => {
             const r = await background.historical(c, true, 'prerender-screenshots');
             if (!r.screenshot || !r.url) throw new Error(r.error ?? 'Screenshot unavailable.');
+            // Promote the sanitized backend artifact out of the quarantined
+            // prerender directory before it is wiped; the canonical location
+            // matches interactive renders and the backend view reader.
+            try {
+              const artifact = await fs.readFile(`${r.screenshot}.backend.json`, 'utf8');
+              await atomicWrite(
+                path.join(
+                  timeline!.store.root,
+                  'screenshots',
+                  renderKey(runner!.config),
+                  `${c.id}.backend.json`
+                ),
+                artifact
+              );
+            } catch {
+              /* Capture disabled or unavailable for this render. */
+            }
             return r.screenshot;
           },
           () => cancelRender || shutdownPreview,
@@ -1210,6 +1238,109 @@ export async function activate(context: vscode.ExtensionContext) {
         }
         if (message.type === 'render-history') {
           beginRender();
+          return;
+        }
+        if (message.type === 'request-backend') {
+          if (!/^[a-f0-9]{64}$/.test(message.id)) return;
+          const checkpoint = timeline?.store.checkpoints.find((c) => c.id === message.id);
+          if (!checkpoint || !timeline || !runner) return;
+          const cachedBackend = backendCache.get(message.id);
+          if (cachedBackend) {
+            backend = cachedBackend;
+            publish(state);
+            return;
+          }
+          backend = { status: 'loading', checkpoint: message.id };
+          publish(state);
+          try {
+            const capturePath = path.join(
+              timeline.store.root,
+              'screenshots',
+              renderKey(runner.config),
+              `${message.id}.backend.json`
+            );
+            let capture: BackendCapture | undefined;
+            try {
+              const parsed = JSON.parse(await fs.readFile(capturePath, 'utf8')) as BackendCapture;
+              if (parsed.version === 1 && parsed.checkpoint === message.id) capture = parsed;
+            } catch {
+              /* No capture recorded for this checkpoint. */
+            }
+            const diagramsOn = config.get<boolean>('backendDiagrams', true);
+            let endpoints: import('./backend/types').EndpointMap | undefined;
+            let graph: import('./backend/types').ModuleGraph | undefined;
+            let matches: number[] | undefined;
+            if (diagramsOn) {
+              const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'scrubline-backend-'));
+              try {
+                await timeline.store.materialize(checkpoint, temp);
+                const codeFiles: { path: string; content: string }[] = [];
+                const CODE = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
+                const SKIP = /(^|\/)(node_modules|\.git|dist|out)(\/|$)/;
+                const walk = async (dir: string, prefix: string): Promise<void> => {
+                  if (codeFiles.length >= 1000) return;
+                  for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
+                    if (codeFiles.length >= 1000) return;
+                    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+                    if (entry.isDirectory()) {
+                      if (!SKIP.test(rel)) await walk(path.join(dir, entry.name), rel);
+                    } else if (CODE.test(entry.name) && !SKIP.test(rel)) {
+                      const full = path.join(dir, entry.name);
+                      const stat = await fs.stat(full);
+                      if (stat.size > 256 * 1024) continue;
+                      codeFiles.push({ path: rel, content: await fs.readFile(full, 'utf8') });
+                    }
+                  }
+                };
+                await walk(temp, '');
+                endpoints = scanEndpoints(codeFiles);
+                graph = buildImportGraph(codeFiles);
+                if (capture)
+                  matches = capture.entries.map((e) => matchRoute(e.path, endpoints!.routes));
+              } finally {
+                await fs.rm(temp, { recursive: true, force: true });
+              }
+            }
+            let diff: import('./backend/types').BackendDiffEntry[] | undefined;
+            if (capture && checkpoint.parentId) {
+              try {
+                const parent = JSON.parse(
+                  await fs.readFile(
+                    path.join(
+                      timeline.store.root,
+                      'screenshots',
+                      renderKey(runner.config),
+                      `${checkpoint.parentId}.backend.json`
+                    ),
+                    'utf8'
+                  )
+                ) as BackendCapture;
+                if (parent.version === 1) diff = diffCaptures(parent, capture);
+              } catch {
+                /* Parent render predates capture; diff stays absent. */
+              }
+            }
+            backend = {
+              status: capture || endpoints || graph ? 'ready' : 'empty',
+              checkpoint: message.id,
+              capture,
+              matches,
+              endpoints,
+              graph,
+              diff,
+              message: capture
+                ? undefined
+                : 'No backend capture for this checkpoint. Re-render it to record traffic.'
+            };
+            backendCache.set(message.id, backend);
+          } catch (e) {
+            backend = {
+              status: 'error',
+              checkpoint: message.id,
+              message: e instanceof Error ? e.message : 'Backend view failed.'
+            };
+          }
+          publish(state);
           return;
         }
         if (message.type === 'refresh-renders' && cache) {
@@ -2212,7 +2343,10 @@ export async function activate(context: vscode.ExtensionContext) {
               width: config.get<number>('previewWidth', 960),
               height: config.get<number>('previewHeight', 600),
               route: config.get<string>('previewRoute', '/'),
-              readySelector: config.get<string>('previewReadySelector', '')
+              readySelector: config.get<string>('previewReadySelector', ''),
+              backendCapture: config.get<boolean>('backendCapture', true),
+              backendFilter: config.get<string>('backendCaptureFilter', ''),
+              backendMaxRequests: config.get<number>('backendMaxRequests', 200)
             },
             timeline.store,
             (message) => {

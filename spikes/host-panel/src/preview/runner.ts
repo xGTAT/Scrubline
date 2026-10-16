@@ -9,6 +9,7 @@ import { specification, specificationKey } from './spec';
 import { readReceipt } from './receipt';
 import type { RenderReceipt } from '../evidence/types';
 import { hashBytes, HistoryStore, atomicWrite } from '../store/store';
+import { createCapture } from '../backend/capture';
 export interface PreviewConfig {
   command: string;
   port: number;
@@ -20,6 +21,11 @@ export interface PreviewConfig {
   route?: string;
   readySelector?: string;
   guard?: import('../layout/types').LayoutGuard;
+  /** Metadata-only backend capture during renders; default on. */
+  backendCapture?: boolean;
+  /** Optional glob limiting captured request URLs, e.g. star-star/api/star-star. */
+  backendFilter?: string;
+  backendMaxRequests?: number;
 }
 export interface PreviewResult {
   checkpoint: string;
@@ -184,6 +190,14 @@ export class PreviewRunner {
     });
     try {
       const page = await browser.newPage({ viewport: { width: spec.width, height: spec.height } });
+      const collector =
+        this.config.backendCapture === false
+          ? undefined
+          : createCapture({
+              filter: this.config.backendFilter,
+              maxEntries: this.config.backendMaxRequests
+            });
+      collector?.attach(page);
       // Server startup and browser rendering have separate budgets.
       const renderTimeout = Math.max(this.config.timeoutMs, 15000);
       const renderStart = Date.now();
@@ -269,6 +283,13 @@ export class PreviewRunner {
       const geometry = JSON.stringify(regions);
       await atomicWrite(destination, image);
       await atomicWrite(`${destination}.json`, geometry);
+      if (collector && checkpoint) {
+        await collector.finish();
+        await atomicWrite(
+          `${destination}.backend.json`,
+          JSON.stringify(collector.build(checkpoint.id, specificationKey(this.config), url))
+        );
+      }
       if (checkpoint) {
         const receipt: RenderReceipt = {
           version: 1,

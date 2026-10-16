@@ -20,6 +20,7 @@ import type {
   TimelineInbound,
   PerfDelta
 } from '../bridge/timeline';
+import { BackendView } from './BackendView';
 
 const formatBytes = (n: number) =>
   Math.abs(n) >= 1024 * 1024
@@ -156,6 +157,10 @@ export const App: React.FC = () => {
     bridge?.postMessage({ type: 'request-chatbot-state' });
     return () => window.removeEventListener('message', handler);
   }, []);
+  useEffect(() => {
+    if (selected && /^[a-f0-9]{64}$/.test(selected))
+      bridge?.postMessage({ type: 'request-backend', id: selected });
+  }, [selected]);
   const [fullscreen, setFullscreen] = useState(window.__SCRUBLINE_FULLSCREEN__ ?? false);
   const [frame, setFrame] = useState<
     import('./Frame').Frame & {
@@ -545,6 +550,12 @@ export const App: React.FC = () => {
                 >
                   Recheck twice
                 </button>
+              </details>
+            )}
+            {state.backend && selected && state.backend.checkpoint === selected && (
+              <details className="backend-panel">
+                <summary>Backend</summary>
+                <BackendView backend={state.backend} />
               </details>
             )}
             {row && (

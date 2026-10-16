@@ -132,6 +132,41 @@ exports.run = async () => {
     0,
     'recovery after failed/cancelled render and settings change'
   );
+  // Backend capture: the real host render recorded sanitized request metadata.
+  const storeRoot = api.getStoreRoot();
+  const screenshotsRoot = path.join(storeRoot, 'screenshots');
+  const specDirs = await fs.readdir(screenshotsRoot).catch(() => []);
+  let backendArtifact;
+  for (const dir of specDirs) {
+    const candidate = path.join(screenshotsRoot, dir, `${baseline}.backend.json`);
+    if (
+      await fs.access(candidate).then(
+        () => true,
+        () => false
+      )
+    ) {
+      backendArtifact = JSON.parse(await fs.readFile(candidate, 'utf8'));
+      break;
+    }
+  }
+  assert.ok(backendArtifact, 'backend capture artifact written for host render');
+  assert.equal(backendArtifact.checkpoint, baseline);
+  assert.equal(backendArtifact.version, 1);
+  const seen = backendArtifact.entries.map((e) => `${e.method} ${e.path}`);
+  assert.ok(seen.includes('GET /api/status'), `capture has the GET route: ${seen}`);
+  assert.ok(seen.includes('POST /api/items'), `capture has the POST route: ${seen}`);
+  const statusEntry = backendArtifact.entries.find((e) => e.path === '/api/status');
+  assert.deepEqual(statusEntry.queryKeys, ['session']);
+  assert.equal(statusEntry.mutation, false);
+  assert.equal(
+    backendArtifact.entries.find((e) => e.path === '/api/items').mutation,
+    true,
+    'POST flagged as mutation'
+  );
+  assert.ok(
+    !JSON.stringify(backendArtifact).includes('HOSTSECRET'),
+    'query values never serialized'
+  );
   const commands = await vscode.commands.getCommands(true);
   assert.ok(commands.includes('scrubline.deleteHistory'));
   assert.ok(commands.includes('scrubline.compactHistory'));

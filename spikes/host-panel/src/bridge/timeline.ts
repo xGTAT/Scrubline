@@ -96,6 +96,7 @@ export interface TimelineState {
   };
   selection?: { ids: string[]; mode: 'combine' | 'revert' | 'mosaic' };
   measuredPacket?: import('../targeting/measured').MeasuredPacket;
+  backend?: import('../backend/types').BackendState;
   rollback?: { message: string; changes?: import('../investigation/change-units').CssUnit[] };
   canUndo?: boolean;
   branches?: { id: string; name: string; checkpoint: string; base: string; directory: string }[];
@@ -163,6 +164,7 @@ export type TimelineInbound =
   | { type: 'copy-packet' }
   | { type: 'validate-target' }
   | { type: 'request-timeline' }
+  | { type: 'request-backend'; id: string }
   | { type: 'set-page'; route: string }
   | { type: 'add-page' }
   | { type: 'retry-capture' }

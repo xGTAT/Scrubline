@@ -175,6 +175,32 @@
           "maximum": 50,
           "description": "Maximum checkpoints selectable for one multi-checkpoint review."
         },
+        "scrubline.backendCapture": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "description": "Record metadata (method, redacted URL, status, timing) of page network requests during renders. Query values, headers, cookies and bodies are never stored."
+        },
+        "scrubline.backendCaptureFilter": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Optional glob limiting which request URLs are recorded (for example **/api/**). Empty records all requests the page makes during the render."
+        },
+        "scrubline.backendMaxRequests": {
+          "type": "number",
+          "default": 200,
+          "minimum": 1,
+          "maximum": 1000,
+          "scope": "resource",
+          "description": "Maximum requests recorded per render."
+        },
+        "scrubline.backendDiagrams": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "description": "Build static backend route map and module import graph from checkpoint source."
+        },
         "scrubline.advisorBackend": {
           "type": "string",
           "enum": [
