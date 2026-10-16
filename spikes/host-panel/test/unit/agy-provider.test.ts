@@ -13,13 +13,22 @@ const doublePath = path.join(__dirname, '..', 'fixtures', 'agy-double.mjs');
 
 async function makeAgyShim(): Promise<string> {
   const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'scrubline-agy-shim-'));
-  const shim = path.join(dir, 'agy');
+  const base = path.join(dir, 'agy');
+  if (process.platform === 'win32') {
+    // Windows command shims run through cmd.exe; the provider resolves the
+    // extension-less path to agy.cmd, so return the base path.
+    await fs.promises.writeFile(
+      `${base}.cmd`,
+      `@echo off\r\n"${process.execPath}" "${doublePath}" %*\r\n`
+    );
+    return base;
+  }
   await fs.promises.writeFile(
-    shim,
+    base,
     `#!/bin/sh\nAGY_DOUBLE_BEHAVIOR="$AGY_DOUBLE_BEHAVIOR" exec "${process.execPath}" "${doublePath}" "$@"\n`,
     { mode: 0o755 }
   );
-  return shim;
+  return base;
 }
 
 function context(): DesignQueryContext {
