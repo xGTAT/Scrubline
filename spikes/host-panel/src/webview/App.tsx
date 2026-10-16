@@ -113,12 +113,12 @@ export const App: React.FC = () => {
     window.addEventListener('message', handler);
     bridge?.postMessage({ type: 'request-timeline' });
     bridge?.postMessage({ type: 'request-chatbot-state' });
-    useEffect(() => {
-      if (selected && /^[a-f0-9]{64}$/.test(selected))
-        bridge?.postMessage({ type: 'request-backend', id: selected });
-    }, [selected]);
     return () => window.removeEventListener('message', handler);
   }, []);
+  useEffect(() => {
+    if (selected && /^[a-f0-9]{64}$/.test(selected))
+      bridge?.postMessage({ type: 'request-backend', id: selected });
+  }, [selected]);
   const [fullscreen, setFullscreen] = useState(window.__SCRUBLINE_FULLSCREEN__ ?? false);
   const [frame, setFrame] = useState<
     import('./Frame').Frame & {
