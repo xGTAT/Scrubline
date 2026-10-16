@@ -1,6 +1,7 @@
 import { replaceActivation } from './lifecycle';
 import { ElementPicker } from './branches/picker';
 import { elementCandidate } from './branches/element';
+import { frameworkElementCandidate, isFrameworkDocument } from './framework/candidate';
 import { installMcpRuntime } from './mcp/install';
 import { measuredPacket } from './targeting/measured';
 import { specificationKey } from './preview/spec';
@@ -969,22 +970,53 @@ export async function activate(context: vscode.ExtensionContext) {
             runner.config.browserPath,
             result.url,
             { width: runner.config.width ?? 960, height: runner.config.height ?? 600 },
-            async (indices) => {
+            async (indices, info) => {
               try {
                 const current = timeline!.store.checkpoints.filter((c) => !c.branch).at(-1)!;
-                const candidate = await elementCandidate(
-                  timeline!.store,
-                  pickedSource,
-                  current,
-                  document,
-                  '',
-                  indices
-                );
+                let candidate;
+                let frameworkNotes: string[] = [];
+                let htmlError: unknown;
+                // Static HTML documents use the exact parse5 path. A framework
+                // app's served shell (e.g. a Vite index.html) falls through to
+                // framework source matching when the HTML path refuses.
+                if (
+                  document.endsWith('.html') &&
+                  pickedSource.files.some((f) => f.path === document) &&
+                  current.files.some((f) => f.path === document)
+                ) {
+                  try {
+                    candidate = await elementCandidate(
+                      timeline!.store,
+                      pickedSource,
+                      current,
+                      document,
+                      '',
+                      indices
+                    );
+                  } catch (e) {
+                    htmlError = e;
+                  }
+                }
+                if (!candidate) {
+                  try {
+                    const result = await frameworkElementCandidate(
+                      timeline!.store,
+                      pickedSource,
+                      current,
+                      info
+                    );
+                    candidate = result.candidate;
+                    frameworkNotes = result.notes;
+                  } catch (frameworkError) {
+                    throw htmlError ?? frameworkError;
+                  }
+                }
                 review = await timeline!.exclusive(() =>
                   restore!.review(candidate, current, state.unsaved)
                 );
                 review.note =
-                  'Element content, inline styles and paired exclusive CSS only. Shared styles and unmatched rules stay current; this may differ from the historical appearance.';
+                  'Element content, inline styles and paired exclusive CSS only. Shared styles and unmatched rules stay current; this may differ from the historical appearance.' +
+                  (frameworkNotes.length ? ' ' + frameworkNotes.join(' ') : '');
                 selectiveTarget = candidate;
                 selected = pickedSource.id;
                 publish(state);
@@ -1012,8 +1044,10 @@ export async function activate(context: vscode.ExtensionContext) {
           const document =
             message.document ||
             (await vscode.window.showQuickPick(
-              target.files.filter((f) => f.path.endsWith('.html')).map((f) => f.path),
-              { placeHolder: 'Plain HTML document' }
+              target.files
+                .filter((f) => f.path.endsWith('.html') || isFrameworkDocument(f.path))
+                .map((f) => f.path),
+              { placeHolder: 'HTML document or framework component file' }
             ));
           if (!document) return;
           const element =
@@ -1024,18 +1058,27 @@ export async function activate(context: vscode.ExtensionContext) {
               placeHolder: 'hero'
             }));
           if (!element) return;
-          const candidate = await elementCandidate(
-            timeline.store,
-            target,
-            current,
-            document,
-            element
-          );
+          let candidate;
+          let frameworkNotes: string[] = [];
+          if (isFrameworkDocument(document)) {
+            const result = await frameworkElementCandidate(
+              timeline.store,
+              target,
+              current,
+              { id: element },
+              { document }
+            );
+            candidate = result.candidate;
+            frameworkNotes = result.notes;
+          } else {
+            candidate = await elementCandidate(timeline.store, target, current, document, element);
+          }
           review = await timeline.exclusive(() =>
             restore!.review(candidate, current, state.unsaved)
           );
           review.note =
-            'Element content, inline styles and paired exclusive CSS only. Shared styles and unmatched rules stay current; this may differ from the historical appearance.';
+            'Element content, inline styles and paired exclusive CSS only. Shared styles and unmatched rules stay current; this may differ from the historical appearance.' +
+            (frameworkNotes.length ? ' ' + frameworkNotes.join(' ') : '');
           selectiveTarget = candidate;
           selected = target.id;
           publish(state);

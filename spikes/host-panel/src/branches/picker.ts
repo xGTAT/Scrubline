@@ -10,7 +10,17 @@ export class ElementPicker {
     executable: string,
     url: string,
     viewport: { width: number; height: number },
-    picked: (path: number[]) => Promise<void>,
+    picked: (
+      path: number[],
+      info: {
+        tag: string;
+        id?: string;
+        testId?: string;
+        name?: string;
+        text?: string;
+        href?: string;
+      }
+    ) => Promise<void>,
     stopped: () => Promise<void>
   ) {
     await this.stop();
@@ -29,7 +39,7 @@ export class ElementPicker {
       await stopped();
     });
     await page.exposeBinding('__scrublineSelect', async (_source, value: { selector: string }) => {
-      const indices = await page.locator(value.selector).evaluate((el) => {
+      const result = await page.locator(value.selector).evaluate((el) => {
         const path: number[] = [];
         let n: Element | null = el;
         while (n && n !== document.body) {
@@ -38,9 +48,19 @@ export class ElementPicker {
           path.unshift([...parent.children].indexOf(n));
           n = parent;
         }
-        return path;
+        return {
+          path,
+          info: {
+            tag: el.tagName.toLowerCase(),
+            id: el.id || undefined,
+            testId: el.getAttribute('data-testid') ?? undefined,
+            name: el.getAttribute('aria-label') ?? undefined,
+            text: (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 300) || undefined,
+            href: el.getAttribute('href') ?? undefined
+          }
+        };
       });
-      await picked(indices);
+      await picked(result.path, result.info);
     });
     await page.route('**/*', async (route) => {
       const u = new URL(route.request().url());

@@ -1,0 +1,9 @@
+<main class="app">
+  <nav id="top-nav">
+    <a *ngFor="let l of links" [routerLink]="l.path">{{ l.label }}</a>
+  </nav>
+  <section class="hero">
+    <h1 data-testid="title">Hola</h1>
+    <button (click)="go()">Go</button>
+  </section>
+</main>
