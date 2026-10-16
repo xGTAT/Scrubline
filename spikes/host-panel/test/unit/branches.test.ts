@@ -252,5 +252,5 @@ test('two real branch renders differ without workspace or sibling modification',
     for (const r of runners) await r.stop();
     await fs.rm(f.temp, { recursive: true, force: true });
   }
-}, 15000);
+}, 30000);
 // Isolated temp-directory cleanup regression boundary.

@@ -76,6 +76,7 @@ export interface TimelineState {
     summary?: string;
   };
   chatbot?: import('../chatbot/types').ChatbotState;
+  verificationReport?: import('../verification/types').VerificationReport;
 }
 export type TimelineInbound =
   | { type: 'render-history' }
