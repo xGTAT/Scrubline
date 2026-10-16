@@ -46,6 +46,8 @@ Configure workspace settings:
 
 Use a command appropriate for your project. `{port}` and the `PORT` environment variable carry the selected port. Optional `scrubline.previewReadySelector` waits for a unique visible element before capture. No browser is downloaded at runtime.
 
+**Multiple pages.** When the workspace has more than one page, the panel's **Page** dropdown selects which page to scrub, render, preview and pick elements on. Static HTML pages are discovered automatically (root `index.html` is `/`); server-only routes can be added with **Add page route…**. Each page keeps its own render cache, and the selection is remembered per workspace. Pick on page and Hidden element ID cherry-pick against the active page's document with the same static-HTML eligibility limits as before. Framework routes on React development builds get element-level cherry-picking via React's debug metadata (strict identity: reorders, duplicates and renamed components are refused; only the JSX subtree is carried). Pages where element picking is unavailable or refused (production builds, non-React frameworks, server-rendered routes) automatically fall back to exact-file cherry-picking from the checkpoint's changed files instead of a dead refusal. See [multi-page notes](docs/multi-page.md).
+
 **Render history** prepares local screenshots. Scrub, Prev, Next or Play through cached history; missing frames render on demand. **Open preview** explicitly opens interactive source. Render receipts bind evidence to source, route, viewport and browser/runtime. Two fresh probes can check repeatability, not freeze dependencies, backends or time.
 
 Preview commands run in disposable historical folders, but are not OS security sandboxes. Excluded dependencies and external state are not captured. Only run trusted commands. See [preview and restore notes](docs/m2-preview-restore.md).
@@ -69,6 +71,16 @@ Content and inline styles travel with the subtree. Complete SVGs and self-closin
 Shared CSS changes no longer veto every pick. Shared rules, theme variables, unmatched/unsupported rules and unrelated current edits stay current. The review states this limit before confirmation: a selective element restore is not a promise of the complete historical appearance. Use whole-file review if you intend to restore shared styling too. A matching element with no content or paired exclusive-style delta shows a no-change review with confirmation disabled.
 
 Use the secondary **Hidden element ID** path for source elements you cannot point to on the page. Choose the tracked HTML file and a unique ID without `#`.
+
+### Framework sources
+
+Element pick and selective apply also cover framework source files: JSX/TSX (React, Preact, Solid, Next.js), Vue, Svelte and Astro single-file components, and Angular component templates through the static HTML path. Source files are analyzed statically with exact byte ranges - no build, bundler plugin or `node_modules` needed, including on historical snapshots.
+
+What travels with a picked framework element: its exact source range (markup, Tailwind/utility classes, inline `style={{...}}` objects), plus paired exclusive style rules from imported `.css`/`.scss`/`.less` stylesheets and SFC `<style>` blocks, under the same ownership rules as static HTML. SCSS/Less nesting and unsupported selectors are never rolled back.
+
+Picked elements resolve by unique `id`/`data-testid`, or a scored match on tag, text and accessible name that must clearly beat every other candidate. Repeated elements rendered from the same `.map()` without anchors, structural drift between versions, and ambiguous ownership refuse with a plain-language reason rather than guessing. CSS-in-JS (styled-components/Emotion) is detected and disclosed in the review: markup and inline styles restore, component-defined styles stay current.
+
+Not claimed: runtime source mapping via compile-time injection, previewing framework snapshots without resolvable dependencies (`node_modules` stays excluded from capture), SCSS/Less nested-rule rollback, CSS-in-JS style rollback. See [framework language notes](docs/m7-framework-languages.md).
 
 Safety limits: ambiguous/missing source identity, duplicate IDs, script-bearing pages, active selected markup, framework-generated DOM, embedded stylesheets and stylesheet-list changes are refused. Shared and unsupported rules are preserved, not silently rolled back. Complex dynamic selector ownership and arbitrary React/Vue/component rollback are not claimed. Whole-file review and the older standalone navbar prototype remain available. See [Alternatives notes](docs/m4-branches-selective.md).
 

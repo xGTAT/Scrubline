@@ -2,7 +2,7 @@
   "name": "scrubline-panel",
   "displayName": "Scrubline Review Panel",
   "description": "Disk checkpoints and a source timeline",
-  "version": "0.8.12",
+  "version": "0.9.0",
   "publisher": "scrubline",
   "engines": {
     "vscode": "^1.80.0"
@@ -180,6 +180,7 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",
+    "@babel/parser": "^8.0.7",
     "@eslint/js": "9.39.5",
     "@playwright/test": "1.63.0",
     "@types/node": "^20.11.0",
@@ -191,10 +192,11 @@
     "esbuild": "^0.25.0",
     "eslint": "9.39.5",
     "globals": "15.15.0",
+    "postcss-less": "^6.0.0",
+    "postcss-scss": "^4.0.9",
     "prettier": "3.9.9",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "typescript": "^5.3.3",
     "typescript-eslint": "8.71.0",
     "vitest": "4.1.11"
   },
@@ -213,6 +215,7 @@
     "parse5-htmlparser2-tree-adapter": "^7.1.0",
     "playwright-core": "1.63.0",
     "postcss": "8.5.29",
+    "typescript": "^5.3.3",
     "zod": "4.6.5"
   }
 }

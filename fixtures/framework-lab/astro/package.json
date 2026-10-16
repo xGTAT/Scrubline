@@ -1,0 +1,7 @@
+{
+  "name": "framework-lab-astro",
+  "private": true,
+  "dependencies": {
+    "astro": "^4.0.0"
+  }
+}

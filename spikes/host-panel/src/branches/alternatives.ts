@@ -108,3 +108,16 @@ export function mergeFiles(
   };
   return { target: { id: hashBytes(JSON.stringify(body)), ...body }, conflicts };
 }
+
+/**
+ * Base checkpoint for cherry-picking a main-timeline checkpoint: its parent,
+ * whose difference introduced the checkpoint's changes. Branch checkpoints
+ * use Alternatives.base instead and return undefined here.
+ */
+export function mainlineBase(
+  target: Pick<Checkpoint, 'parentId' | 'branch'>,
+  checkpoints: readonly Checkpoint[]
+) {
+  if (target.branch || !target.parentId) return undefined;
+  return checkpoints.find((c) => c.id === target.parentId);
+}

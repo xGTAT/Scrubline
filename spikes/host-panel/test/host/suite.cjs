@@ -141,6 +141,17 @@ exports.run = async () => {
   const replacement = require(path.join(extension.extensionPath, 'dist', 'extension.js'));
   const subscriptions = [];
   const storageUri = vscode.Uri.file(path.dirname(path.dirname(api.getStoreRoot())));
+  const memento = () => {
+    const values = new Map();
+    return {
+      get: (key, fallback) => (values.has(key) ? values.get(key) : fallback),
+      update: async (key, value) => {
+        if (value === undefined) values.delete(key);
+        else values.set(key, value);
+      },
+      keys: () => [...values.keys()]
+    };
+  };
   const nextApi = await replacement.activate({
     extension,
     extensionPath: extension.extensionPath,
@@ -149,6 +160,8 @@ exports.run = async () => {
     globalStorageUri: vscode.Uri.file(
       path.join(path.dirname(storageUri.fsPath), 'global-replacement')
     ),
+    workspaceState: memento(),
+    globalState: memento(),
     subscriptions
   });
   assert.equal(

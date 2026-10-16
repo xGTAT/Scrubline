@@ -64,6 +64,8 @@ export interface TimelineState {
   canUndo?: boolean;
   branches?: { id: string; name: string; checkpoint: string; base: string; directory: string }[];
   comparison?: { left?: string; right?: string; leftId: string; rightId: string; message?: string };
+  pages?: import('../pages').PageInfo[];
+  activePage?: string;
   layout?: import('../layout/types').LayoutMatrix;
   investigation?: import('../investigation/types').Investigation;
   targeting?: {
@@ -104,6 +106,8 @@ export type TimelineInbound =
   | { type: 'copy-packet' }
   | { type: 'validate-target' }
   | { type: 'request-timeline' }
+  | { type: 'set-page'; route: string }
+  | { type: 'add-page' }
   | { type: 'retry-capture' }
   | { type: 'select-checkpoint'; id: string }
   | { type: 'start-preview' }

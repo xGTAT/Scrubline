@@ -1,0 +1,13 @@
+{
+  "name": "framework-lab-react",
+  "private": true,
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "vite": "^5.0.0",
+    "tailwindcss": "^3.4.0"
+  }
+}
