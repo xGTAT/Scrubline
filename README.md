@@ -102,6 +102,12 @@ Render history contains opt-in breakpoint/history sampling, bounded static-CSS c
 
 History is bound to the canonical folder path; moving a folder starts a new binding. Old unbound history is not silently assigned to a new workspace. Retention keeps checkpoints until explicit deletion. **Compact unused history data** removes orphan blobs; **Delete workspace history** erases the bound store after confirmation. Additional exclusions use `scrubline.ignoreAdditions`. No telemetry. Private/UNLICENSED; marketplace publication and license choice remain the owner's decision.
 
+## Panel features (0.9.1)
+
+- **Advisor chatbot.** The panel includes a read-only UI advisor chat (context from the timeline, preview and targeting state). It answers questions and suggests next steps; it never mutates the workspace or history.
+- **Output verification.** Restores are checked against structural and visual invariants before applying: a failed verification blocks the restore and shows the violations and visual diff highlights of vanished or collapsed regions.
+- **Multi-element cherry-pick.** Select element supports picking several elements in one pass; the restore review lists each applied element with its owned files, and ownership conflicts across the selection are refused.
+
 ## Build and test
 
 ```bash

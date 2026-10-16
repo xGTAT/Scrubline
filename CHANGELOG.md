@@ -1,5 +1,9 @@
 ## 0.9.1
 
+- Advisor chatbot in the panel (read-only; answers from timeline, preview and targeting context, never mutates the workspace).
+- Output verification before restore: structural and visual invariant checks block a failing restore and show violations plus visual diff highlights.
+- Multi-element cherry-picking: pick several elements in one pass; the review lists applied elements with owned files; ownership conflicts are refused.
+
 - The changes badge and "Read-only screenshot" caption no longer overlay the preview: they live in a bar below the frame, so short or content-filled pages are never covered at any panel width or change count.
 - Checkpoints and render history are now page-scoped: a checkpoint only appears (and renders) on pages whose own files changed. Page file sets cover the HTML document plus its local stylesheets, scripts and media, including recursive CSS @import/url() targets; changes to shared assets still appear on every page that uses them, and changes no page maps (config, framework sources) stay visible everywhere. Server-rendered routes without a static document keep the full timeline.
 
