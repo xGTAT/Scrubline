@@ -328,6 +328,7 @@ test('alternatives show their own webpage previews and picking targets the right
     (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
       status: 'ready',
       unsaved: false,
+      uiMode: 'dev',
       rows: [
         {
           id: 'a'.repeat(64),
@@ -370,6 +371,7 @@ test('alternatives show their own webpage previews and picking targets the right
       (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
         status: 'ready',
         unsaved: false,
+        uiMode: 'dev',
         rows: [
           {
             id: 'a'.repeat(64),
