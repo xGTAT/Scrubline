@@ -115,13 +115,22 @@ test('backend panel renders waterfall, routes, graph and honest labels', async (
 });
 
 test('backend panel evidence screenshots wide and narrow', async ({ page }) => {
-  await page.setViewportSize({ width: 960, height: 700 });
+  await page.setViewportSize({ width: 960, height: 900 });
   await openBackend(page);
   await page.locator('details.backend-endpoints summary').click();
   await page.locator('details.backend-modules summary').click();
-  await page.screenshot({ path: `${evidenceDir}/backend_panel_wide.png`, fullPage: true });
-  await page.setViewportSize({ width: 320, height: 700 });
-  await page.screenshot({ path: `${evidenceDir}/backend_panel_narrow.png`, fullPage: true });
+  // Viewport screenshots: fullPage stitching misdraws the sticky scrub bar.
+  await page.locator('details.backend-panel').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${evidenceDir}/backend_panel_wide.png`, fullPage: false });
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.locator('details.backend-panel').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${evidenceDir}/backend_panel_narrow.png`, fullPage: false });
+  // No real overlap: scrub controls sit above the backend panel in flow.
+  const boxes = await page.evaluate(() => {
+    const rect = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
+    return { scrub: rect('.scrub'), backend: rect('details.backend-panel') };
+  });
+  expect(boxes.backend.top).toBeGreaterThanOrEqual(boxes.scrub.top);
   // Narrow: waterfall stays inside the panel, no horizontal page scroll.
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth
