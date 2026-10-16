@@ -93,6 +93,7 @@ export async function assembleChatbotContext(
     compareCheckpoint?: Checkpoint;
     cache?: RenderCache;
     secrets?: readonly string[];
+    locks?: readonly { selector: string; document: string; label?: string }[];
   } = {}
 ): Promise<DesignQueryContext> {
   const secrets = options.secrets ?? [];
@@ -194,6 +195,7 @@ export async function assembleChatbotContext(
   }
 
   return {
+    lockedElements: options.locks?.map((l) => ({ ...l })),
     activeCheckpoint,
     compareCheckpoint,
     targetFiles,

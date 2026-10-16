@@ -15,7 +15,12 @@ export class ChatbotController {
     private readonly getCache: () => RenderCache | undefined,
     private readonly getSecrets: () => Promise<readonly string[]>,
     private readonly notifyState: (state: ChatbotState) => void,
-    advisorService?: DesignAdvisorService
+    advisorService?: DesignAdvisorService,
+    private readonly getLocks?: () => readonly {
+      selector: string;
+      document: string;
+      label?: string;
+    }[]
   ) {
     this.advisorService = advisorService ?? new DesignAdvisorService();
   }
@@ -76,7 +81,8 @@ export class ChatbotController {
       const context = await assembleChatbotContext(this.store, activeCp, userQuery, {
         compareCheckpoint: compareCp,
         cache: this.getCache(),
-        secrets
+        secrets,
+        locks: this.getLocks?.()
       });
 
       const advice = await this.advisorService.ask(context);

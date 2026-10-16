@@ -10,6 +10,7 @@
 - Mosaic element picks for static HTML: per-file optional element id narrows the winner to that subtree plus paired id-scoped CSS, with the existing refusal rules; a refusal conflicts only that file.
 - Composition identity binding: changing the set, order, mode or overrides after review disables Confirm and refuses apply with a stale-review error.
 - Limits: one element pick per file (static HTML only), combine folds whole files (no hunk merge).
+- Element locking: lock a picked element from the review panel. Locks persist per workspace (locks.json in the history store), appear in the panel with an Unlock action, and are exposed to the agent through a new read-only MCP tool `list_locked_elements` whose contract says locked elements must never be modified. The UI Advisor receives locks as context (the Antigravity prompt instructs advice-only for locked elements), and a drift warning appears in the panel when a checkpoint touches a locked element's document.
 - UI Advisor can now answer through Antigravity models: the advisor calls the Antigravity CLI headless mode (`agy -p --output-format json --json-schema`) on the user's own credentials, with structured output mapped into the advice response. Offline heuristic analysis remains as automatic fallback (`scrubline.advisorBackend`: auto/agy/deterministic; `scrubline.agyPath`, `scrubline.advisorTimeoutMs`, `scrubline.advisorModel`). The chat shows which backend answered.
 
 ## 0.9.1

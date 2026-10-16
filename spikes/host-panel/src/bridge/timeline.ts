@@ -96,8 +96,14 @@ export interface TimelineState {
   };
   chatbot?: import('../chatbot/types').ChatbotState;
   verificationReport?: import('../verification/types').VerificationReport;
+  /** Elements the user locked; agents and restores must never modify them. */
+  locks?: import('../locks/registry').LockedElement[];
+  /** Locks whose owning document changed in the latest capture - drift warning. */
+  lockDrift?: { selector: string; document: string; label?: string }[];
 }
 export type TimelineInbound =
+  | { type: 'lock-element'; label?: string }
+  | { type: 'unlock-element'; selector: string; document: string }
   | { type: 'render-history' }
   | { type: 'fullscreen'; active: boolean }
   | { type: 'cancel-render' }

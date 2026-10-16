@@ -110,6 +110,11 @@ function buildPrompt(context: DesignQueryContext): string {
     parts.push(
       `COMPARE CHECKPOINT: ${context.compareCheckpoint.id} at ${context.compareCheckpoint.createdAt}`
     );
+  if (context.lockedElements?.length) {
+    parts.push('', 'LOCKED ELEMENTS (never suggest changing these; advise the user instead):');
+    for (const l of context.lockedElements)
+      parts.push(`- ${l.selector} in ${l.document}${l.label ? ` (${l.label})` : ''}`);
+  }
   parts.push('', 'TARGET FILES:');
   let budget = MAX_TOTAL_CHARS;
   for (const f of context.targetFiles) {

@@ -21,6 +21,18 @@ export function createMcpServer(
     })
   );
   server.registerTool(
+    'list_locked_elements',
+    {
+      description:
+        'List elements the user has locked. NEVER modify a locked element, its owning document, or its scoped styles, under any circumstances. If a change would affect a locked element, advise the user instead of editing.',
+      inputSchema: {},
+      annotations: { readOnlyHint: true }
+    },
+    async () => ({
+      content: [{ type: 'text', text: JSON.stringify(await call('list_locked_elements')) }]
+    })
+  );
+  server.registerTool(
     'restore_checkpoint',
     {
       description:

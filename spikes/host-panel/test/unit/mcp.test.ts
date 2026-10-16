@@ -7,11 +7,13 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
-test('MCP advertises exactly three tools; restore and multi review only request reviewed confirmation', async () => {
+test('MCP advertises exactly four tools; restore and multi review only request reviewed confirmation', async () => {
   const requests: unknown[] = [];
   const server = createMcpServer(async (name, id, extra) => {
     requests.push({ name, id, extra });
     if (name === 'list_checkpoints') return { checkpoints: [{ id: 'a'.repeat(64) }] };
+    if (name === 'list_locked_elements')
+      return { locks: [{ selector: '#buy', document: 'index.html' }] };
     if (name === 'review_checkpoints')
       return { status: 'pending_user_confirmation', ...(extra as object) };
     return { status: 'pending_user_confirmation', checkpoint: id };
@@ -24,6 +26,7 @@ test('MCP advertises exactly three tools; restore and multi review only request 
     const tools = await client.listTools();
     expect(tools.tools.map((t) => t.name)).toEqual([
       'list_checkpoints',
+      'list_locked_elements',
       'restore_checkpoint',
       'review_checkpoints'
     ]);

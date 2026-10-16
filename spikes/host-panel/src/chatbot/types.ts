@@ -88,6 +88,8 @@ export interface DesignQueryContext {
   }[];
   visual: VisualEvidenceStatus;
   userQuery: string;
+  /** Elements locked by the user: never suggest changing these; advise instead. */
+  lockedElements?: { selector: string; document: string; label?: string }[];
 }
 
 export interface DesignAdviceResponse {

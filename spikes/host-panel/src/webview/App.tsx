@@ -1039,9 +1039,52 @@ export const App: React.FC = () => {
               >
                 {state.review.multi ? 'Confirm combined apply' : 'Confirm restore'}
               </button>
+              <button
+                className="lock-button"
+                title="Lock the picked element: it must never be changed, by restores or by the agent"
+                onClick={() => bridge?.postMessage({ type: 'lock-element' })}
+              >
+                Lock element
+              </button>
             </>
           )}
         </section>
+      )}
+      {!!state.lockDrift?.length && (
+        <section className="lock-drift" role="alert">
+          <p className="failure">
+            Locked elements were touched by the latest change:{' '}
+            {state.lockDrift.map((l) => `${l.selector} (${l.document})`).join(', ')}
+          </p>
+        </section>
+      )}
+      {!!state.locks?.length && (
+        <details className="locks-panel" name="scrubline-tools">
+          <summary>Locked elements ({state.locks.length})</summary>
+          <p className="locks-note">
+            Locked elements must never be changed by restores or by the agent. The agent sees this
+            list through the Scrubline MCP tools.
+          </p>
+          <ul className="paths">
+            {state.locks.map((l) => (
+              <li key={`${l.document}::${l.selector}`}>
+                <code>{l.selector}</code> in <code>{l.document}</code>
+                {l.label ? ` (${l.label})` : ''}
+                <button
+                  onClick={() =>
+                    bridge?.postMessage({
+                      type: 'unlock-element',
+                      selector: l.selector,
+                      document: l.document
+                    })
+                  }
+                >
+                  Unlock
+                </button>
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
       {row && (
         <button onClick={() => bridge?.postMessage({ type: 'fork-checkpoint', id: row.id })}>
