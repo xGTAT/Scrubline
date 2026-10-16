@@ -713,7 +713,15 @@ export const App: React.FC = () => {
         </section>
       )}
       {state.review && (
-        <section role="region" aria-label="Restore confirmation" className="restore-confirmation">
+        <section
+          role="region"
+          aria-label="Restore confirmation"
+          className={
+            state.review.multi
+              ? 'restore-confirmation restore-confirmation--multi'
+              : 'restore-confirmation'
+          }
+        >
           {state.review.note && <p className="element-review-note">{state.review.note}</p>}
           {state.review.multi && (
             <section aria-label="Multi-checkpoint review">
@@ -750,7 +758,7 @@ export const App: React.FC = () => {
                   ))}
                 </ul>
               )}
-              <table>
+              <table className="multi-table">
                 <thead>
                   <tr>
                     <th>File</th>
@@ -765,11 +773,17 @@ export const App: React.FC = () => {
                       <td title={d.path}>{d.path}</td>
                       <td>{d.sources.map((id) => id.slice(0, 8)).join(', ')}</td>
                       <td>
-                        {d.status === 'conflict'
-                          ? (d.reason ?? 'Conflict')
-                          : d.status === 'clean'
-                            ? 'Apply'
-                            : 'Unchanged'}
+                        {(() => {
+                          if (state.review!.multi!.mode === 'mosaic') {
+                            const winner = state.review!.multi!.overrides?.[d.path];
+                            if (!winner || winner === 'current') return 'Keep current';
+                          }
+                          return d.status === 'conflict'
+                            ? (d.reason ?? 'Conflict')
+                            : d.status === 'clean'
+                              ? (d.reason ?? 'Apply')
+                              : 'Unchanged';
+                        })()}
                       </td>
                       {state.review!.multi!.mode === 'mosaic' && (
                         <td>
@@ -825,10 +839,10 @@ export const App: React.FC = () => {
             </section>
           )}
           {(state.review.multi?.blocked.length ?? 0) > 0 && (
-            <span role="alert">
+            <p role="alert" className="multi-note">
               Composition conflicts block apply. Untick a checkpoint, reorder, or pick per-file
               winners in Pick per file mode.
-            </span>
+            </p>
           )}
           {state.review.conflicts.length > 0 ? (
             <>
