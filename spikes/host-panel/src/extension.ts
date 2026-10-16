@@ -1934,6 +1934,7 @@ export async function activate(context: vscode.ExtensionContext) {
   return {
     getTimeline: () => state,
     getStoreRoot: () => timeline?.store.root,
+    head: () => timeline?.store.checkpoints.filter((c) => !c.branch).at(-1)?.id,
     prepareRenders: async () => {
       beginRender();
       await renderJob;
@@ -1978,6 +1979,40 @@ export async function activate(context: vscode.ExtensionContext) {
           timeline!.store.checkpoints.find((c) => c.id === id)!,
           state.unsaved
         )
+      ),
+    reviewMulti: (
+      ids: string[],
+      mode: 'combine' | 'revert' | 'mosaic',
+      overrides: import('./branches/multi').MosaicOverrides = {}
+    ) =>
+      timeline!.exclusive(async () => {
+        const current = timeline!.store.checkpoints.filter((c) => !c.branch).at(-1)!;
+        const composed = await composeCheckpoints(
+          timeline!.store.checkpoints,
+          current,
+          ids,
+          mode,
+          overrides,
+          50,
+          timeline!.store
+        );
+        if (composed.conflicts.length)
+          return { conflicts: composed.conflicts, decisions: composed.decisions };
+        const reviewed = await restore!.review(composed.target, current, state.unsaved);
+        return {
+          target: composed.target,
+          review: reviewed,
+          compositionId: composed.compositionId,
+          decisions: composed.decisions
+        };
+      }),
+    applyTarget: (
+      target: import('./bridge/timeline').Checkpoint,
+      token: string,
+      attribution?: import('./bridge/timeline').Attribution
+    ) =>
+      timeline!.exclusive(() =>
+        restore!.apply(token, target, state.unsaved, undefined, undefined, attribution)
       ),
     undo: () =>
       timeline?.exclusive(() => restore!.undo(timeline!.store.checkpoints.at(-1)!, state.unsaved))

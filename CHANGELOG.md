@@ -7,7 +7,9 @@
 - Dependency hints name unselected checkpoints a selected change sits on, with one-click Add; composition conflicts disable confirmation.
 - Selection persists across panel reloads; shift-click extends ranges.
 - Read-only MCP `review_checkpoints` tool composes and opens the same review; apply stays panel-confirmed.
-- Limits: mosaic picks are file-level (no per-element picks), Shift+Arrow range selection is not implemented, combine folds whole files (no hunk merge).
+- Mosaic element picks for static HTML: per-file optional element id narrows the winner to that subtree plus paired id-scoped CSS, with the existing refusal rules; a refusal conflicts only that file.
+- Composition identity binding: changing the set, order, mode or overrides after review disables Confirm and refuses apply with a stale-review error.
+- Limits: one element pick per file (static HTML only), combine folds whole files (no hunk merge).
 
 ## 0.9.0
 

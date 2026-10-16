@@ -177,9 +177,56 @@ exports.run = async () => {
   await fs.writeFile(path.join(root, 'after-upgrade.txt'), 'captured after hot upgrade');
   await nextApi.capture();
   assert.ok(nextApi.getTimeline().rows.at(-1).changedPaths.includes('after-upgrade.txt'));
+  // Multi-checkpoint composition over the real host: two checkpoints with
+  // disjoint deltas compose, apply and undo through the shared transaction.
+  await fs.writeFile(path.join(root, 'multi-a.txt'), 'A v1');
+  await nextApi.capture();
+  const cpA = nextApi.head();
+  await fs.writeFile(path.join(root, 'multi-b.txt'), 'B v1');
+  await nextApi.capture();
+  const cpB = nextApi.head();
+  await fs.rm(path.join(root, 'multi-a.txt'));
+  await fs.rm(path.join(root, 'multi-b.txt'));
+  await nextApi.capture();
+  const multi = await nextApi.reviewMulti([cpB, cpA], 'combine');
+  assert.deepEqual(multi.conflicts ?? [], [], 'disjoint deltas compose cleanly');
+  assert.ok(multi.compositionId, 'composition identity present');
+  await nextApi.applyTarget(multi.target, multi.review.token, {
+    kind: 'composed',
+    mode: 'combine',
+    sources: [cpB, cpA]
+  });
+  assert.equal(await fs.readFile(path.join(root, 'multi-a.txt'), 'utf8'), 'A v1');
+  assert.equal(await fs.readFile(path.join(root, 'multi-b.txt'), 'utf8'), 'B v1');
+  let appliedRow;
+  const attrDeadline = Date.now() + 10000;
+  do {
+    await new Promise((r) => setTimeout(r, 250));
+    appliedRow = nextApi.getTimeline().rows.find((r) => r.id === nextApi.head());
+  } while (!appliedRow && Date.now() < attrDeadline);
+  assert.equal(
+    appliedRow && appliedRow.attribution.kind,
+    'composed',
+    'applied checkpoint carries composed attribution'
+  );
+  await nextApi.undo();
+  await assert.rejects(fs.access(path.join(root, 'multi-a.txt')), 'undo removes A');
+  await assert.rejects(fs.access(path.join(root, 'multi-b.txt')), 'undo removes B');
+  // MCP review_checkpoints stays review-only in the host.
+  const mcpConnection = await vscode.commands.executeCommand('scrubline.startMcp');
+  const mcpConfig = JSON.parse(await fs.readFile(mcpConnection, 'utf8'));
+  const mcpResponse = await fetch(mcpConfig.url, {
+    method: 'POST',
+    headers: { authorization: 'Bearer ' + mcpConfig.token },
+    body: JSON.stringify({ name: 'review_checkpoints', checkpoints: [cpA], mode: 'combine' })
+  });
+  const mcpJson = await mcpResponse.json();
+  assert.equal(mcpJson.status, 'pending_user_confirmation', 'MCP multi review never applies');
+  await assert.rejects(fs.access(path.join(root, 'multi-a.txt')), 'MCP review wrote nothing');
   await vscode.commands.executeCommand('scrubline.openPanel');
   await replacement.deactivate();
+
   console.log(
-    'HOST TEST PASS: activation, storage, edit, timeline, MCP review-only, restore/Undo, panel command'
+    'HOST TEST PASS: activation, storage, edit, timeline, MCP review-only, restore/Undo, multi compose/apply/Undo, MCP multi review-only, panel command'
   );
 };

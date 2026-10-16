@@ -8,7 +8,8 @@ Introduced on the `feature/multi-checkpoint` branch (0.10.0).
   them to a **selection tray** at the top of the timeline: the count, a mode
   selector, the ordered list of selected checkpoints as chips (reorder with
   the arrows, remove with x), **Clear**, and **Review**. Shift-click extends
-  the range from the last toggled card. The selection survives panel reloads.
+  the range from the last toggled card; Shift+Arrow extends from the keyboard.
+  The selection survives panel reloads.
   The cap is `scrubline.multiSelectLimit` (default 20, maximum 50).
 - **Review** composes the selected checkpoints into ONE synthetic candidate
   and runs it through the exact same review/apply/Undo pipeline as a single
@@ -33,7 +34,13 @@ Introduced on the `feature/multi-checkpoint` branch (0.10.0).
 - **Pick per file (mosaic)**: per-file winner. The review lists every file
   touched by any selected checkpoint with a per-file dropdown of the
   checkpoints that touched it plus "current". Files without a choice keep
-  current content. No merging, so composition itself never conflicts.
+  current content. No merging, so composition itself never conflicts. For
+  static HTML files, an optional element id input narrows the pick to that
+  element's subtree plus its paired id-scoped CSS; the existing element
+  refusal rules apply and a refusal conflicts only that file.
+- Keyboard: Space toggles the focused card's checkbox; Shift+ArrowUp/Down
+  extends the selection from the anchor to the adjacent checkpoint and moves
+  focus, so repeated presses walk the timeline.
 
 ## Safety behavior
 
@@ -46,9 +53,13 @@ Introduced on the `feature/multi-checkpoint` branch (0.10.0).
   restore path and its tests.
 - The combined candidate renders a **preview with a receipt** before
   confirmation. The label names the checkpoint count, mode and selection
-  order; the receipt binds the exact rendered content. When the preview
-  runner is unavailable or the render fails, the review still opens with the
-  per-file table only and says so.
+  order; the receipt binds the exact rendered content, and a composition
+  identity (hash of the mode, ordered ids, overrides and exact file set)
+  rides with the review. Changing the selection, order, mode or overrides
+  after reviewing invalidates it: Confirm disables, and apply refuses with
+  "Selection changed since review. Review again." When the preview runner is
+  unavailable or the render fails, the review still opens with the per-file
+  table only and says so.
 - **Dependency hints**: when an unselected checkpoint between the selected
   ones also touched a file in the composition, the review names it and
   offers one-click **Add** to extend the selection. Hints are advisory;
@@ -66,12 +77,16 @@ Introduced on the `feature/multi-checkpoint` branch (0.10.0).
 
 ## Limits (honest list)
 
-- Mosaic picks are **file-level**. Choosing individual elements per
-  checkpoint inside one file is not implemented.
-- Selection keyboard support is the native checkbox behavior (Space toggles
-  the focused card). Shift+Arrow range selection is not implemented.
+- Element picks are **static HTML only**, one per file: the unique-id subtree
+  plus paired id-scoped CSS, with the existing refusal rules (shared CSS,
+  scripts, embedded styles, ambiguous ownership). Picking two elements from
+  different checkpoints inside the same file is not supported; pick the whole
+  file instead. Framework sources (JSX/Vue/Svelte) are not offered for
+  element picks in mosaic mode.
 - Combine folds at **whole-file** granularity. Two checkpoints that edited
   different parts of the same file from different bases conflict instead of
   merging hunks.
 - Side-by-side comparison of composed candidates and jump-to-source add-ons
   are not part of this change.
+- Host regression coverage runs on Linux; Windows-specific host behavior is
+  not separately verified by these tests.
