@@ -22,7 +22,7 @@ const rows = [
     attribution: { kind: 'unattributed' }
   }
 ];
-const ready = { status: 'ready', rows, unsaved: false };
+const ready = { status: 'ready', rows, unsaved: false, uiMode: 'dev' };
 
 async function openPanel(page: import('@playwright/test').Page) {
   await page.goto('/');

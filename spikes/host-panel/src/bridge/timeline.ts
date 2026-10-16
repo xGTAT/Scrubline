@@ -119,8 +119,13 @@ export interface TimelineState {
   locks?: import('../locks/registry').LockedElement[];
   /** Locks whose owning document changed in the latest capture - drift warning. */
   lockDrift?: { selector: string; document: string; label?: string }[];
+  /** Active panel presentation. 'standard' (default) shows the everyday scrub/
+   * preview/review surface; 'dev' adds granular diagnostics and advanced
+   * actions. Published by the host so every view stays in sync. */
+  uiMode?: 'standard' | 'dev';
 }
 export type TimelineInbound =
+  | { type: 'set-ui-mode'; mode: 'standard' | 'dev' }
   | { type: 'lock-element'; label?: string }
   | { type: 'unlock-element'; selector: string; document: string }
   | { type: 'render-history' }

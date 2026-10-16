@@ -266,18 +266,50 @@ export const App: React.FC = () => {
     return () => document.removeEventListener('visibilitychange', stop);
   }, []);
   const visible = row ? [row] : state.rows.slice(-1);
+  // Presentation mode is host-owned (persisted in globalState, published with
+  // every timeline so all views stay in sync). The webview keeps a transient
+  // override so the toggle responds instantly; it is dropped when the host
+  // confirms or a different host mode arrives. Business logic reads `state`,
+  // never the mode - this is rendering preference only.
+  const [modeOverride, setModeOverride] = useState<'standard' | 'dev' | undefined>(undefined);
+  const [lastHostMode, setLastHostMode] = useState<'standard' | 'dev'>(state.uiMode ?? 'standard');
+  useEffect(() => {
+    if (state.uiMode && state.uiMode !== lastHostMode) {
+      setLastHostMode(state.uiMode);
+      setModeOverride(undefined);
+    }
+  }, [state.uiMode, lastHostMode]);
+  const dev = (modeOverride ?? state.uiMode ?? 'standard') === 'dev';
+  const switchMode = (next: 'standard' | 'dev') => {
+    if ((modeOverride ?? state.uiMode ?? 'standard') === next) return;
+    setModeOverride(next);
+    bridge?.postMessage({ type: 'set-ui-mode', mode: next });
+  };
   return (
-    <main className={`panel ${fullscreen ? 'fullscreen' : ''}`}>
+    <main
+      className={`panel ${fullscreen ? 'fullscreen' : ''}`}
+      data-mode={dev ? 'dev' : 'standard'}
+    >
       <header className="header">
         <strong>
           <ClockCounterClockwise size={18} strokeWidth={1.5} aria-hidden="true" />
           Scrubline
         </strong>
-        {fullscreen ? (
-          <button onClick={toggleFullscreen}>Exit fullscreen</button>
-        ) : (
-          <span aria-label="Storage location">Local</span>
-        )}
+        <span className="header-tools">
+          <span className="mode-switch" role="group" aria-label="Interface mode">
+            <button aria-pressed={!dev} onClick={() => switchMode('standard')}>
+              Standard
+            </button>
+            <button aria-pressed={dev} onClick={() => switchMode('dev')}>
+              Dev
+            </button>
+          </span>
+          {fullscreen ? (
+            <button onClick={toggleFullscreen}>Exit fullscreen</button>
+          ) : (
+            <span aria-label="Storage location">Local</span>
+          )}
+        </span>
       </header>
       {(state.pages?.length ?? 0) > 0 && (
         <section className="page-select" aria-label="Page selection">
@@ -331,7 +363,7 @@ export const App: React.FC = () => {
         </section>
       )}
 
-      {state.rows.length > 0 && (
+      {dev && state.rows.length > 0 && (
         <details className="render-controls" name="scrubline-tools">
           <summary>
             Render history ({state.rows.filter((r) => state.rendered?.includes(r.id)).length}/
@@ -371,7 +403,7 @@ export const App: React.FC = () => {
           {state.rendering?.message && <p className="failure">{state.rendering.message}</p>}
         </details>
       )}
-      {state.rows.length > 0 && (
+      {dev && state.rows.length > 0 && (
         <details className="chatbot-panel" name="scrubline-tools">
           <summary>
             <ChatCircleText size={16} strokeWidth={1.5} aria-hidden="true" />
@@ -386,6 +418,32 @@ export const App: React.FC = () => {
           />
         </details>
       )}
+      {state.rows.length > 0 && state.rendering?.message && !dev && (
+        <p className="failure">{state.rendering.message}</p>
+      )}
+      {/* Standard mode: one quiet action so playback can start without the
+          full render toolset (cache controls, investigation, breakpoint map). */}
+      {!dev &&
+        state.rows.length > 1 &&
+        (state.rendering?.running ||
+          state.rows.some((r) => !(state.rendered ?? []).includes(r.id))) && (
+          <section className="render-quick" aria-label="Render history">
+            {state.rendering?.running ? (
+              <>
+                <span role="status">
+                  Rendering {state.rendering.done}/{state.rendering.total}…
+                </span>
+                <button onClick={() => bridge?.postMessage({ type: 'cancel-render' })}>
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <button onClick={() => bridge?.postMessage({ type: 'render-history' })}>
+                Render history
+              </button>
+            )}
+          </section>
+        )}
       {row?.alternative && (
         <section className="alternative-selection" aria-label="Alternative selection">
           <span>Alternative: {row.alternative}</span>
@@ -522,7 +580,7 @@ export const App: React.FC = () => {
           (!selected || state.preview.checkpoint === selected)) ? (
           <>
             <span>{frame?.label ?? state.preview?.label}</span>
-            {(frame?.receipt ?? state.preview?.receipt) && (
+            {dev && (frame?.receipt ?? state.preview?.receipt) && (
               <details className="render-receipt">
                 <summary>Render receipt</summary>
                 <p>
@@ -599,7 +657,7 @@ export const App: React.FC = () => {
           </button>
         ) : null}
       </section>
-      {visible.length > 0 && multi.ids.length > 0 && (
+      {dev && visible.length > 0 && multi.ids.length > 0 && (
         <section className="selection-tray" aria-label="Selected checkpoints">
           <span>{multi.ids.length} selected</span>
           <select
@@ -657,43 +715,45 @@ export const App: React.FC = () => {
           <ol className="timeline" aria-label="Checkpoints">
             {visible.map((r) => (
               <li key={r.id}>
-                <input
-                  ref={(el) => {
-                    if (el) checkboxRefs.current.set(r.id, el);
-                    else checkboxRefs.current.delete(r.id);
-                  }}
-                  type="checkbox"
-                  aria-label={`Select checkpoint ${r.id.slice(0, 8)} for multi-apply`}
-                  checked={multi.ids.includes(r.id)}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleMulti(r.id, (e as React.MouseEvent).shiftKey);
-                  }}
-                  onKeyDown={(e) => {
-                    if (!e.shiftKey || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
-                    e.preventDefault();
-                    const order = state.rows.map((x) => x.id);
-                    const i = order.indexOf(r.id);
-                    const j = e.key === 'ArrowDown' ? i + 1 : i - 1;
-                    if (i < 0 || j < 0 || j >= order.length) return;
-                    const a =
-                      anchor.current && order.includes(anchor.current)
-                        ? order.indexOf(anchor.current)
-                        : i;
-                    const range = order.slice(Math.min(a, j), Math.max(a, j) + 1);
-                    const ids = [...new Set([...multi.ids, ...range])]
-                      .filter((x) => order.includes(x))
-                      .sort((x, y) => order.indexOf(x) - order.indexOf(y));
-                    persistMulti({ ids, mode: multi.mode });
-                    choose(order[j]);
-                    // Focus follows the extended edge so repeated Shift+Arrow keeps
-                    // walking. Applied post-commit (effect above), not via a raw
-                    // timer: a timer can fire before the React commit or before a
-                    // state echo re-render, dropping the key sequence under load.
-                    pendingCheckboxFocus.current = order[j];
-                  }}
-                  onChange={() => {}}
-                />
+                {dev && (
+                  <input
+                    ref={(el) => {
+                      if (el) checkboxRefs.current.set(r.id, el);
+                      else checkboxRefs.current.delete(r.id);
+                    }}
+                    type="checkbox"
+                    aria-label={`Select checkpoint ${r.id.slice(0, 8)} for multi-apply`}
+                    checked={multi.ids.includes(r.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleMulti(r.id, (e as React.MouseEvent).shiftKey);
+                    }}
+                    onKeyDown={(e) => {
+                      if (!e.shiftKey || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
+                      e.preventDefault();
+                      const order = state.rows.map((x) => x.id);
+                      const i = order.indexOf(r.id);
+                      const j = e.key === 'ArrowDown' ? i + 1 : i - 1;
+                      if (i < 0 || j < 0 || j >= order.length) return;
+                      const a =
+                        anchor.current && order.includes(anchor.current)
+                          ? order.indexOf(anchor.current)
+                          : i;
+                      const range = order.slice(Math.min(a, j), Math.max(a, j) + 1);
+                      const ids = [...new Set([...multi.ids, ...range])]
+                        .filter((x) => order.includes(x))
+                        .sort((x, y) => order.indexOf(x) - order.indexOf(y));
+                      persistMulti({ ids, mode: multi.mode });
+                      choose(order[j]);
+                      // Focus follows the extended edge so repeated Shift+Arrow keeps
+                      // walking. Applied post-commit (effect above), not via a raw
+                      // timer: a timer can fire before the React commit or before a
+                      // state echo re-render, dropping the key sequence under load.
+                      pendingCheckboxFocus.current = order[j];
+                    }}
+                    onChange={() => {}}
+                  />
+                )}
                 <button
                   className="row"
                   aria-pressed={selected === r.id}
@@ -710,8 +770,10 @@ export const App: React.FC = () => {
                     }).format(new Date(r.createdAt))}
                   </time>
                   <span>{r.changedPaths.length} files changed</span>
-                  <small>{r.attribution.kind === 'hook' ? 'Hook matched' : 'Unattributed'}</small>
-                  {r.perfDelta && r.perfDelta.length > 0 && (
+                  {dev && (
+                    <small>{r.attribution.kind === 'hook' ? 'Hook matched' : 'Unattributed'}</small>
+                  )}
+                  {dev && r.perfDelta && r.perfDelta.length > 0 && (
                     <small title="Performance change vs the previous checkpoint">
                       {r.perfDelta.slice(0, 2).map(formatPerfDelta).join(' · ')}
                     </small>
@@ -764,22 +826,26 @@ export const App: React.FC = () => {
           </button>
           <details>
             <summary>Changed paths ({row.changedPaths.length})</summary>
-            <button onClick={() => bridge?.postMessage({ type: 'pick-element', id: row.id })}>
-              Pick on page
-            </button>{' '}
-            <button
-              disabled={state.unsaved}
-              onClick={() =>
-                bridge?.postMessage({
-                  type: 'review-element',
-                  id: row.id,
-                  document: '',
-                  element: ''
-                })
-              }
-            >
-              Hidden element ID
-            </button>
+            {dev && (
+              <>
+                <button onClick={() => bridge?.postMessage({ type: 'pick-element', id: row.id })}>
+                  Pick on page
+                </button>{' '}
+                <button
+                  disabled={state.unsaved}
+                  onClick={() =>
+                    bridge?.postMessage({
+                      type: 'review-element',
+                      id: row.id,
+                      document: '',
+                      element: ''
+                    })
+                  }
+                >
+                  Hidden element ID
+                </button>
+              </>
+            )}
             <ul className="paths">
               {row.changedPaths.map((p) => (
                 <li key={p}>
@@ -793,7 +859,7 @@ export const App: React.FC = () => {
               ))}
             </ul>
           </details>
-          {row.perf && (
+          {dev && row.perf && (
             <details>
               <summary>Performance vs previous checkpoint</summary>
               {row.perfDelta && row.perfDelta.length > 0 ? (
@@ -826,7 +892,7 @@ export const App: React.FC = () => {
           }
         >
           {state.review.note && <p className="element-review-note">{state.review.note}</p>}
-          {state.review.multi && (
+          {dev && state.review.multi && (
             <section aria-label="Multi-checkpoint review">
               {state.review.multi.warnings.map((w) => (
                 <p key={w} role="alert">
@@ -989,7 +1055,7 @@ export const App: React.FC = () => {
                       <p className="failure-reason">
                         {state.verificationReport.failureReason || state.verificationReport.summary}
                       </p>
-                      {state.verificationReport.structuralViolations?.length > 0 && (
+                      {dev && state.verificationReport.structuralViolations?.length > 0 && (
                         <ul className="violation-list">
                           {state.verificationReport.structuralViolations.map((v, i) => (
                             <li key={i} className="violation-item">
@@ -999,7 +1065,8 @@ export const App: React.FC = () => {
                           ))}
                         </ul>
                       )}
-                      {state.verificationReport.diffHighlights &&
+                      {dev &&
+                        state.verificationReport.diffHighlights &&
                         state.verificationReport.diffHighlights.length > 0 && (
                           <div className="diff-highlights-container">
                             <span>Visual Diff Highlights (Vanished / Collapsed):</span>
@@ -1030,14 +1097,15 @@ export const App: React.FC = () => {
               {state.rollback && (
                 <section aria-label="Rollback review">
                   <p role="status">{state.rollback.message}</p>
-                  {state.rollback.changes?.map((u) => (
-                    <p key={u.path + u.key}>
-                      <code>
-                        {u.path}: {u.selector} / {u.property}
-                      </code>{' '}
-                      {u.after} → {u.before}
-                    </p>
-                  ))}
+                  {dev &&
+                    state.rollback.changes?.map((u) => (
+                      <p key={u.path + u.key}>
+                        <code>
+                          {u.path}: {u.selector} / {u.property}
+                        </code>{' '}
+                        {u.after} → {u.before}
+                      </p>
+                    ))}
                 </section>
               )}
               <span>
@@ -1109,13 +1177,15 @@ export const App: React.FC = () => {
               >
                 {state.review.multi ? 'Confirm combined apply' : 'Confirm restore'}
               </button>
-              <button
-                className="lock-button"
-                title="Lock the picked element: it must never be changed, by restores or by the agent"
-                onClick={() => bridge?.postMessage({ type: 'lock-element' })}
-              >
-                Lock element
-              </button>
+              {dev && (
+                <button
+                  className="lock-button"
+                  title="Lock the picked element: it must never be changed, by restores or by the agent"
+                  onClick={() => bridge?.postMessage({ type: 'lock-element' })}
+                >
+                  Lock element
+                </button>
+              )}
             </>
           )}
         </section>
@@ -1128,7 +1198,7 @@ export const App: React.FC = () => {
           </p>
         </section>
       )}
-      {!!state.locks?.length && (
+      {dev && !!state.locks?.length && (
         <details className="locks-panel" name="scrubline-tools">
           <summary>Locked elements ({state.locks.length})</summary>
           <p className="locks-note">
@@ -1156,13 +1226,13 @@ export const App: React.FC = () => {
           </ul>
         </details>
       )}
-      {row && (
+      {dev && row && (
         <button onClick={() => bridge?.postMessage({ type: 'fork-checkpoint', id: row.id })}>
           <GitBranch size={14} strokeWidth={1.5} aria-hidden="true" />
           Fork checkpoint
         </button>
       )}
-      {!!state.branches?.length && (
+      {dev && !!state.branches?.length && (
         <details className="alternatives-menu" name="scrubline-tools">
           <summary>Alternatives ({state.branches.length})</summary>
           <p>
@@ -1234,7 +1304,7 @@ export const App: React.FC = () => {
           </ul>
         </details>
       )}
-      {state.comparison && (
+      {dev && state.comparison && (
         <details open>
           <summary>Workspace vs selected alternative</summary>
           <div className="comparison">
@@ -1252,7 +1322,8 @@ export const App: React.FC = () => {
           {state.comparison.message && <small>{state.comparison.message}</small>}
         </details>
       )}
-      {state.preview?.status === 'ready' &&
+      {dev &&
+        state.preview?.status === 'ready' &&
         state.preview.url &&
         state.preview.checkpoint &&
         (!state.targeting || state.targeting.status === 'off') && (
@@ -1260,7 +1331,7 @@ export const App: React.FC = () => {
             Select element
           </button>
         )}
-      {state.targeting && state.targeting.status !== 'off' && (
+      {dev && state.targeting && state.targeting.status !== 'off' && (
         <section aria-label="Target context">
           <span>
             {state.targeting.status === 'on'
@@ -1402,7 +1473,7 @@ export const App: React.FC = () => {
           </button>
         </section>
       )}
-      {state.measuredPacket && (
+      {dev && state.measuredPacket && (
         <details className="measured-packet">
           <summary>Review measured repair packet</summary>
           <p>
@@ -1426,9 +1497,11 @@ export const App: React.FC = () => {
       {state.canUndo && (
         <button onClick={() => bridge?.postMessage({ type: 'undo-restore' })}>Undo restore</button>
       )}
-      <footer className="footer">
-        {window.__SCRUBLINE_HOST_INFO__?.appName ?? 'Detecting host…'}
-      </footer>
+      {dev && (
+        <footer className="footer">
+          {window.__SCRUBLINE_HOST_INFO__?.appName ?? 'Detecting host…'}
+        </footer>
+      )}
     </main>
   );
 };
