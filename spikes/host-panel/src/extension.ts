@@ -1,4 +1,5 @@
 import { DualVerificationEngine } from './verification/engine';
+import { diffPerf } from './preview/perf';
 import { replaceActivation } from './lifecycle';
 import { ChatbotController } from './chatbot/controller';
 import { DesignAdvisorService, DeterministicAdvisorProvider } from './chatbot/advisor';
@@ -205,6 +206,11 @@ export async function activate(context: vscode.ExtensionContext) {
                   timeline!.store.checkpoints.find((parent) => parent.id === c.parentId)?.files ??
                     [],
                   c.files
+                ),
+                perf: c.perf,
+                perfDelta: diffPerf(
+                  timeline!.store.checkpoints.find((parent) => parent.id === c.parentId)?.perf,
+                  c.perf
                 )
               })) ?? [])
           : [])

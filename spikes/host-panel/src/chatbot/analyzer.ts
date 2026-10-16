@@ -451,6 +451,24 @@ export class DesignAnalyzer {
     findings: DesignAnalysisFinding[],
     recommendations: DesignRecommendation[]
   ) {
+    if (context.perfDelta?.length) {
+      findings.push({
+        type: 'observation',
+        category: 'diff_comparison',
+        title: 'Performance changes between compared versions',
+        details: context.perfDelta
+          .map(
+            (d) => `${d.label}: ${d.before} -> ${d.after} (${d.delta > 0 ? '+' : ''}${d.delta}).`
+          )
+          .join(' '),
+        evidence: context.perfDelta.slice(0, 5).map((d) => ({
+          category: 'historical_diff',
+          description: `${d.label} changed from ${d.before} to ${d.after}`,
+          value: `${d.delta > 0 ? '+' : ''}${d.delta}`,
+          verified: true
+        }))
+      });
+    }
     if (!context.cssChanges || context.cssChanges.length === 0) {
       findings.push({
         type: 'observation',

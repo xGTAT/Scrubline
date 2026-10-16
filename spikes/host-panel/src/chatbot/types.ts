@@ -90,6 +90,8 @@ export interface DesignQueryContext {
   userQuery: string;
   /** Elements locked by the user: never suggest changing these; advise instead. */
   lockedElements?: { selector: string; document: string; label?: string }[];
+  /** Static performance deltas between the compare and active checkpoints. */
+  perfDelta?: import('../bridge/timeline').PerfDelta[];
 }
 
 export interface DesignAdviceResponse {

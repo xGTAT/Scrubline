@@ -4,6 +4,7 @@ import type { HistoryStore } from '../store/store';
 import type { RenderCache } from '../preview/cache';
 import type { Checkpoint } from '../bridge/timeline';
 import { changedPaths } from '../capture/scanner';
+import { diffPerf } from '../preview/perf';
 import { declarationChanges, type CssUnit } from '../investigation/change-units';
 import { redact } from '../targeting/redact';
 import type { DesignQueryContext, VisualEvidenceStatus } from './types';
@@ -203,6 +204,9 @@ export async function assembleChatbotContext(
     cssChanges,
     htmlElements,
     visual,
+    perfDelta: compareCheckpoint
+      ? diffPerf(compareCheckpoint.perf, activeCheckpoint.perf)
+      : undefined,
     userQuery: redact(userQuery, secrets)
   };
 }

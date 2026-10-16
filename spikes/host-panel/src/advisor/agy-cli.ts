@@ -128,6 +128,11 @@ function buildPrompt(context: DesignQueryContext): string {
     for (const c of context.cssChanges.slice(0, 40))
       parts.push(`- ${c.selector} { ${c.property}: ${JSON.stringify(c)} }`.slice(0, 200));
   }
+  if (context.perfDelta?.length) {
+    parts.push('', 'PERFORMANCE CHANGES BETWEEN CHECKPOINTS (static metrics):');
+    for (const d of context.perfDelta)
+      parts.push(`- ${d.label}: ${d.before} -> ${d.after} (${d.delta > 0 ? '+' : ''}${d.delta})`);
+  }
   parts.push('', 'HTML ELEMENTS:');
   for (const el of context.htmlElements.slice(0, 80))
     parts.push(

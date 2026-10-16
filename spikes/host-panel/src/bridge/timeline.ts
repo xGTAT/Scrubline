@@ -8,6 +8,21 @@ export type Attribution =
   | { kind: 'unattributed' }
   | { kind: 'hook'; tool: string; conversation?: string; stepIdx?: number; paths: string[] }
   | { kind: 'composed'; mode: 'combine' | 'revert' | 'mosaic'; sources: string[] };
+export interface PerfMetrics {
+  htmlBytes: number;
+  domElements: number;
+  cssBytes: number;
+  cssRules: number;
+  assetBytes: number;
+  totalBytes: number;
+}
+export interface PerfDelta {
+  metric: keyof PerfMetrics;
+  label: string;
+  before: number;
+  after: number;
+  delta: number;
+}
 export interface Checkpoint {
   schemaVersion: 1;
   id: string;
@@ -17,6 +32,7 @@ export interface Checkpoint {
   trigger: 'baseline' | 'watcher' | 'save' | 'reconcile';
   files: TrackedFile[];
   attribution: Attribution;
+  perf?: PerfMetrics;
 }
 export interface TimelineRow {
   alternative?: string;
@@ -24,6 +40,9 @@ export interface TimelineRow {
   createdAt: string;
   changedPaths: string[];
   attribution: Attribution;
+  perf?: PerfMetrics;
+  perfDelta?: PerfDelta[];
+  renderMs?: number;
 }
 export interface TimelineState {
   status: 'empty' | 'loading' | 'ready' | 'error' | 'limit';

@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import type { Attribution, Checkpoint, TimelineState } from '../bridge/timeline';
 import { HistoryStore, hashBytes } from '../store/store';
 import { scan, changedPaths, defaultLimits, type ScanLimits } from './scanner';
+import { diffPerf } from '../preview/perf';
 
 export class Timeline {
   state: TimelineState = { status: 'loading', rows: [], unsaved: false };
@@ -83,6 +84,7 @@ export class Timeline {
           await this.store.commit(current.files, current.contents, trigger, attribution);
         }
         const parents = new Map(this.store.checkpoints.map((c) => [c.id, c]));
+        const renderTimings = await this.store.renderTimings();
         this.state = {
           status: 'ready',
           rows: this.store.checkpoints
@@ -91,7 +93,10 @@ export class Timeline {
               id: c.id,
               createdAt: c.createdAt,
               attribution: c.attribution,
-              changedPaths: changedPaths(parents.get(c.parentId ?? '')?.files ?? [], c.files)
+              changedPaths: changedPaths(parents.get(c.parentId ?? '')?.files ?? [], c.files),
+              perf: c.perf,
+              perfDelta: diffPerf(parents.get(c.parentId ?? '')?.perf, c.perf),
+              renderMs: renderTimings[c.id]
             })),
           unsaved: this.state.unsaved
         };

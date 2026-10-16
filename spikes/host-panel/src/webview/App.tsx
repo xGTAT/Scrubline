@@ -14,7 +14,39 @@ import {
 import { FrameView } from './Frame';
 import { ChatbotView } from './ChatbotView';
 import type { HostInfo } from '../host-info';
-import type { TimelineState, TimelineOutbound, TimelineInbound } from '../bridge/timeline';
+import type {
+  TimelineState,
+  TimelineOutbound,
+  TimelineInbound,
+  PerfDelta
+} from '../bridge/timeline';
+
+const formatBytes = (n: number) =>
+  Math.abs(n) >= 1024 * 1024
+    ? `${(n / (1024 * 1024)).toFixed(1)} MB`
+    : Math.abs(n) >= 1024
+      ? `${(n / 1024).toFixed(1)} kB`
+      : `${n} B`;
+
+const formatPerfDelta = (d: PerfDelta) => {
+  const bytes =
+    d.metric === 'htmlBytes' ||
+    d.metric === 'cssBytes' ||
+    d.metric === 'assetBytes' ||
+    d.metric === 'totalBytes';
+  const sign = d.delta > 0 ? '+' : '-';
+  const magnitude = bytes ? formatBytes(Math.abs(d.delta)) : String(Math.abs(d.delta));
+  return `${d.label} ${sign}${magnitude}`;
+};
+
+const formatPerfValue = (d: PerfDelta, which: 'before' | 'after') => {
+  const bytes =
+    d.metric === 'htmlBytes' ||
+    d.metric === 'cssBytes' ||
+    d.metric === 'assetBytes' ||
+    d.metric === 'totalBytes';
+  return bytes ? formatBytes(d[which]) : String(d[which]);
+};
 declare global {
   interface Window {
     __SCRUBLINE_HOST_INFO__?: HostInfo;
@@ -666,6 +698,11 @@ export const App: React.FC = () => {
                   </time>
                   <span>{r.changedPaths.length} files changed</span>
                   <small>{r.attribution.kind === 'hook' ? 'Hook matched' : 'Unattributed'}</small>
+                  {r.perfDelta && r.perfDelta.length > 0 && (
+                    <small title="Performance change vs the previous checkpoint">
+                      {r.perfDelta.slice(0, 2).map(formatPerfDelta).join(' · ')}
+                    </small>
+                  )}
                 </button>
               </li>
             ))}
@@ -743,6 +780,26 @@ export const App: React.FC = () => {
               ))}
             </ul>
           </details>
+          {row.perf && (
+            <details>
+              <summary>Performance vs previous checkpoint</summary>
+              {row.perfDelta && row.perfDelta.length > 0 ? (
+                <ul className="paths">
+                  {row.perfDelta.map((d) => (
+                    <li key={d.metric}>
+                      {d.label}: {formatPerfValue(d, 'before')} → {formatPerfValue(d, 'after')} (
+                      {formatPerfDelta(d)})
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>No measurable change in DOM size, CSS weight or asset bytes.</p>
+              )}
+              {typeof row.renderMs === 'number' && (
+                <p>Last preview render: {(row.renderMs / 1000).toFixed(1)} s.</p>
+              )}
+            </details>
+          )}
         </section>
       )}
       {state.review && (
