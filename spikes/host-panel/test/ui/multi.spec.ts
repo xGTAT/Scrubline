@@ -203,6 +203,11 @@ test('shift+arrow extends the selection from the anchor and moves focus', async 
   await page.keyboard.press('Shift+ArrowDown');
   const tray = page.getByRole('region', { name: 'Selected checkpoints' });
   await expect(tray).toContainText('2 selected');
+  // Focus moves to the extended-to checkbox; re-assert it so a re-render that
+  // briefly drops focus cannot eat the next keypress (CI load flake).
+  await page
+    .getByRole('checkbox', { name: `Select checkpoint ${id('b').slice(0, 8)}` })
+    .focus();
   await page.keyboard.press('Shift+ArrowDown');
   await expect(tray).toContainText('3 selected');
   const chips = tray.locator('ol li code');
