@@ -38,6 +38,9 @@
 
 # M4 progress
 
+- Alternatives menu simplification (owner Slack request Oct 17): per-alternative webpage previews under each alternative id (alternative render only), card actions reduced to Pick on page and Hidden element ID. Previews lazy (menu-open), sequential, capped at 8, bound to branch head + render key; failures marked, never stale-imaged. Handlers for removed card actions retained. Local: typecheck/lint/build clean, 74 UI tests, host suite PASS with per-branch preview assertions, wide/narrow evidence in docs/evidence/alternatives_preview_*.png.
+
+
 - Main M0.1-M3 gate PASS: https://github.com/xGTAT/Scrubline/actions/runs/37357088937 @ 3e07c9e.
 - Local M4 snapshot forks, DAG restart, captured side-by-side renders, file three-way merge/review/Undo, candidate+post-build checks and narrow standalone navbar HTML/CSS ownership. No worktrees/hunks/general component mapping.
 - 47 unit tests, 20 UI, host, package pass; publication and Windows gate pending. Read docs/m4-branches-selective.md.

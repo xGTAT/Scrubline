@@ -101,6 +101,9 @@ export interface TimelineState {
   canUndo?: boolean;
   branches?: { id: string; name: string; checkpoint: string; base: string; directory: string }[];
   comparison?: { left?: string; right?: string; leftId: string; rightId: string; message?: string };
+  /** Per-alternative webpage previews, keyed by branch id. `checkpoint` binds the
+   * image to the exact branch head it renders; a mismatch means stale. */
+  branchPreviews?: Record<string, { checkpoint: string; image?: string; message?: string }>;
   pages?: import('../pages').PageInfo[];
   activePage?: string;
   layout?: import('../layout/types').LayoutMatrix;
@@ -144,6 +147,7 @@ export type TimelineInbound =
   | { type: 'fork-checkpoint'; id: string }
   | { type: 'capture-branch'; branch: string }
   | { type: 'compare-branch'; branch: string }
+  | { type: 'preview-branches' }
   | { type: 'pick-element'; id: string }
   | { type: 'review-element'; id: string; document: string; element: string }
   | { type: 'review-navbar'; id: string; document: string }

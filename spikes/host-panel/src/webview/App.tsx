@@ -72,8 +72,16 @@ export const App: React.FC = () => {
     unsaved: false
   });
   const [packetReviewed, setPacketReviewed] = useState(false);
+  const [altsOpen, setAltsOpen] = useState(false);
   useEffect(() => setPacketReviewed(false), [state.targeting?.packet]);
   const selections = state.targeting?.selections;
+  useEffect(() => {
+    if (!altsOpen) return;
+    const stale = state.branches?.some(
+      (b) => state.branchPreviews?.[b.id]?.checkpoint !== b.checkpoint
+    );
+    if (stale) bridge?.postMessage({ type: 'preview-branches' });
+  }, [altsOpen, state.branches, state.branchPreviews]);
   const [includedIndices, setIncludedIndices] = useState<number[]>([]);
   const [selectionCheckpoints, setSelectionCheckpoints] = useState<Record<number, string>>({});
   useEffect(() => {
@@ -1174,12 +1182,13 @@ export const App: React.FC = () => {
         </button>
       )}
       {!!state.branches?.length && (
-        <details className="alternatives-menu" name="scrubline-tools">
+        <details
+          className="alternatives-menu"
+          name="scrubline-tools"
+          onToggle={(e) => setAltsOpen((e.target as HTMLDetailsElement).open)}
+        >
           <summary>Alternatives ({state.branches.length})</summary>
-          <p>
-            Saved forks. Create another with Fork checkpoint; Capture updates that fork, not a new
-            alternative.
-          </p>
+          <p>Saved forks. Create another with Fork checkpoint.</p>
           <ul className="paths">
             {state.branches.map((b) => (
               <li key={b.id}>
@@ -1189,6 +1198,17 @@ export const App: React.FC = () => {
                 <small>
                   Base {b.base.slice(0, 8)} · Saved {b.checkpoint.slice(0, 8)}
                 </small>
+                {state.branchPreviews?.[b.id]?.image ? (
+                  <img
+                    className="branch-preview"
+                    src={state.branchPreviews[b.id].image}
+                    alt={`${b.name} alternative render`}
+                  />
+                ) : (
+                  <small className="branch-preview-pending">
+                    {state.branchPreviews?.[b.id]?.message ?? 'Preview loading…'}
+                  </small>
+                )}
                 <button
                   onClick={() => bridge?.postMessage({ type: 'pick-element', id: b.checkpoint })}
                 >
@@ -1205,40 +1225,6 @@ export const App: React.FC = () => {
                   }
                 >
                   Hidden element ID
-                </button>
-                <button
-                  title="Prototype: standalone static HTML section (nav, footer, etc). Framework components and shared CSS are not supported."
-                  onClick={() =>
-                    bridge?.postMessage({ type: 'review-section', id: b.checkpoint, document: '' })
-                  }
-                >
-                  Static section
-                </button>
-                <button
-                  onClick={() => bridge?.postMessage({ type: 'capture-branch', branch: b.id })}
-                >
-                  Capture
-                </button>
-                <button
-                  onClick={() => bridge?.postMessage({ type: 'compare-branch', branch: b.id })}
-                >
-                  Compare
-                </button>
-                <button
-                  onClick={() => {
-                    setPlaying(false);
-                    setSelected(b.checkpoint);
-                    bridge?.postMessage({ type: 'select-checkpoint', id: b.checkpoint });
-                  }}
-                >
-                  Inspect
-                </button>
-                <button
-                  onClick={() =>
-                    bridge?.postMessage({ type: 'review-selective', id: b.checkpoint, paths: [] })
-                  }
-                >
-                  Choose files
                 </button>
               </li>
             ))}
