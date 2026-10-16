@@ -88,6 +88,16 @@ export const App: React.FC = () => {
   );
   const anchor = useRef<string | undefined>(undefined);
   const checkboxRefs = useRef(new Map<string, HTMLInputElement>());
+  // Focus target set by Shift+Arrow extend; applied after the render commit so
+  // it wins against any re-render the state change triggers (see keydown below).
+  const pendingCheckboxFocus = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const focusId = pendingCheckboxFocus.current;
+    if (focusId) {
+      pendingCheckboxFocus.current = undefined;
+      checkboxRefs.current.get(focusId)?.focus();
+    }
+  });
   useEffect(() => {
     if (state.selection) setMulti(state.selection);
   }, [state.selection]);
@@ -676,8 +686,11 @@ export const App: React.FC = () => {
                       .sort((x, y) => order.indexOf(x) - order.indexOf(y));
                     persistMulti({ ids, mode: multi.mode });
                     choose(order[j]);
-                    // Focus follows the extended edge so repeated Shift+Arrow keeps walking.
-                    setTimeout(() => checkboxRefs.current.get(order[j])?.focus(), 0);
+                    // Focus follows the extended edge so repeated Shift+Arrow keeps
+                    // walking. Applied post-commit (effect above), not via a raw
+                    // timer: a timer can fire before the React commit or before a
+                    // state echo re-render, dropping the key sequence under load.
+                    pendingCheckboxFocus.current = order[j];
                   }}
                   onChange={() => {}}
                 />
