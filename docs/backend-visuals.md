@@ -43,8 +43,11 @@ placeholders, and common secret-looking query keys (`token`, `key`, `secret`,
 
 **Honest limit:** this redaction is heuristic. A path or query key that does
 not match the token patterns can still carry an identifier or secret. The
-artifact stays on local disk under `.scrubline/`, and nothing is transmitted,
-but do not treat the file as guaranteed secret-free. Requests with userinfo
+artifact stays in the extension's workspace-scoped storage under the editor's
+user-data directory (outside the project folder; see Storage below), and this
+feature does not upload it anywhere - but rendering itself executes live
+network requests, and the file should not be treated as guaranteed
+secret-free. Requests with userinfo
 in the URL are rejected outright (never recorded). Fragments are never sent
 over the wire, but the recorder strips them regardless.
 
