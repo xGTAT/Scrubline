@@ -7,7 +7,8 @@ import {
   ArrowRight,
   Play,
   GitBranch,
-  ShieldCheck
+  ShieldCheck,
+  Warning
 } from '@phosphor-icons/react';
 import { FrameView } from './Frame';
 import type { HostInfo } from '../host-info';
@@ -584,6 +585,59 @@ export const App: React.FC = () => {
             </>
           ) : (
             <>
+              {state.verificationReport && (
+                <section
+                  role="alert"
+                  className={`verification-report ${state.verificationReport.status === 'failed' ? 'verification-warning' : 'verification-passed'}`}
+                  aria-label="Verification report"
+                >
+                  {state.verificationReport.status === 'failed' ? (
+                    <>
+                      <div className="verification-header failure">
+                        <Warning size={16} aria-hidden="true" />
+                        <strong>Invariant Violation Detected</strong>
+                      </div>
+                      <p className="failure-reason">
+                        {state.verificationReport.failureReason || state.verificationReport.summary}
+                      </p>
+                      {state.verificationReport.structuralViolations?.length > 0 && (
+                        <ul className="violation-list">
+                          {state.verificationReport.structuralViolations.map((v, i) => (
+                            <li key={i} className="violation-item">
+                              <span className="violation-kind">{v.kind}</span>
+                              <code>&lt;{v.tag}&gt;</code>: {v.message}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {state.verificationReport.diffHighlights &&
+                        state.verificationReport.diffHighlights.length > 0 && (
+                          <div className="diff-highlights-container">
+                            <span>Visual Diff Highlights (Vanished / Collapsed):</span>
+                            <div className="diff-highlights-grid">
+                              {state.verificationReport.diffHighlights.map((src, i) => (
+                                <figure key={i} className="diff-highlight-figure">
+                                  <img
+                                    src={src}
+                                    alt="Visual diff highlight showing vanished element"
+                                  />
+                                  <figcaption>Vanished Region</figcaption>
+                                </figure>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                    </>
+                  ) : (
+                    <div className="verification-success">
+                      <ShieldCheck size={16} aria-hidden="true" />
+                      <span>
+                        Verification passed: Invariants preserved, target appearance verified.
+                      </span>
+                    </div>
+                  )}
+                </section>
+              )}
               {state.rollback && (
                 <section aria-label="Rollback review">
                   <p role="status">{state.rollback.message}</p>
@@ -628,8 +682,17 @@ export const App: React.FC = () => {
                   ))}
                 </ul>
               </details>
+              {state.verificationReport?.status === 'failed' && (
+                <small className="failure-blocked">
+                  Restore blocked: Fix invariant violations before applying.
+                </small>
+              )}
               <button
-                disabled={state.unsaved || state.review.paths.length === 0}
+                disabled={
+                  state.unsaved ||
+                  state.review.paths.length === 0 ||
+                  state.verificationReport?.status === 'failed'
+                }
                 onClick={() =>
                   bridge?.postMessage({
                     type: 'apply-reviewed',

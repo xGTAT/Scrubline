@@ -73,6 +73,7 @@ export interface TimelineState {
     crop?: string;
     summary?: string;
   };
+  verificationReport?: import('../verification/types').VerificationReport;
 }
 export type TimelineInbound =
   | { type: 'render-history' }

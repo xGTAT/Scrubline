@@ -1,3 +1,4 @@
+import { DualVerificationEngine } from './verification/engine';
 import { replaceActivation } from './lifecycle';
 import { ElementPicker } from './branches/picker';
 import { elementCandidate } from './branches/element';
@@ -83,6 +84,8 @@ export async function activate(context: vscode.ExtensionContext) {
   let rollbackCandidate: RollbackCandidate | undefined;
   let rollback: TimelineState['rollback'];
   let selectiveTarget: import('./bridge/timeline').Checkpoint | undefined;
+  let verificationReport: TimelineState['verificationReport'];
+  let selectiveMeta: { targetSelector?: string; documentPath?: string } | undefined;
   let comparison: TimelineState['comparison'];
   let mcpBridge: McpBridge | undefined;
   const elementPicker = new ElementPicker();
@@ -137,7 +140,8 @@ export async function activate(context: vscode.ExtensionContext) {
       canUndo,
       targeting,
       branches: alternatives?.list(),
-      comparison
+      comparison,
+      verificationReport
     };
     for (const view of views) {
       try {
@@ -889,6 +893,8 @@ export async function activate(context: vscode.ExtensionContext) {
           selected = target.id;
           review = undefined;
           selectiveTarget = undefined;
+          selectiveMeta = undefined;
+          verificationReport = undefined;
           publish(state);
           await enqueuePreview(target.id);
         }
@@ -986,7 +992,19 @@ export async function activate(context: vscode.ExtensionContext) {
                 review.note =
                   'Element content, inline styles and paired exclusive CSS only. Shared styles and unmatched rules stay current; this may differ from the historical appearance.';
                 selectiveTarget = candidate;
+                selectiveMeta = { targetSelector: '', documentPath: document };
                 selected = pickedSource.id;
+                try {
+                  verificationReport = await DualVerificationEngine.verifyStaticDocuments({
+                    store: timeline!.store,
+                    current,
+                    candidate,
+                    targetSelector: '',
+                    documentPath: document
+                  });
+                } catch {
+                  verificationReport = undefined;
+                }
                 publish(state);
                 void vscode.window.showInformationMessage(
                   'Element selected. Review exact files and confirm in Scrubline.'
@@ -1037,7 +1055,19 @@ export async function activate(context: vscode.ExtensionContext) {
           review.note =
             'Element content, inline styles and paired exclusive CSS only. Shared styles and unmatched rules stay current; this may differ from the historical appearance.';
           selectiveTarget = candidate;
+          selectiveMeta = { targetSelector: `#${element}`, documentPath: document };
           selected = target.id;
+          try {
+            verificationReport = await DualVerificationEngine.verifyStaticDocuments({
+              store: timeline.store,
+              current,
+              candidate,
+              targetSelector: `#${element}`,
+              documentPath: document
+            });
+          } catch {
+            verificationReport = undefined;
+          }
           publish(state);
           return;
         }
@@ -1145,6 +1175,8 @@ export async function activate(context: vscode.ExtensionContext) {
         if (message.type === 'review-checkpoint' && target) {
           selected = target.id;
           selectiveTarget = undefined;
+          selectiveMeta = undefined;
+          verificationReport = undefined;
           await timeline.exclusive(async () => {
             review = await restore!.review(
               target,
@@ -1182,19 +1214,32 @@ export async function activate(context: vscode.ExtensionContext) {
               } finally {
                 layoutJob = undefined;
               }
-            } else if (selectiveTarget?.id === message.id)
+            } else if (selectiveTarget?.id === message.id) {
+              const current = timeline!.store.checkpoints.filter((c) => !c.branch).at(-1)!;
+              const historical = timeline!.store.checkpoints.find((c) => c.id === selected);
               await applySelective(
                 restore!,
                 applying,
                 message.token,
                 state.unsaved,
                 config.get<string>('postApplyCommand') ?? '',
-                () => state.unsaved
+                () => state.unsaved,
+                {
+                  verify: {
+                    previewConfig: runner?.config,
+                    historical,
+                    current,
+                    targetSelector: selectiveMeta?.targetSelector || '',
+                    documentPath: selectiveMeta?.documentPath || 'index.html'
+                  }
+                }
               );
-            else await restore!.apply(message.token, applying, state.unsaved);
+            } else await restore!.apply(message.token, applying, state.unsaved);
           });
           review = undefined;
           selectiveTarget = undefined;
+          selectiveMeta = undefined;
+          verificationReport = undefined;
           rollbackCandidate = undefined;
           rollback = undefined;
           canUndo = true;
@@ -1267,8 +1312,24 @@ export async function activate(context: vscode.ExtensionContext) {
         }
       } catch (e) {
         if (message.type === 'apply-reviewed') {
+          const vReport =
+            e && typeof e === 'object' && 'verificationReport' in e
+              ? (e as { verificationReport: TimelineState['verificationReport'] })
+                  .verificationReport
+              : undefined;
+          if (vReport) {
+            verificationReport = vReport;
+            publish(state);
+            void vscode.window.showWarningMessage(
+              verificationReport?.failureReason ||
+                'Selective restore blocked: Invariant violation detected.'
+            );
+            return;
+          }
           review = undefined;
           selectiveTarget = undefined;
+          selectiveMeta = undefined;
+          verificationReport = undefined;
           rollbackCandidate = undefined;
           rollback = undefined;
           canUndo = true;
