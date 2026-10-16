@@ -49,7 +49,9 @@ export function buildImportGraph(files: { path: string; content: string }[]): Mo
         nodes.add(target);
         edges.push({ from: file.path, to: target });
       } else if (!spec.startsWith('.')) {
-        external.add(spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0]);
+        external.add(
+          spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0]
+        );
       }
     }
   }

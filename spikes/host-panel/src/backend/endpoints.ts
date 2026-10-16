@@ -54,7 +54,10 @@ export function scanEndpoints(files: { path: string; content: string }[]): Endpo
       for (const match of text.matchAll(PLAIN_MOUNT)) {
         if (routerVars.has(match[2])) mounts.push({ prefix: '', router: match[2] });
       }
-      if (/\.(get|post|put|patch|delete|all|use)\s*\(\s*[^'"`\s)]/.test(text) && !/^\s*\/\//.test(text))
+      if (
+        /\.(get|post|put|patch|delete|all|use)\s*\(\s*[^'"`\s)]/.test(text) &&
+        !/^\s*\/\//.test(text)
+      )
         sawDynamic = true;
     });
     if (fileHit || EXPRESS_HINT.test(file.content)) scanned++;
@@ -85,9 +88,7 @@ export function scanEndpoints(files: { path: string; content: string }[]): Endpo
     notes.push('Dynamically registered or non-literal routes exist and are not listed.');
   if (sawExpress && routes.length === 0)
     notes.push('Express usage detected but no literal routes were found.');
-  routes.sort(
-    (a, b) => a.path.localeCompare(b.path) || a.method.localeCompare(b.method)
-  );
+  routes.sort((a, b) => a.path.localeCompare(b.path) || a.method.localeCompare(b.method));
   return {
     framework: sawExpress ? 'express' : 'unknown',
     routes,

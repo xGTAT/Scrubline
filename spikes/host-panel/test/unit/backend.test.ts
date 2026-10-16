@@ -9,7 +9,9 @@ describe('redactPath', () => {
   it('replaces JWT, long hex, uuid and opaque segments', () => {
     expect(redactPath('/api/users/42')).toBe('/api/users/42');
     expect(
-      redactPath('/api/eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c')
+      redactPath(
+        '/api/eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c'
+      )
     ).toBe('/api/{redacted}');
     expect(redactPath('/sess/4f8b2c1d9e0a3b5c6d7e8f90')).toBe('/sess/{redacted}');
     expect(redactPath('/u/550e8400-e29b-41d4-a716-446655440000')).toBe('/u/{redacted}');
@@ -148,9 +150,12 @@ describe('matchRoute', () => {
 describe('buildImportGraph', () => {
   it('resolves relative imports and lists external packages', () => {
     const files = [
-      { path: 'server.js', content: "const r = require('./routes/items'); import x from 'express';" },
+      {
+        path: 'server.js',
+        content: "const r = require('./routes/items'); import x from 'express';"
+      },
       { path: 'routes/items.js', content: "import { db } from '../db';" },
-      { path: 'db.js', content: "export const db = 1;" }
+      { path: 'db.js', content: 'export const db = 1;' }
     ];
     const graph = buildImportGraph(files);
     expect(graph.edges).toContainEqual({ from: 'server.js', to: 'routes/items.js' });
@@ -170,8 +175,30 @@ describe('diffCaptures', () => {
     truncated: false,
     coverage: [],
     entries: [
-      { method: 'GET', host: 'h', path: '/a', queryKeys: [], status: 200, resourceType: 'fetch', startedAt: 0, durationMs: 100, sameOrigin: true, mutation: false },
-      { method: 'GET', host: 'h', path: '/b', queryKeys: [], status: 200, resourceType: 'fetch', startedAt: 0, durationMs: 100, sameOrigin: true, mutation: false }
+      {
+        method: 'GET',
+        host: 'h',
+        path: '/a',
+        queryKeys: [],
+        status: 200,
+        resourceType: 'fetch',
+        startedAt: 0,
+        durationMs: 100,
+        sameOrigin: true,
+        mutation: false
+      },
+      {
+        method: 'GET',
+        host: 'h',
+        path: '/b',
+        queryKeys: [],
+        status: 200,
+        resourceType: 'fetch',
+        startedAt: 0,
+        durationMs: 100,
+        sameOrigin: true,
+        mutation: false
+      }
     ]
   };
   it('reports added, removed, status and timing changes', () => {
@@ -186,7 +213,12 @@ describe('diffCaptures', () => {
     };
     const diff = diffCaptures(base, after);
     expect(diff).toContainEqual({ key: 'GET h/a', kind: 'status', before: '200', after: '500' });
-    expect(diff).toContainEqual({ key: 'GET h/b', kind: 'timing', before: '100ms', after: '400ms' });
+    expect(diff).toContainEqual({
+      key: 'GET h/b',
+      kind: 'timing',
+      before: '100ms',
+      after: '400ms'
+    });
     expect(diff).toContainEqual({ key: 'GET h/c', kind: 'added', after: '200' });
     const removed = diffCaptures(after, base).find((d) => d.kind === 'removed');
     expect(removed?.key).toBe('GET h/c');

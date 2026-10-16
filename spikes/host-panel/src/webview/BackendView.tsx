@@ -3,7 +3,11 @@ import type { BackendState, BackendCapture, ModuleGraph } from '../backend/types
 
 const base = (p: string) => p.split('/').pop() ?? p;
 
-function Waterfall({ capture, matches, routes }: {
+function Waterfall({
+  capture,
+  matches,
+  routes
+}: {
   capture: BackendCapture;
   matches?: number[];
   routes?: { method: string; path: string; file: string; line: number }[];
@@ -25,7 +29,8 @@ function Waterfall({ capture, matches, routes }: {
         aria-label="Backend request waterfall"
       >
         {entries.map((e, i) => {
-          const x = e.startedAt >= 0 ? labelW + ((width - labelW - 60) * e.startedAt) / end : labelW;
+          const x =
+            e.startedAt >= 0 ? labelW + ((width - labelW - 60) * e.startedAt) / end : labelW;
           const w =
             e.durationMs != null && e.startedAt >= 0
               ? Math.max(2, ((width - labelW - 60) * e.durationMs) / end)
@@ -178,7 +183,11 @@ export function BackendView({ backend }: { backend: BackendState }) {
               the preview server. Renders execute the page; the panel only observes.
             </p>
           )}
-          <Waterfall capture={capture} matches={backend.matches} routes={backend.endpoints?.routes} />
+          <Waterfall
+            capture={capture}
+            matches={backend.matches}
+            routes={backend.endpoints?.routes}
+          />
           {backend.diff && backend.diff.length > 0 && (
             <div className="backend-diff">
               <small>vs previous checkpoint:</small>
@@ -206,7 +215,10 @@ export function BackendView({ backend }: { backend: BackendState }) {
           <ul>
             {backend.endpoints.routes.slice(0, 50).map((r, i) => (
               <li key={i}>
-                <code>{r.method}</code> {r.path} <small>{r.file}:{r.line}</small>
+                <code>{r.method}</code> {r.path}{' '}
+                <small>
+                  {r.file}:{r.line}
+                </small>
               </li>
             ))}
           </ul>
@@ -214,7 +226,9 @@ export function BackendView({ backend }: { backend: BackendState }) {
             <small>Showing 50 of {backend.endpoints.routes.length}.</small>
           )}
           {backend.endpoints.notes.map((n, i) => (
-            <small key={i} className="backend-note">{n}</small>
+            <small key={i} className="backend-note">
+              {n}
+            </small>
           ))}
           <small className="backend-coverage">
             Statically detected literal routes only; dynamic registration is not visible.
