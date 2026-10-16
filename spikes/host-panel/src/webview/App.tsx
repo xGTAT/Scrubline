@@ -15,6 +15,7 @@ import { FrameView } from './Frame';
 import { ChatbotView } from './ChatbotView';
 import type { HostInfo } from '../host-info';
 import type { TimelineState, TimelineOutbound, TimelineInbound } from '../bridge/timeline';
+import { BackendView } from './BackendView';
 declare global {
   interface Window {
     __SCRUBLINE_HOST_INFO__?: HostInfo;
@@ -112,6 +113,10 @@ export const App: React.FC = () => {
     window.addEventListener('message', handler);
     bridge?.postMessage({ type: 'request-timeline' });
     bridge?.postMessage({ type: 'request-chatbot-state' });
+  useEffect(() => {
+    if (selected && /^[a-f0-9]{64}$/.test(selected))
+      bridge?.postMessage({ type: 'request-backend', id: selected });
+  }, [selected]);
     return () => window.removeEventListener('message', handler);
   }, []);
   const [fullscreen, setFullscreen] = useState(window.__SCRUBLINE_FULLSCREEN__ ?? false);
@@ -503,6 +508,12 @@ export const App: React.FC = () => {
                 >
                   Recheck twice
                 </button>
+              </details>
+            )}
+            {state.backend && selected && state.backend.checkpoint === selected && (
+              <details className="backend-panel">
+                <summary>Backend</summary>
+                <BackendView backend={state.backend} />
               </details>
             )}
             {row && (

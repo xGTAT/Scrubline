@@ -282,9 +282,7 @@ export class PreviewRunner {
       await atomicWrite(destination, image);
       await atomicWrite(`${destination}.json`, geometry);
       if (collector && checkpoint) {
-        collector.finish();
-        // Let in-flight requestfinished handlers resolve before assembly.
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        await collector.finish();
         await atomicWrite(
           `${destination}.backend.json`,
           JSON.stringify(collector.build(checkpoint.id, specificationKey(this.config), url))

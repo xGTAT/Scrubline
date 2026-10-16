@@ -56,7 +56,7 @@ const isAbort = (text: string) => /abort/i.test(text);
 
 export interface CaptureCollector {
   attach(page: import('playwright-core').Page): void;
-  finish(): void;
+  finish(): Promise<void>;
   build(checkpoint: string, specification: string, pageUrl: string): BackendCapture;
 }
 
@@ -69,6 +69,7 @@ export function createCapture(options: { filter?: string; maxEntries?: number })
   const max = Math.max(1, Math.min(options.maxEntries ?? 200, 1000));
   const matcher = options.filter?.trim() ? globToRegExp(options.filter.trim()) : null;
   const entries: BackendRequestEntry[] = [];
+  const pending: Promise<void>[] = [];
   let truncated = false;
   let firstStart = Number.NaN;
   let done = false;
@@ -77,18 +78,18 @@ export function createCapture(options: { filter?: string; maxEntries?: number })
     failure?: string
   ): Promise<void> => {
     if (done) return;
+    await Promise.resolve();
     const raw = request.url();
     if (matcher && !matcher.test(raw)) return;
     const parts = redactUrl(raw);
     if (!parts) return;
+    const timing = request.timing();
+    if (Number.isNaN(firstStart) && timing.startTime > 0) firstStart = timing.startTime;
+    const response = failure ? null : await request.response().catch(() => null);
     if (entries.length >= max) {
       truncated = true;
       return;
     }
-    const timing = request.timing();
-    if (Number.isNaN(firstStart) && timing.startTime > 0) firstStart = timing.startTime;
-    const response = failure ? null : await request.response().catch(() => null);
-    if (done) return;
     const method = request.method().toUpperCase();
     entries.push({
       method,
@@ -112,14 +113,22 @@ export function createCapture(options: { filter?: string; maxEntries?: number })
   };
   return {
     attach(page) {
-      page.on('requestfinished', (request) => void record(request));
+      const track = (job: Promise<void>) => {
+        pending.push(job);
+        void job.finally(() => {
+          const index = pending.indexOf(job);
+          if (index >= 0) pending.splice(index, 1);
+        });
+      };
+      page.on('requestfinished', (request) => track(record(request)));
       page.on('requestfailed', (request) => {
         const text = request.failure()?.errorText ?? '';
-        void record(request, isAbort(text) ? 'aborted' : 'failed');
+        track(record(request, isAbort(text) ? 'aborted' : 'failed'));
       });
     },
-    finish() {
+    async finish() {
       done = true;
+      while (pending.length) await Promise.all([...pending]);
     },
     build(checkpoint, specification, pageUrl) {
       const page = redactUrl(pageUrl);
