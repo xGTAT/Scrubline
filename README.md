@@ -106,6 +106,10 @@ Render history contains opt-in breakpoint/history sampling, bounded static-CSS c
 
 History is bound to the canonical folder path; moving a folder starts a new binding. Old unbound history is not silently assigned to a new workspace. Retention keeps checkpoints until explicit deletion. **Compact unused history data** removes orphan blobs; **Delete workspace history** erases the bound store after confirmation. Additional exclusions use `scrubline.ignoreAdditions`. No telemetry. Private/UNLICENSED; marketplace publication and license choice remain the owner's decision.
 
+## Backend visuals
+
+The panel's Backend tab shows the HTTP requests a page made while rendering (metadata-only: paths, status, timing - never bodies or headers), API routes found by static source scan, a backend import graph, and a request diff vs the parent checkpoint. Observed browser requests are labeled separately from static analysis; neither claims server-side causality. See docs/backend-visuals.md for the privacy model and limits.
+
 ## Panel features (0.9.1)
 
 - **Advisor chatbot.** The panel includes a read-only UI advisor chat (context from the timeline, preview and targeting state). It answers questions and suggests next steps; it never mutates the workspace or history.

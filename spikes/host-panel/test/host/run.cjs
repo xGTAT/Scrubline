@@ -19,7 +19,12 @@ const path = require('node:path');
   await fs.mkdir(path.join(workspace, '.vscode'));
   await fs.writeFile(
     path.join(workspace, 'server.cjs'),
-    "require('http').createServer((q,r)=>r.end('<h1>Real host render</h1>')).listen(process.env.PORT,'127.0.0.1')"
+    `require('http').createServer((q,r)=>{
+      if(q.url==='/'){r.end('<h1>Real host render</h1><script>fetch("/api/status?session=HOSTSECRET").then(()=>fetch("/api/items",{method:"POST"}))</script>');return;}
+      if(q.url.startsWith('/api/status')){r.writeHead(200,{'content-type':'application/json'});r.end('{"ok":true}');return;}
+      if(q.url==='/api/items'){r.writeHead(201,{'content-type':'application/json'});r.end('{}');return;}
+      r.writeHead(404);r.end('nope');
+    }).listen(process.env.PORT,'127.0.0.1')`
   );
   await fs.writeFile(
     path.join(workspace, '.vscode/settings.json'),

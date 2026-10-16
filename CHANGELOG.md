@@ -1,3 +1,11 @@
+## Unreleased
+
+- Backend visuals: a new **Backend** tab in the checkpoint panel shows the HTTP requests the page made during rendering (waterfall), API routes found by static source scan, a backend import graph, and a request-count diff against the parent checkpoint.
+- Capture is metadata-only: paths, status, timing and protocol only; bodies, headers, cookies and query values are never stored. Heuristic redaction of token-looking path segments and secret-looking query keys (bounded, not guaranteed - see docs/backend-visuals.md).
+- Observed browser requests are labeled separately from static scan results; neither claims server-side or database causality.
+- New settings: scrubline.backendCapture (default on), scrubline.backendCaptureFilter, scrubline.backendMaxRequests (default 60), scrubline.backendDiagrams.
+- Waterfall scrolls internally at narrow panel widths.
+
 ## 0.10.0
 
 - Multi-checkpoint composition: check any number of checkpoint cards (cap `scrubline.multiSelectLimit`, default 20, max 50), order them in the selection tray, and review one combined candidate.
@@ -10,6 +18,7 @@
 - Mosaic element picks for static HTML: per-file optional element id narrows the winner to that subtree plus paired id-scoped CSS, with the existing refusal rules; a refusal conflicts only that file.
 - Composition identity binding: changing the set, order, mode or overrides after review disables Confirm and refuses apply with a stale-review error.
 - Limits: one element pick per file (static HTML only), combine folds whole files (no hunk merge).
+
 ## 0.9.1
 
 - Advisor chatbot in the panel (read-only; answers from timeline, preview and targeting context, never mutates the workspace).

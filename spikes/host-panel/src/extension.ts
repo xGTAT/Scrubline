@@ -540,6 +540,23 @@ export async function activate(context: vscode.ExtensionContext) {
           async (c) => {
             const r = await background.historical(c, true, 'prerender-screenshots');
             if (!r.screenshot || !r.url) throw new Error(r.error ?? 'Screenshot unavailable.');
+            // Promote the sanitized backend artifact out of the quarantined
+            // prerender directory before it is wiped; the canonical location
+            // matches interactive renders and the backend view reader.
+            try {
+              const artifact = await fs.readFile(`${r.screenshot}.backend.json`, 'utf8');
+              await atomicWrite(
+                path.join(
+                  timeline!.store.root,
+                  'screenshots',
+                  renderKey(runner!.config),
+                  `${c.id}.backend.json`
+                ),
+                artifact
+              );
+            } catch {
+              /* Capture disabled or unavailable for this render. */
+            }
             return r.screenshot;
           },
           () => cancelRender || shutdownPreview,
