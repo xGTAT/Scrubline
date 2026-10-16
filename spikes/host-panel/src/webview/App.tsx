@@ -7,9 +7,11 @@ import {
   ArrowRight,
   Play,
   GitBranch,
-  ShieldCheck
+  ShieldCheck,
+  ChatCircleText
 } from '@phosphor-icons/react';
 import { FrameView } from './Frame';
+import { ChatbotView } from './ChatbotView';
 import type { HostInfo } from '../host-info';
 import type { TimelineState, TimelineOutbound, TimelineInbound } from '../bridge/timeline';
 declare global {
@@ -35,14 +37,19 @@ export const App: React.FC = () => {
   const [selected, setSelected] = useState<string | undefined>(bridge?.getState()?.selected);
   useEffect(() => {
     const handler = (event: MessageEvent<TimelineOutbound>) => {
-      if (event.data.type === 'timeline') setState(event.data.data);
-      if (event.data.type === 'select') {
-        setSelected(event.data.id);
-        bridge?.setState({ selected: event.data.id });
+      const msg = event.data;
+      if (msg.type === 'timeline') setState(msg.data);
+      if (msg.type === 'select') {
+        setSelected(msg.id);
+        bridge?.setState({ selected: msg.id });
+      }
+      if (msg.type === 'chatbot-state') {
+        setState((prev) => ({ ...prev, chatbot: msg.data }));
       }
     };
     window.addEventListener('message', handler);
     bridge?.postMessage({ type: 'request-timeline' });
+    bridge?.postMessage({ type: 'request-chatbot-state' });
     return () => window.removeEventListener('message', handler);
   }, []);
   const [fullscreen, setFullscreen] = useState(window.__SCRUBLINE_FULLSCREEN__ ?? false);
@@ -238,6 +245,21 @@ export const App: React.FC = () => {
             </>
           )}
           {state.rendering?.message && <p className="failure">{state.rendering.message}</p>}
+        </details>
+      )}
+      {state.rows.length > 0 && (
+        <details className="chatbot-panel" name="scrubline-tools">
+          <summary>
+            <ChatCircleText size={16} strokeWidth={1.5} aria-hidden="true" />
+            UI Advisor Chatbot
+          </summary>
+          <ChatbotView
+            state={state.chatbot}
+            rows={state.rows}
+            selectedCheckpointId={selected}
+            renderedCheckpoints={state.rendered}
+            send={(message) => bridge?.postMessage(message)}
+          />
         </details>
       )}
       {row?.alternative && (

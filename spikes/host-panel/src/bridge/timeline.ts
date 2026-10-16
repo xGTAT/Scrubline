@@ -73,6 +73,7 @@ export interface TimelineState {
     crop?: string;
     summary?: string;
   };
+  chatbot?: import('../chatbot/types').ChatbotState;
 }
 export type TimelineInbound =
   | { type: 'render-history' }
@@ -111,6 +112,11 @@ export type TimelineInbound =
   | { type: 'apply-reviewed'; id: string; token: string }
   | { type: 'undo-restore' }
   | { type: 'open-preview' }
-  | { type: 'open-diff'; id: string; path: string };
+  | { type: 'open-diff'; id: string; path: string }
+  | { type: 'ask-chatbot'; query: string; checkpointId?: string; compareCheckpointId?: string }
+  | { type: 'clear-chatbot-history' }
+  | { type: 'request-chatbot-state' };
 export type TimelineOutbound =
-  { type: 'timeline'; data: TimelineState } | { type: 'select'; id: string };
+  | { type: 'timeline'; data: TimelineState }
+  | { type: 'select'; id: string }
+  | { type: 'chatbot-state'; data: import('../chatbot/types').ChatbotState };

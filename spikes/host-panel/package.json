@@ -25,6 +25,11 @@
         "category": "Scrubline"
       },
       {
+        "command": "scrubline.openChatbot",
+        "title": "Scrubline: Open UI Advisor Chatbot",
+        "category": "Scrubline"
+      },
+      {
         "command": "scrubline.startMcp",
         "title": "Scrubline: Start Local MCP"
       },
