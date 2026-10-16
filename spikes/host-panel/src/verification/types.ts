@@ -9,6 +9,14 @@ export interface ComputedStyles {
   display: string;
   visibility: string;
   opacity: number;
+  // Widened computed-style comparison (live captures only; offline markup
+  // fingerprints leave these undefined and the comparison skips them).
+  position?: string;
+  zIndex?: string;
+  fontSize?: string;
+  fontWeight?: string;
+  color?: string;
+  backgroundColor?: string;
 }
 
 export interface StructuralNodeFingerprint {
@@ -30,7 +38,7 @@ export interface StructuralFingerprint {
   nodes: StructuralNodeFingerprint[];
 }
 
-export type InvariantViolationKind = 'missing' | 'hidden' | 'collapsed' | 'shifted';
+export type InvariantViolationKind = 'missing' | 'hidden' | 'collapsed' | 'shifted' | 'restyled';
 
 export interface InvariantViolation {
   kind: InvariantViolationKind;
