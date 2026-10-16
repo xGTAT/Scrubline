@@ -1146,14 +1146,20 @@ export async function activate(context: vscode.ExtensionContext) {
                         'No source map or matching original source found for the picked element.'
                       );
                   }
-                  candidate = await frameworkElementCandidate(
+                  const result = await frameworkElementCandidate(
                     timeline!.store,
                     pickedSource,
                     current,
                     { frame, tag: framework.tag, resolved }
                   );
+                  candidate = result.checkpoint;
                   note =
-                    'JSX element subtree only (content, props, inline styles). External CSS and component internals stay current.';
+                    'JSX element subtree only (content, props, inline styles); external CSS and component internals stay current.' +
+                    (result.referenced.length
+                      ? ` References resolve to current code, not the historical versions: ${result.referenced.join(
+                          ', '
+                        )}.`
+                      : '');
                 }
                 review = await timeline!.exclusive(() =>
                   restore!.review(candidate, current, state.unsaved)

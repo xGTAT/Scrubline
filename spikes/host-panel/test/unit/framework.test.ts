@@ -126,6 +126,97 @@ test('reorder and duplication change the skeleton and are refused', () => {
   expect('refusal' in r2).toBe(true);
 });
 
+const SIBLINGS = `export function Actions() {
+  return (
+    <div>
+      <button id="save">Save</button>
+      <button id="cancel">Cancel</button>
+    </div>
+  );
+}
+`;
+
+test('same-tag sibling reorder with unchanged skeleton is refused, not mistargeted', () => {
+  // Picked element: the Cancel button (second button occurrence).
+  const line = SIBLINGS.split('\n').findIndex((l) => l.includes('id="cancel"')) + 1;
+  const col = SIBLINGS.split('\n')[line - 1].indexOf('<button') + 1;
+  const historical = extractJsxElement(SIBLINGS, line, col)!;
+  expect(historical.tagName).toBe('button');
+  expect(historical.occurrenceIndex).toBe(1);
+  expect(historical.identity.id).toBe('cancel');
+
+  // Siblings exchanged: the full tag skeleton (div, button, button) is
+  // IDENTICAL, so skeleton equality alone cannot see this reorder.
+  const swapped = SIBLINGS.replace(
+    '<button id="save">Save</button>\n      <button id="cancel">Cancel</button>',
+    '<button id="cancel">Cancel</button>\n      <button id="save">Save</button>'
+  );
+  const swappedFirst = extractJsxElement(swapped, 4, 7)!;
+  expect(swappedFirst.skeleton).toEqual(historical.skeleton);
+
+  // Occurrence 1 in the swapped source is now the save button: the identity
+  // signal disagrees and the carry must refuse instead of restoring onto the
+  // wrong sibling.
+  const r = locateCorresponding(swapped, historical);
+  expect('refusal' in r).toBe(true);
+  if ('refusal' in r) expect(r.refusal).toContain('no longer matches');
+});
+
+test('same-tag siblings distinguished by text only are refused when swapped', () => {
+  const textOnly = SIBLINGS.replace(' id="save"', '').replace(' id="cancel"', '');
+  const line = textOnly.split('\n').findIndex((l) => l.includes('Cancel')) + 1;
+  const col = textOnly.split('\n')[line - 1].indexOf('<button') + 1;
+  const historical = extractJsxElement(textOnly, line, col)!;
+  expect(historical.identity.text).toBe('Cancel');
+  const swapped = textOnly.replace(
+    '<button>Save</button>\n      <button>Cancel</button>',
+    '<button>Cancel</button>\n      <button>Save</button>'
+  );
+  const r = locateCorresponding(swapped, historical);
+  expect('refusal' in r).toBe(true);
+});
+
+test('same-tag siblings with no distinguishing signal are refused as indistinguishable', () => {
+  const plain = SIBLINGS.replace(' id="save"', '')
+    .replace(' id="cancel"', '')
+    .replace('>Save<', '>One<')
+    .replace('>Cancel<', '>One<');
+  const line = plain.split('\n').findIndex((l) => l.includes('<button')) + 1;
+  const col = plain.split('\n')[line - 1].indexOf('<button') + 1;
+  const historical = extractJsxElement(plain, line, col)!;
+  // Edit one twin in current: both identity texts are 'One' on the picked
+  // side and on the edited side at the same position, so position decides.
+  const edited = plain.replace(
+    '<button>One</button>\n      <button>One</button>',
+    '<button>One</button>\n      <button>Two</button>'
+  );
+  const r = locateCorresponding(edited, historical);
+  expect('range' in r).toBe(true);
+});
+
+test('id-matched siblings with edited text still resolve to the same element', () => {
+  const line = SIBLINGS.split('\n').findIndex((l) => l.includes('id="cancel"')) + 1;
+  const col = SIBLINGS.split('\n')[line - 1].indexOf('<button') + 1;
+  const historical = extractJsxElement(SIBLINGS, line, col)!;
+  const edited = SIBLINGS.replace('>Cancel</button>', '>Discard changes</button>');
+  const r = locateCorresponding(edited, historical);
+  expect('range' in r).toBe(true);
+  if ('range' in r) expect(edited.slice(r.range.start, r.range.end)).toContain('Discard changes');
+});
+
+test('edited text among same-tag siblings without ids refuses rather than guesses', () => {
+  const textOnly = SIBLINGS.replace(' id="save"', '').replace(' id="cancel"', '');
+  const line = textOnly.split('\n').findIndex((l) => l.includes('Cancel')) + 1;
+  const col = textOnly.split('\n')[line - 1].indexOf('<button') + 1;
+  const historical = extractJsxElement(textOnly, line, col)!;
+  // The user edited the same element in place - indistinguishable from a
+  // reorder without a stable signal, so refuse honestly.
+  const edited = textOnly.replace('>Cancel</button>', '>Discard</button>');
+  const r = locateCorresponding(edited, historical);
+  expect('refusal' in r).toBe(true);
+  if ('refusal' in r) expect(r.refusal).toContain('Pick whole files instead');
+});
+
 test('missing component is refused', () => {
   const line = APP_HISTORICAL.split('\n').findIndex((l) => l.includes('<h2>')) + 1;
   const col = APP_HISTORICAL.split('\n')[line - 1].indexOf('<h2>') + 1;
@@ -191,12 +282,13 @@ test('frameworkElementCandidate restores one element and refuses tag mismatch', 
   try {
     const line = APP_HISTORICAL.split('\n').findIndex((l) => l.includes('<button id="cta"')) + 1;
     const col = APP_HISTORICAL.split('\n')[line - 1].indexOf('<button') + 1;
-    const candidate = await frameworkElementCandidate(store, oldCp, nowCp, {
+    const { checkpoint, referenced } = await frameworkElementCandidate(store, oldCp, nowCp, {
       frame: { fileName: '/src/App.tsx', lineNumber: line, columnNumber: col },
       tag: 'button'
     });
+    expect(referenced).toContain('count');
     const text = (
-      await store.readBlob(candidate.files.find((f) => f.path === 'src/App.tsx')!.hash)
+      await store.readBlob(checkpoint.files.find((f) => f.path === 'src/App.tsx')!.hash)
     ).toString('utf8');
     expect(text).toContain('Clicked {count} times');
     expect(text).toContain('Full price now');

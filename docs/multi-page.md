@@ -38,10 +38,21 @@ Introduced on the `feature/multi-page` branch (0.9.0).
   stay current.
 - **Element identity is strict.** The element is carried only when its
   component name and the component's full tag skeleton are identical in
-  both checkpoints. Reordered elements, duplicated elements, moved
-  subtrees and renamed components change that identity and are refused.
-  A dependency guard refuses copied JSX that references identifiers not
-  available in the current component or file, naming the missing ones.
+  both checkpoints. Structural reorders, duplications, moves and renames
+  change that identity and are refused. A swap of same-tag siblings
+  (two buttons, three list items) leaves the skeleton unchanged, so such
+  siblings are disambiguated further: when the picked element has an id
+  or key, the element at the same position in current source must carry
+  the same one; without id or key, its text must still match. Any
+  disagreement refuses the pick rather than risk restoring onto the
+  wrong sibling.
+- **Dependency guard is presence-only.** Copied JSX that references
+  identifiers not available in the current component or file is refused,
+  naming the missing ones. A same-named binding whose meaning changed
+  (a rewritten handler, a recomputed constant) is not detectable, so the
+  review callout names every referenced identifier and those resolve to
+  the current code, not the historical versions; the build/test gate
+  then runs as usual.
   Untracked, absolute or outside-workspace source paths are refused.
 - **File-level fallback remains for everything else.** Production builds
   carry no debug metadata, and non-React frameworks (Vue, Svelte, ...)
@@ -84,8 +95,10 @@ Introduced on the `feature/multi-page` branch (0.9.0).
 - Unit: route/document mapping, nested discovery, exclusions, empty workspaces,
   pickable-document detection for the element/file fallback decision,
   parent-base resolution for main-timeline cherry-picks, source-map decode,
-  JSX extraction, reorder/duplicate/moved-element refusals, source path
-  ambiguity refusal, dependency guard and end-to-end framework candidates.
+  JSX extraction, reorder/duplicate/moved-element refusals, same-tag sibling
+  swap refusal (unchanged skeleton, id and text variants), id-matched
+  sibling edit acceptance, source path ambiguity refusal, dependency guard
+  and end-to-end framework candidates.
 - UI (framework): a real React 18 dev bundle served over HTTP, picked in
   Chromium: fiber metadata extraction, exact JSX element resolution from
   source positions, and component-created elements resolving to their own

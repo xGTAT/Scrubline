@@ -125,6 +125,12 @@ export function resolveTrackedSource(
 
 // --- JSX element location and identity (TypeScript parser).
 
+export interface ElementIdentity {
+  id?: string;
+  key?: string;
+  text: string;
+}
+
 export interface LocatedElement {
   start: number;
   end: number;
@@ -133,6 +139,8 @@ export interface LocatedElement {
   componentName?: string;
   occurrenceIndex: number;
   skeleton: string[];
+  /** Distinguishing signals used to disambiguate same-tag siblings. */
+  identity: ElementIdentity;
 }
 
 function scriptKindFor(source: string) {
@@ -209,6 +217,37 @@ function skeletonOf(body: ts.Node): string[] {
   return elements.map((e) => tagOf(e).toLowerCase());
 }
 
+function attrValue(el: ts.JsxElement | ts.JsxSelfClosingElement, name: string): string | undefined {
+  const attrs = ts.isJsxElement(el) ? el.openingElement.attributes : el.attributes;
+  for (const prop of attrs.properties) {
+    if (ts.isJsxAttribute(prop) && prop.name.getText() === name) {
+      const init = prop.initializer;
+      if (!init) return '';
+      if (ts.isStringLiteral(init)) return init.text;
+      return init
+        .getText()
+        .replace(/^\{|\}$/g, '')
+        .trim();
+    }
+  }
+  return undefined;
+}
+
+function ownText(el: ts.JsxElement | ts.JsxSelfClosingElement): string {
+  if (!ts.isJsxElement(el)) return '';
+  return el.children
+    .filter(ts.isJsxText)
+    .map((t) => t.getText())
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120);
+}
+
+function fingerprintOf(el: ts.JsxElement | ts.JsxSelfClosingElement): ElementIdentity {
+  return { id: attrValue(el, 'id'), key: attrValue(el, 'key'), text: ownText(el) };
+}
+
 function locateIn(
   source: string,
   predicate: (el: ts.JsxElement | ts.JsxSelfClosingElement, pos: number) => boolean
@@ -231,7 +270,8 @@ function locateIn(
     tagName: tag,
     componentName: componentNameOf(match),
     occurrenceIndex: sameTag.indexOf(match),
-    skeleton: skeletonOf(body)
+    skeleton: skeletonOf(body),
+    identity: fingerprintOf(match)
   };
 }
 
@@ -282,6 +322,34 @@ export function locateCorresponding(
   const sameTag = bodyElements.filter((e) => tagOf(e) === historical.tagName);
   const target = sameTag[historical.occurrenceIndex];
   if (!target) return { refusal: 'The element no longer exists in current source.' };
+  // Position alone cannot tell an in-place edit from a same-tag sibling
+  // reorder (the tag skeleton is unchanged by a swap). With more than one
+  // same-tag sibling, require a shared distinguishing signal - id, key or
+  // text - that still matches; anything else is a wrong-target risk.
+  if (sameTag.length > 1) {
+    const currentIdentity = fingerprintOf(target);
+    // Strong stable signals first: when id (or key) exists on both sides it
+    // decides identity, and a text difference is just the edit being
+    // restored. Without id/key, equal text is the only signal left.
+    const strong = (['id', 'key'] as const).find(
+      (k) => historical.identity[k] !== undefined || currentIdentity[k] !== undefined
+    );
+    if (strong) {
+      if (
+        historical.identity[strong] === undefined ||
+        currentIdentity[strong] === undefined ||
+        historical.identity[strong] !== currentIdentity[strong]
+      )
+        return {
+          refusal: `The element at this position no longer matches the picked element (${strong} differs). Same-tag siblings may have been reordered; refusing to guess. Pick whole files instead.`
+        };
+    } else if (!historical.identity.text || historical.identity.text !== currentIdentity.text) {
+      return {
+        refusal:
+          'Same-tag siblings cannot be distinguished (no id or key, and the text at this position changed). The element may have been reordered or edited; refusing to guess. Pick whole files instead.'
+      };
+    }
+  }
   return { range: { start: target.getStart(sf), end: target.getEnd() } };
 }
 
@@ -446,5 +514,9 @@ export async function frameworkElementCandidate(
   const { id: _id, ...body } = current;
   void _id;
   const candidate = { ...body, files };
-  return { ...candidate, id: hashBytes(JSON.stringify(candidate)) };
+  return {
+    checkpoint: { ...candidate, id: hashBytes(JSON.stringify(candidate)) },
+    file,
+    referenced: needed
+  };
 }
