@@ -6,3 +6,4 @@
 !node_modules/ignore/**
 !node_modules/parse5/**
 !node_modules/entities/**
+!node_modules/typescript/**

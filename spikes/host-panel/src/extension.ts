@@ -1,10 +1,19 @@
 import { replaceActivation } from './lifecycle';
 import { ElementPicker } from './branches/picker';
 import { elementCandidate } from './branches/element';
-import { frameworkElementCandidate, isFrameworkDocument } from './framework/candidate';
+import {
+  frameworkElementCandidate as staticElementCandidate,
+  isFrameworkDocument
+} from './framework/candidate';
+import {
+  frameworkElementCandidate,
+  resolveTrackedSource,
+  resolveViaSourceMap
+} from './branches/framework';
 import { installMcpRuntime } from './mcp/install';
 import { measuredPacket } from './targeting/measured';
-import { specificationKey } from './preview/spec';
+import { specification, specificationKey } from './preview/spec';
+import { listPages, routeToDocument, isPickableDocument } from './pages';
 import { prepareRollback, applyRollback, type RollbackCandidate } from './investigation/rollback';
 import { investigate } from './investigation/run';
 import { sweep } from './layout/sweep';
@@ -18,7 +27,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { RenderCache, renderKey, prepareHistory } from './preview/cache';
 import { scopedStore } from './store/identity';
-import { Alternatives, mergeFiles } from './branches/alternatives';
+import { Alternatives, mainlineBase, mergeFiles } from './branches/alternatives';
 import { changedPaths } from './capture/scanner';
 import { applySelective } from './branches/apply';
 import { staticNavbarPaths } from './branches/static-mapping';
@@ -138,7 +147,9 @@ export async function activate(context: vscode.ExtensionContext) {
       canUndo,
       targeting,
       branches: alternatives?.list(),
-      comparison
+      comparison,
+      pages,
+      activePage
     };
     for (const view of views) {
       try {
@@ -165,7 +176,68 @@ export async function activate(context: vscode.ExtensionContext) {
   let restore: Restore | undefined;
   let runner: PreviewRunner | undefined;
   let selected: string | undefined;
+  let pages: import('./pages').PageInfo[] = [];
+  let activePage: string | undefined;
   let previewQueue = Promise.resolve();
+  const discoverPages = async (root: string) => {
+    if (!runner) return;
+    const discovered = await listPages(root);
+    const merged = [...discovered];
+    for (const extra of context.workspaceState.get<string[]>('scrubline.extraPages', [])) {
+      try {
+        specification({ ...runner.config, route: extra });
+        if (!merged.some((p) => p.route === extra))
+          merged.push({ route: extra, document: routeToDocument(extra) });
+      } catch {
+        diagnostics.appendLine(`Ignoring invalid saved page route: ${extra}`);
+      }
+    }
+    const configuredRoute = runner.config.route ?? '/';
+    if (!merged.some((p) => p.route === configuredRoute))
+      merged.push({ route: configuredRoute, document: routeToDocument(configuredRoute) });
+    pages = merged;
+  };
+  /**
+   * File-level cherry-pick fallback for pages without a pickable static HTML
+   * document (framework/server-rendered routes) or refused element picks.
+   * Uses the same reviewed, conflict-guarded selective apply as Changed paths.
+   */
+  const reviewFilesFallback = async (
+    target: import('./bridge/timeline').Checkpoint,
+    reason: string
+  ) => {
+    if (!timeline || !restore || !alternatives) return;
+    const base = target.branch
+      ? alternatives.base(target)
+      : mainlineBase(target, timeline.store.checkpoints);
+    if (!base) {
+      void vscode.window.showInformationMessage(`${reason} No base checkpoint to compare against.`);
+      return;
+    }
+    const changes = changedPaths(base.files, target.files);
+    if (!changes.length) {
+      void vscode.window.showInformationMessage(`${reason} No changed files to cherry-pick.`);
+      return;
+    }
+    const picked = await vscode.window.showQuickPick(changes, {
+      canPickMany: true,
+      placeHolder: `${reason} Select exact files to cherry-pick.`
+    });
+    if (!picked?.length) return;
+    const current = timeline.store.checkpoints.filter((c) => !c.branch).at(-1)!;
+    review = undefined;
+    selectiveTarget = undefined;
+    const merged = mergeFiles(base, current, target, picked);
+    if (merged.conflicts.length) throw new Error('Both sides changed. Selective apply blocked.');
+    selectiveTarget = merged.target;
+    selected = target.id;
+    review = await timeline.exclusive(() =>
+      restore!.review(selectiveTarget!, current, state.unsaved)
+    );
+    if (review)
+      review.note = `${reason} Whole files only; element-level picking needs static HTML.`;
+    publish(state);
+  };
   const start = async () => {
     if (timeline || !folders.length) return;
     if (folders.length !== 1) {
@@ -231,15 +303,32 @@ export async function activate(context: vscode.ExtensionContext) {
     );
     Object.assign(runner.config, await identifyBrowser(runner.config));
     cache = new RenderCache(storeRoot, renderKey(runner.config));
+    await discoverPages(root);
+    const rememberedPage = context.workspaceState.get<string>('scrubline.activePage');
+    if (rememberedPage && pages.some((p) => p.route === rememberedPage)) {
+      activePage = rememberedPage;
+      runner.config.route = rememberedPage;
+      cache = new RenderCache(storeRoot, renderKey(runner.config));
+    } else {
+      activePage = runner.config.route ?? '/';
+    }
     publish({ status: 'loading', rows: [], unsaved: false });
     const watcher = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(folders[0], '**/*')
     );
     context.subscriptions.push(
       watcher,
-      watcher.onDidCreate(() => timeline?.event('watcher')),
+      watcher.onDidCreate((uri) => {
+        timeline?.event('watcher');
+        if (uri.fsPath.endsWith('.html'))
+          void discoverPages(folders[0].uri.fsPath).then(() => publish(state));
+      }),
       watcher.onDidChange(() => timeline?.event('watcher')),
-      watcher.onDidDelete(() => timeline?.event('watcher'))
+      watcher.onDidDelete((uri) => {
+        timeline?.event('watcher');
+        if (uri.fsPath.endsWith('.html'))
+          void discoverPages(folders[0].uri.fsPath).then(() => publish(state));
+      })
     );
     const dirty = () =>
       timeline?.dirty(
@@ -865,6 +954,67 @@ export async function activate(context: vscode.ExtensionContext) {
           } else await start();
           return;
         }
+        if (message.type === 'set-page' && timeline && runner && cache) {
+          const page = pages.find((p) => p.route === message.route);
+          if (!page) throw new Error('Page not found in this workspace.');
+          if (page.route === activePage) return;
+          generation++;
+          cancelRender = true;
+          await previewQueue.catch(() => {});
+          await elementPicker.stop();
+          await elementRunner?.stop();
+          await runner.stop();
+          runner.config.route = page.route;
+          specification(runner.config);
+          cache = new RenderCache(timeline.store.root, renderKey(runner.config));
+          rendered = [];
+          preview = undefined;
+          review = undefined;
+          selectiveTarget = undefined;
+          activePage = page.route;
+          void context.workspaceState.update('scrubline.activePage', page.route);
+          publish(state);
+          if (selected) await enqueuePreview(selected);
+          return;
+        }
+        if (message.type === 'add-page' && timeline && runner && cache) {
+          const input = await vscode.window.showInputBox({
+            prompt: 'Local page route, for example /about.html or /dashboard',
+            value: '/'
+          });
+          if (!input) return;
+          let route: string;
+          try {
+            route = specification({ ...runner.config, route: input.trim() }).route;
+          } catch {
+            void vscode.window.showErrorMessage(
+              'Page route must be a local path starting with / and without a fragment.'
+            );
+            return;
+          }
+          if (!pages.some((p) => p.route === route)) {
+            pages = [...pages, { route, document: routeToDocument(route) }];
+            const extras = context.workspaceState.get<string[]>('scrubline.extraPages', []);
+            void context.workspaceState.update('scrubline.extraPages', [...extras, route]);
+          }
+          generation++;
+          cancelRender = true;
+          await previewQueue.catch(() => {});
+          await elementPicker.stop();
+          await elementRunner?.stop();
+          await runner.stop();
+          runner.config.route = route;
+          cache = new RenderCache(timeline.store.root, renderKey(runner.config));
+          rendered = [];
+          preview = undefined;
+          review = undefined;
+          selectiveTarget = undefined;
+          activePage = route;
+          void context.workspaceState.update('scrubline.activePage', route);
+          publish(state);
+          if (selected) await enqueuePreview(selected);
+          return;
+        }
         if (!timeline || !restore || !vscode.workspace.isTrusted) return;
         const target =
           'id' in message ? timeline.store.checkpoints.find((c) => c.id === message.id) : undefined;
@@ -970,18 +1120,16 @@ export async function activate(context: vscode.ExtensionContext) {
             runner.config.browserPath,
             result.url,
             { width: runner.config.width ?? 960, height: runner.config.height ?? 600 },
-            async (indices, info) => {
+            async (indices, info, framework) => {
               try {
                 const current = timeline!.store.checkpoints.filter((c) => !c.branch).at(-1)!;
                 let candidate;
-                let frameworkNotes: string[] = [];
+                const notes: string[] = [];
                 let htmlError: unknown;
-                // Static HTML documents use the exact parse5 path. A framework
-                // app's served shell (e.g. a Vite index.html) falls through to
-                // framework source matching when the HTML path refuses.
+                let fiberError: unknown;
+                // 1. Static HTML documents use the exact parse5 path.
                 if (
-                  document.endsWith('.html') &&
-                  pickedSource.files.some((f) => f.path === document) &&
+                  isPickableDocument(document, pickedSource.files) &&
                   current.files.some((f) => f.path === document)
                 ) {
                   try {
@@ -997,18 +1145,51 @@ export async function activate(context: vscode.ExtensionContext) {
                     htmlError = e;
                   }
                 }
+                // 2. React development builds: exact fiber debug metadata
+                // resolved through source maps.
+                if (!candidate && framework && framework.frames.length) {
+                  try {
+                    const frame = framework.frames[0];
+                    let resolved;
+                    if (!resolveTrackedSource(frame.fileName, pickedSource.files)) {
+                      resolved = await resolveViaSourceMap(frame);
+                      if (!resolved)
+                        throw new Error(
+                          'No source map or matching original source found for the picked element.'
+                        );
+                    }
+                    const result = await frameworkElementCandidate(
+                      timeline!.store,
+                      pickedSource,
+                      current,
+                      { frame, tag: framework.tag, resolved }
+                    );
+                    candidate = result.checkpoint;
+                    notes.push(
+                      'JSX element subtree only (content, props, inline styles); external CSS and component internals stay current.'
+                    );
+                    if (result.referenced.length)
+                      notes.push(
+                        `References resolve to current code, not the historical versions: ${result.referenced.join(', ')}.`
+                      );
+                  } catch (e) {
+                    fiberError = e;
+                  }
+                }
+                // 3. Static-analysis framework matching (Vue/Svelte/Astro/JSX
+                // sources, and any page whose HTML path refused).
                 if (!candidate) {
                   try {
-                    const result = await frameworkElementCandidate(
+                    const result = await staticElementCandidate(
                       timeline!.store,
                       pickedSource,
                       current,
                       info
                     );
                     candidate = result.candidate;
-                    frameworkNotes = result.notes;
-                  } catch (frameworkError) {
-                    throw htmlError ?? frameworkError;
+                    notes.push(...result.notes);
+                  } catch (staticError) {
+                    throw htmlError ?? fiberError ?? staticError;
                   }
                 }
                 review = await timeline!.exclusive(() =>
@@ -1016,7 +1197,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 );
                 review.note =
                   'Element content, inline styles and paired exclusive CSS only. Shared styles and unmatched rules stay current; this may differ from the historical appearance.' +
-                  (frameworkNotes.length ? ' ' + frameworkNotes.join(' ') : '');
+                  (notes.length ? ' ' + notes.join(' ') : '');
                 selectiveTarget = candidate;
                 selected = pickedSource.id;
                 publish(state);
@@ -1024,9 +1205,9 @@ export async function activate(context: vscode.ExtensionContext) {
                   'Element selected. Review exact files and confirm in Scrubline.'
                 );
               } catch (e) {
-                void vscode.window.showErrorMessage(
-                  e instanceof Error ? e.message : 'Element selection failed.'
-                );
+                const reason = e instanceof Error ? e.message : 'Element selection failed.';
+                const choice = await vscode.window.showErrorMessage(reason, 'Pick files instead');
+                if (choice) await reviewFilesFallback(pickedSource, reason);
               }
             },
             () => pickedRunner.stop()
@@ -1041,14 +1222,25 @@ export async function activate(context: vscode.ExtensionContext) {
         }
         if (message.type === 'review-element' && target) {
           const current = timeline.store.checkpoints.filter((c) => !c.branch).at(-1)!;
+          const activeDocument = pages.find((p) => p.route === activePage)?.document;
+          if (
+            !message.document &&
+            !(activeDocument && target.files.some((f) => f.path === activeDocument)) &&
+            !target.files.some((f) => f.path.endsWith('.html') || isFrameworkDocument(f.path))
+          ) {
+            await reviewFilesFallback(target, 'No tracked HTML or framework source on this page.');
+            return;
+          }
           const document =
             message.document ||
-            (await vscode.window.showQuickPick(
-              target.files
-                .filter((f) => f.path.endsWith('.html') || isFrameworkDocument(f.path))
-                .map((f) => f.path),
-              { placeHolder: 'HTML document or framework component file' }
-            ));
+            (activeDocument && target.files.some((f) => f.path === activeDocument)
+              ? activeDocument
+              : await vscode.window.showQuickPick(
+                  target.files
+                    .filter((f) => f.path.endsWith('.html') || isFrameworkDocument(f.path))
+                    .map((f) => f.path),
+                  { placeHolder: 'HTML document or framework component file' }
+                ));
           if (!document) return;
           const element =
             message.element ||
@@ -1061,7 +1253,7 @@ export async function activate(context: vscode.ExtensionContext) {
           let candidate;
           let frameworkNotes: string[] = [];
           if (isFrameworkDocument(document)) {
-            const result = await frameworkElementCandidate(
+            const result = await staticElementCandidate(
               timeline.store,
               target,
               current,
@@ -1495,6 +1687,10 @@ export async function activate(context: vscode.ExtensionContext) {
             (message) => diagnostics.appendLine(message)
           );
           Object.assign(runner.config, await identifyBrowser(runner.config));
+          await discoverPages(folders[0].uri.fsPath);
+          if (activePage && pages.some((p) => p.route === activePage))
+            runner.config.route = activePage;
+          else activePage = runner.config.route ?? '/';
           cache = new RenderCache(timeline.store.root, renderKey(runner.config));
           rendered = await cache.available(timeline.store.checkpoints);
           preview = undefined;

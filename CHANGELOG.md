@@ -6,6 +6,12 @@
 - Paired exclusive styles extend to imported .css/.scss/.less stylesheets and SFC <style> blocks; SCSS/Less nesting and unsupported selectors are never rolled back.
 - CSS-in-JS (styled-components/emotion) is detected and disclosed: markup restores, component styles stay current.
 - New framework-lab fixture sites (React TSX, Vue, Svelte, Astro, Angular, styled-components) with unit coverage.
+- Page dropdown lists discovered static HTML pages, the configured preview route and custom routes; the active page persists per workspace.
+- Scrubbing, render history, interactive preview and rechecks run against the selected page with per-page render caches.
+- Pick on page and Hidden element ID cherry-pick against the active page's document; existing static-HTML eligibility refusals are unchanged per page.
+- React development builds get element-level cherry-picking on framework routes: fiber debug metadata (React <=18 `_debugSource`, React 19 `_debugStack`) resolved through loopback-only source maps into a TypeScript-AST JSX element carry, with strict component/skeleton identity (reorder, duplicates, moves and renames refused) and a missing-identifier dependency guard.
+- Other framework and server-rendered pages get automatic exact-file cherry-picking (same reviewed selective apply as Changed paths) when element picking is unavailable or refused.
+- Live dropdown refresh on HTML file create/delete; discovery skips dependency/build folders and caps at 200 pages.
 
 ## 0.8.2
 

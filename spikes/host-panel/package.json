@@ -197,7 +197,6 @@
     "prettier": "3.9.9",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "typescript": "^5.3.3",
     "typescript-eslint": "8.71.0",
     "vitest": "4.1.11"
   },
@@ -216,6 +215,7 @@
     "parse5-htmlparser2-tree-adapter": "^7.1.0",
     "playwright-core": "1.63.0",
     "postcss": "8.5.29",
+    "typescript": "^5.3.3",
     "zod": "4.6.5"
   }
 }
