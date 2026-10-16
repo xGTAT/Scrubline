@@ -62,8 +62,10 @@ export function isPickableDocument(document: string, files: { path: string }[]) 
   return document.endsWith('.html') && files.some((f) => f.path === document);
 }
 
-const REFERENCE_ATTRIBUTES = /\b(?:href|src)\s*=\s*["']([^"']+)["']/gi;
-const SRCSET_ATTRIBUTE = /\bsrcset\s*=\s*["']([^"']+)["']/gi;
+// Only asset-carrying tags count as dependencies: a navigation <a href> to
+// another page must not merge that page (and its assets) into this page's set.
+const ASSET_TAGS = /<(link|script|img|source|video|audio|iframe)\b[^>]*>/gi;
+const TAG_REFERENCES = /\b(?:href|src|srcset)\s*=\s*["']([^"']+)["']/gi;
 const CSS_REFERENCES =
   /@import\s+(?:url\(\s*)?["']([^"']+)["']\s*\)?|url\(\s*["']?([^"')]+)["']?\s*\)/gi;
 const MAX_PAGE_FILES = 500;
@@ -87,11 +89,14 @@ function resolveReference(fromFile: string, reference: string) {
 
 function htmlReferences(html: string) {
   const references: string[] = [];
-  for (const match of html.matchAll(REFERENCE_ATTRIBUTES)) references.push(match[1]);
-  for (const match of html.matchAll(SRCSET_ATTRIBUTE))
-    for (const candidate of match[1].split(',')) {
-      const url = candidate.trim().split(/\s+/, 1)[0];
-      if (url) references.push(url);
+  for (const tag of html.matchAll(ASSET_TAGS))
+    for (const match of tag[0].matchAll(TAG_REFERENCES)) {
+      if (match[0].toLowerCase().startsWith('srcset'))
+        for (const candidate of match[1].split(',')) {
+          const url = candidate.trim().split(/\s+/, 1)[0];
+          if (url) references.push(url);
+        }
+      else references.push(match[1]);
     }
   return references;
 }

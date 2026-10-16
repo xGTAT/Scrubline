@@ -166,3 +166,38 @@ test('checkpoints surface only on the pages they change', async () => {
   expect(rowRelevantToPage([...all], index, all)).toBe(true);
   expect(rowRelevantToPage([...all], booking, all)).toBe(true);
 });
+
+test('navigation links between pages are not page dependencies (web-lab regression)', async () => {
+  // Every web-lab page links to every other page in its nav. Those <a href>
+  // references must not merge pages: editing index.html must stay off
+  // booking.html even though booking.html links to it.
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'scrubline-pagenav-'));
+  try {
+    await fs.writeFile(
+      path.join(root, 'index.html'),
+      `<!doctype html><link rel="stylesheet" href="site.css"><nav><a href="booking.html">Book</a><a href="dashboard.html">Dash</a></nav>`
+    );
+    await fs.writeFile(
+      path.join(root, 'booking.html'),
+      `<!doctype html><link rel="stylesheet" href="site.css"><script src="booking.js"></script><a href="index.html">Home</a>`
+    );
+    await fs.writeFile(
+      path.join(root, 'dashboard.html'),
+      `<!doctype html><link rel="stylesheet" href="site.css"><script src="dashboard.js"></script><a href="index.html">Home</a>`
+    );
+    await fs.writeFile(path.join(root, 'site.css'), 'body{}');
+    await fs.writeFile(path.join(root, 'booking.js'), '');
+    await fs.writeFile(path.join(root, 'dashboard.js'), '');
+    const index = await pageFiles(root, 'index.html');
+    const booking = await pageFiles(root, 'booking.html');
+    const all = new Set([...index, ...booking]);
+    expect([...index].sort()).toEqual(['index.html', 'site.css']);
+    expect([...booking].sort()).toEqual(['booking.html', 'booking.js', 'site.css']);
+    expect(rowRelevantToPage(['index.html'], booking, all)).toBe(false);
+    expect(rowRelevantToPage(['booking.js'], index, all)).toBe(false);
+    expect(rowRelevantToPage(['site.css'], index, all)).toBe(true);
+    expect(rowRelevantToPage(['site.css'], booking, all)).toBe(true);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
