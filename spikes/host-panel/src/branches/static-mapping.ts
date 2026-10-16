@@ -2,14 +2,7 @@ import { parse } from 'parse5';
 import type { Checkpoint } from '../bridge/timeline';
 import { HistoryStore, safePath } from '../store/store';
 
-export const SECTION_TAGS = new Set([
-  'nav',
-  'footer',
-  'header',
-  'section',
-  'aside',
-  'article'
-]);
+export const SECTION_TAGS = new Set(['nav', 'footer', 'header', 'section', 'aside', 'article']);
 
 export const APPROVED_TAGS = new Set([
   'html',
@@ -131,8 +124,7 @@ export async function staticSectionPaths(
     for (const rule of text.split('}').filter((r) => r.trim())) {
       if (rule.split('{').length !== 2) throw new Error('Invalid CSS blocked.');
       const selector = rule.split('{')[0].trim();
-      if (!selectorRegex.test(selector))
-        throw new Error('Shared CSS selector blocked.');
+      if (!selectorRegex.test(selector)) throw new Error('Shared CSS selector blocked.');
     }
     paths.push(cssPath);
   }

@@ -312,9 +312,7 @@ test('multi-element cherry-pick applies two independent elements (nav + footer) 
     await applySelective(restore, merged.target, r.token, false, 'node -e "process.exit(0)"');
 
     // 4. Assert workspace state: navbar & footer updated, index.html preserved!
-    expect(await fs.readFile(path.join(f.root, 'navbar.html'), 'utf8')).toContain(
-      'Branch 1 Nav'
-    );
+    expect(await fs.readFile(path.join(f.root, 'navbar.html'), 'utf8')).toContain('Branch 1 Nav');
     expect(await fs.readFile(path.join(f.root, 'navbar.css'), 'utf8')).toBe(
       'nav{display:flex}nav .brand{font-weight:bold}'
     );
@@ -330,9 +328,7 @@ test('multi-element cherry-pick applies two independent elements (nav + footer) 
 
     // 5. Undo restores all files
     await restore.undo(f.store.checkpoints.at(-1)!, false);
-    expect(await fs.readFile(path.join(f.root, 'navbar.html'), 'utf8')).toBe(
-      '<nav>Base Nav</nav>'
-    );
+    expect(await fs.readFile(path.join(f.root, 'navbar.html'), 'utf8')).toBe('<nav>Base Nav</nav>');
     expect(await fs.readFile(path.join(f.root, 'footer.html'), 'utf8')).toBe(
       '<footer>Base Footer</footer>'
     );

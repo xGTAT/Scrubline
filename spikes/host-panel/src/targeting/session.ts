@@ -248,11 +248,7 @@ export class TargetSession {
   }
   async validate(): Promise<boolean> {
     const list =
-      this.selections.length > 0
-        ? this.selections
-        : this.selection
-          ? [this.selection]
-          : [];
+      this.selections.length > 0 ? this.selections : this.selection ? [this.selection] : [];
     if (!this.page || list.length === 0) return false;
     return this.page
       .evaluate((list) => {

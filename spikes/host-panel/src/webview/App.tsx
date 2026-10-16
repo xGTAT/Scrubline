@@ -934,7 +934,9 @@ export const App: React.FC = () => {
                             }
                           }}
                         />
-                        <span>#{idx + 1} &lt;{sel.tag}&gt;</span>
+                        <span>
+                          #{idx + 1} &lt;{sel.tag}&gt;
+                        </span>
                         {sel.name ? ` "${sel.name}"` : ''}
                         <code>{sel.selector}</code>
                       </label>

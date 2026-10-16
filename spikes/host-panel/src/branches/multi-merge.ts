@@ -62,10 +62,7 @@ export async function resolveElementFiles(
  * Three-way whole-file merge across multiple element path sets from multiple checkpoints.
  * Any three-way conflict in any file is collected in `conflicts`.
  */
-export function mergeMultiElements(
-  current: Checkpoint,
-  items: MultiMergeItem[]
-): MultiMergeResult {
+export function mergeMultiElements(current: Checkpoint, items: MultiMergeItem[]): MultiMergeResult {
   const files = new Map(current.files.map((f) => [f.path, f]));
   const conflicts: string[] = [];
   const elements: { selector?: string; paths: string[] }[] = [];
@@ -78,8 +75,7 @@ export function mergeMultiElements(
       const b = item.base.files.find((f) => f.path === p);
       const c = files.get(p);
       const s = item.selected.files.find((f) => f.path === p);
-      const same = (x: typeof b, y: typeof b) =>
-        x?.hash === y?.hash && x?.mode === y?.mode;
+      const same = (x: typeof b, y: typeof b) => x?.hash === y?.hash && x?.mode === y?.mode;
 
       if (same(b, s) || same(c, s)) continue;
       if (!same(b, c)) {
