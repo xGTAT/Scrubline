@@ -26,19 +26,34 @@ Introduced on the `feature/multi-page` branch (0.9.0).
   page is selected.
 - **Hidden element ID** now defaults its document to the active page when that
   document is tracked in the checkpoint; the manual picker remains otherwise.
-- **Framework and server-rendered pages get file-level cherry-picking.**
-  When the active page has no tracked static HTML document (a framework route
-  like `/dashboard`), Pick on page automatically switches to exact-file
-  selection from the checkpoint's changed files, using the same reviewed,
-  conflict-guarded selective apply as Changed paths. When an element pick is
-  attempted but refused (script-bearing page, framework-generated DOM,
-  ambiguous structure), the error offers **Pick files instead** with the same
-  file-level flow. So every page in the dropdown has a working cherry-pick:
-  element-level where static HTML source exists, exact-file level otherwise.
-  File-level candidates are the checkpoint's changed files, not filtered to
-  the selected page's route; route-targeted picking exists only at element
-  level on static HTML pages. Main-timeline checkpoints compare against
-  their parent; alternative checkpoints against their fork base. Every
+- **React framework pages get element-level cherry-picking.** When the
+  active page has no tracked static HTML document (a framework route like
+  `/dashboard`), Pick on page reads React development metadata from the
+  clicked element's fiber: `_debugSource` on React 18 and earlier, the
+  `_debugStack` creation-site stack on React 19. Bundle positions are
+  resolved through the bundle's source map, fetched only from the local
+  loopback preview origin. The matching JSX element is located in the
+  tracked source file by TypeScript AST, and only its subtree (content,
+  props, inline styles) is carried; external CSS and component internals
+  stay current.
+- **Element identity is strict.** The element is carried only when its
+  component name and the component's full tag skeleton are identical in
+  both checkpoints. Reordered elements, duplicated elements, moved
+  subtrees and renamed components change that identity and are refused.
+  A dependency guard refuses copied JSX that references identifiers not
+  available in the current component or file, naming the missing ones.
+  Untracked, absolute or outside-workspace source paths are refused.
+- **File-level fallback remains for everything else.** Production builds
+  carry no debug metadata, and non-React frameworks (Vue, Svelte, ...)
+  have no metadata reader: Pick on page there automatically switches to
+  exact-file selection from the checkpoint's changed files, using the same
+  reviewed, conflict-guarded selective apply as Changed paths. Refused
+  element picks also offer **Pick files instead**. So every page in the
+  dropdown has a working cherry-pick: element-level on static HTML and
+  React development builds, exact-file level otherwise. File-level
+  candidates are the checkpoint's changed files, not filtered to the
+  selected page's route. Main-timeline checkpoints compare against their
+  parent; alternative checkpoints against their fork base. Every
   selection is reviewed as exact paths with conflicts shown and must be
   confirmed before apply, with the configured build/test gate and Undo.
 - All existing element-eligibility limits are unchanged and apply per page:
@@ -52,8 +67,13 @@ Introduced on the `feature/multi-page` branch (0.9.0).
 
 - Page discovery sees static `.html` files only. Framework routes that exist
   purely in code (React Router and similar) are not detected; add them with
-  **Add page route…**. Cherry-picking on those routes is file-level, not
-  element-level.
+  **Add page route…**.
+- Framework element picking is verified for React development builds only:
+  React 18.3.1 (via `_debugSource`) end to end in a real browser, and
+  React 19.3.1 (via `_debugStack`) at fiber, stack-parse and source-map
+  level. It requires the JSX dev transform and source maps. Production
+  builds, minified bundles without maps and non-React frameworks fall back
+  to file-level cherry-picking.
 - Discovery caps (200 pages, depth 8) mean very large sites can miss deeply
   nested pages; add those routes manually.
 - Switching pages during an active render cancels it; the cancelled page's
@@ -63,7 +83,13 @@ Introduced on the `feature/multi-page` branch (0.9.0).
 
 - Unit: route/document mapping, nested discovery, exclusions, empty workspaces,
   pickable-document detection for the element/file fallback decision,
-  parent-base resolution for main-timeline cherry-picks.
+  parent-base resolution for main-timeline cherry-picks, source-map decode,
+  JSX extraction, reorder/duplicate/moved-element refusals, source path
+  ambiguity refusal, dependency guard and end-to-end framework candidates.
+- UI (framework): a real React 18 dev bundle served over HTTP, picked in
+  Chromium: fiber metadata extraction, exact JSX element resolution from
+  source positions, and component-created elements resolving to their own
+  component source.
 - UI: dropdown rendering and option order, `set-page` / `add-page` messages,
   hidden-until-known behavior, axe accessibility, evidence screenshot
   (`docs/evidence/panel_page_select.png`).

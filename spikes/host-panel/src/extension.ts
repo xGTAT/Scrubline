@@ -1,6 +1,11 @@
 import { replaceActivation } from './lifecycle';
 import { ElementPicker } from './branches/picker';
 import { elementCandidate } from './branches/element';
+import {
+  frameworkElementCandidate,
+  resolveTrackedSource,
+  resolveViaSourceMap
+} from './branches/framework';
 import { installMcpRuntime } from './mcp/install';
 import { measuredPacket } from './targeting/measured';
 import { specification, specificationKey } from './preview/spec';
@@ -1107,35 +1112,53 @@ export async function activate(context: vscode.ExtensionContext) {
           }
           const route = new URL(result.url).pathname;
           const document = route === '/' ? 'index.html' : route.replace(/^\//, '');
-          if (!isPickableDocument(document, pickedSource.files)) {
-            await elementPicker.stop();
-            await pickedRunner.stop();
-            await reviewFilesFallback(
-              pickedSource,
-              'This page has no tracked static HTML source (framework or server-rendered page).'
-            );
-            return;
-          }
           await elementPicker.start(
             runner.config.browserPath,
             result.url,
             { width: runner.config.width ?? 960, height: runner.config.height ?? 600 },
-            async (indices) => {
+            async (indices, framework) => {
               try {
                 const current = timeline!.store.checkpoints.filter((c) => !c.branch).at(-1)!;
-                const candidate = await elementCandidate(
-                  timeline!.store,
-                  pickedSource,
-                  current,
-                  document,
-                  '',
-                  indices
-                );
+                let candidate;
+                let note: string;
+                if (isPickableDocument(document, pickedSource.files)) {
+                  candidate = await elementCandidate(
+                    timeline!.store,
+                    pickedSource,
+                    current,
+                    document,
+                    '',
+                    indices
+                  );
+                  note =
+                    'Element content, inline styles and paired exclusive CSS only. Shared styles and unmatched rules stay current; this may differ from the historical appearance.';
+                } else {
+                  if (!framework || framework.frames.length === 0)
+                    throw new Error(
+                      'This page has no tracked static HTML source and exposes no React development source metadata (production build or non-React framework).'
+                    );
+                  const frame = framework.frames[0];
+                  let resolved;
+                  if (!resolveTrackedSource(frame.fileName, pickedSource.files)) {
+                    resolved = await resolveViaSourceMap(frame);
+                    if (!resolved)
+                      throw new Error(
+                        'No source map or matching original source found for the picked element.'
+                      );
+                  }
+                  candidate = await frameworkElementCandidate(
+                    timeline!.store,
+                    pickedSource,
+                    current,
+                    { frame, tag: framework.tag, resolved }
+                  );
+                  note =
+                    'JSX element subtree only (content, props, inline styles). External CSS and component internals stay current.';
+                }
                 review = await timeline!.exclusive(() =>
                   restore!.review(candidate, current, state.unsaved)
                 );
-                review.note =
-                  'Element content, inline styles and paired exclusive CSS only. Shared styles and unmatched rules stay current; this may differ from the historical appearance.';
+                review.note = note;
                 selectiveTarget = candidate;
                 selected = pickedSource.id;
                 publish(state);

@@ -1,5 +1,6 @@
 import { chromium, type Browser } from 'playwright-core';
 import { installOverlay } from '../targeting/overlay';
+import { fiberSourceScript, type FiberPick } from './fiber-source';
 export class ElementPicker {
   private browser?: Browser;
   async stop() {
@@ -10,7 +11,7 @@ export class ElementPicker {
     executable: string,
     url: string,
     viewport: { width: number; height: number },
-    picked: (path: number[]) => Promise<void>,
+    picked: (path: number[], framework?: FiberPick) => Promise<void>,
     stopped: () => Promise<void>
   ) {
     await this.stop();
@@ -29,18 +30,25 @@ export class ElementPicker {
       await stopped();
     });
     await page.exposeBinding('__scrublineSelect', async (_source, value: { selector: string }) => {
-      const indices = await page.locator(value.selector).evaluate((el) => {
-        const path: number[] = [];
-        let n: Element | null = el;
-        while (n && n !== document.body) {
-          const parent: Element | null = n.parentElement;
-          if (!parent) throw Error('No body ownership');
-          path.unshift([...parent.children].indexOf(n));
-          n = parent;
+      const { indices, framework } = await page.locator(value.selector).evaluate(
+        (el, fiberSource) => {
+          const path: number[] = [];
+          let n: Element | null = el;
+          while (n && n !== document.body) {
+            const parent: Element | null = n.parentElement;
+            if (!parent) throw Error('No body ownership');
+            path.unshift([...parent.children].indexOf(n));
+            n = parent;
+          }
+          return { indices: path, framework: fiberSource(el) };
+        },
+        fiberSourceScript as unknown as (el: Element) => {
+          tag: string;
+          frames: { fileName: string; lineNumber: number; columnNumber: number }[];
+          components: string[];
         }
-        return path;
-      });
-      await picked(indices);
+      );
+      await picked(indices, framework);
     });
     await page.route('**/*', async (route) => {
       const u = new URL(route.request().url());
