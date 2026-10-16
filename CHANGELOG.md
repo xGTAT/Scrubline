@@ -1,3 +1,7 @@
+## Unreleased
+
+- Framework preview dependencies: when a checkpoint snapshot carries package.json, the preview runner links the live workspace's node_modules into the isolated snapshot (junction on Windows, symlink elsewhere), so dev-server preview commands (vite, next, astro, angular CLI) run from historical snapshots without reinstalling. Snapshots still never store node_modules; static snapshots without package.json are unchanged. Caveat: linked dependencies are the workspace's current install, not the checkpoint's lockfile, so framework previews are visually faithful, not byte-faithful.
+
 ## 0.10.0
 
 - Multi-checkpoint composition: check any number of checkpoint cards (cap `scrubline.multiSelectLimit`, default 20, max 50), order them in the selection tray, and review one combined candidate.

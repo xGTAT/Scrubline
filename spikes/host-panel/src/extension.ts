@@ -255,6 +255,7 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   };
   const folders = vscode.workspace.workspaceFolders ?? [];
+  let workspaceRoot: string | undefined;
   let config = vscode.workspace.getConfiguration('scrubline', folders[0]?.uri);
   let timeline: Timeline | undefined;
   let restore: Restore | undefined;
@@ -358,12 +359,13 @@ export async function activate(context: vscode.ExtensionContext) {
       return;
     }
     const root = folders[0].uri.fsPath;
+    workspaceRoot = root;
     diagnostics.appendLine(
       `Scrubline ${context.extension.packageJSON.version}: starting writer in PID ${process.pid}.`
     );
     const storeRoot = await scopedStore(
       context.storageUri?.fsPath ?? context.globalStorageUri.fsPath,
-      root
+      workspaceRoot
     );
     timeline = new Timeline(
       root,
@@ -404,7 +406,8 @@ export async function activate(context: vscode.ExtensionContext) {
         preview = { status: 'error', message };
         publish(state);
       },
-      (message) => diagnostics.appendLine(message)
+      (message) => diagnostics.appendLine(message),
+      workspaceRoot
     );
     Object.assign(runner.config, await identifyBrowser(runner.config));
     cache = new RenderCache(storeRoot, renderKey(runner.config));
@@ -578,7 +581,8 @@ export async function activate(context: vscode.ExtensionContext) {
       { ...runner!.config, port: runner!.config.port + 3 },
       timeline!.store,
       undefined,
-      (message) => diagnostics.appendLine(message)
+      (message) => diagnostics.appendLine(message),
+      workspaceRoot
     );
     renderJob = (async () => {
       try {
@@ -1000,7 +1004,8 @@ export async function activate(context: vscode.ExtensionContext) {
                     { ...config, width, guard: message.guard, port: config.port + 4 },
                     store,
                     undefined,
-                    (text) => diagnostics.appendLine(text)
+                    (text) => diagnostics.appendLine(text),
+                    workspaceRoot
                   );
                   try {
                     const result = await probe.historical(
@@ -1349,13 +1354,15 @@ export async function activate(context: vscode.ExtensionContext) {
             { ...runner.config, port: runner.config.port + 1 },
             timeline.store,
             undefined,
-            (message) => diagnostics.appendLine(message)
+            (message) => diagnostics.appendLine(message),
+            workspaceRoot
           );
           const b = new PreviewRunner(
             { ...runner.config, port: runner.config.port + 2 },
             timeline.store,
             undefined,
-            (message) => diagnostics.appendLine(message)
+            (message) => diagnostics.appendLine(message),
+            workspaceRoot
           );
           try {
             const x = await a.historical(left, true);
@@ -1385,7 +1392,10 @@ export async function activate(context: vscode.ExtensionContext) {
           const pickedSource = target;
           const pickedRunner = new PreviewRunner(
             { ...runner.config, port: runner.config.port + 7 },
-            timeline.store
+            timeline.store,
+            undefined,
+            undefined,
+            workspaceRoot
           );
           elementRunner = pickedRunner;
           const result = await pickedRunner.historical(target, true, 'element-picker');
@@ -2219,7 +2229,8 @@ export async function activate(context: vscode.ExtensionContext) {
               preview = { status: 'error', message };
               publish(state);
             },
-            (message) => diagnostics.appendLine(message)
+            (message) => diagnostics.appendLine(message),
+            workspaceRoot
           );
           Object.assign(runner.config, await identifyBrowser(runner.config));
           await discoverPages(folders[0].uri.fsPath);
