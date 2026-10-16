@@ -1,0 +1,16 @@
+aside {
+  width: 220px;
+  padding: 16px;
+  background: #f8fafc;
+  border-right: 1px solid #e2e8f0;
+}
+aside .heading {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+aside .navlist {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}

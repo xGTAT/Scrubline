@@ -10,12 +10,14 @@ export function installOverlay() {
   };
   const win = window as typeof window & {
     __scrublineStopped?: () => void;
-    __scrublineSelect?: (value: Candidate) => Promise<void>;
+    __scrublineSelect?: (value: Candidate, all?: Candidate[]) => Promise<void>;
     __scrublineTarget?: {
       selected?: Candidate;
+      selections?: Candidate[];
       enable: () => void;
       disable: () => void;
       validate: () => boolean;
+      clear: () => void;
     };
   };
   win.__scrublineTarget?.disable();
@@ -46,7 +48,21 @@ export function installOverlay() {
     pointerEvents: 'none',
     display: 'none'
   });
+  const badgesContainer = document.createElement('div');
+  badgesContainer.id = 'scrubline-badges-container';
+  badgesContainer.setAttribute('aria-hidden', 'true');
+  Object.assign(badgesContainer.style, {
+    position: 'fixed',
+    top: '0',
+    left: '0',
+    width: '100%',
+    height: '100%',
+    pointerEvents: 'none',
+    zIndex: '2147483645'
+  });
+
   let selected: Candidate | undefined;
+  let selections: Candidate[] = [];
   let enabled = false;
   const fingerprint = (e: Element) =>
     JSON.stringify({
@@ -83,9 +99,53 @@ export function installOverlay() {
     }
     return undefined;
   };
+  const updateBadges = () => {
+    badgesContainer.innerHTML = '';
+    selections.forEach((s, idx) => {
+      try {
+        const el = document.querySelector(s.selector);
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        const badge = document.createElement('div');
+        badge.textContent = String(idx + 1);
+        Object.assign(badge.style, {
+          position: 'fixed',
+          left: `${rect.left}px`,
+          top: `${Math.max(0, rect.top - 18)}px`,
+          background: '#0969da',
+          color: '#ffffff',
+          fontSize: '11px',
+          fontWeight: 'bold',
+          lineHeight: '18px',
+          minWidth: '18px',
+          height: '18px',
+          padding: '0 4px',
+          borderRadius: '9px',
+          textAlign: 'center',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+          border: '1px solid #ffffff',
+          pointerEvents: 'none',
+          zIndex: '2147483647'
+        });
+        const box = document.createElement('div');
+        Object.assign(box.style, {
+          position: 'fixed',
+          left: `${rect.left}px`,
+          top: `${rect.top}px`,
+          width: `${rect.width}px`,
+          height: `${rect.height}px`,
+          border: '2px solid #0969da',
+          background: 'rgba(9, 105, 218, 0.12)',
+          pointerEvents: 'none',
+          zIndex: '2147483646'
+        });
+        badgesContainer.append(box, badge);
+      } catch {}
+    });
+  };
   const move = (event: MouseEvent) => {
     const e = event.target;
-    if (!(e instanceof Element) || e === banner || e === highlight) return;
+    if (!(e instanceof Element) || e === banner || e === highlight || badgesContainer.contains(e)) return;
     const b = e.getBoundingClientRect();
     Object.assign(highlight.style, {
       display: 'block',
@@ -97,7 +157,7 @@ export function installOverlay() {
   };
   const click = (event: MouseEvent) => {
     const e = event.target;
-    if (!(e instanceof Element) || e === banner || e === highlight) return;
+    if (!(e instanceof Element) || e === banner || e === highlight || badgesContainer.contains(e)) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     const selector = selectorFor(e);
@@ -115,7 +175,7 @@ export function installOverlay() {
       (e as HTMLInputElement).labels?.[0]?.textContent ??
       e.textContent ??
       '';
-    selected = {
+    const candidate: Candidate = {
       selector,
       tag: e.tagName.toLowerCase(),
       name: name.trim().slice(0, 300),
@@ -123,7 +183,16 @@ export function installOverlay() {
       route: location.pathname,
       fingerprint: fingerprint(e)
     };
-    void win.__scrublineSelect?.(selected);
+    const existingIndex = selections.findIndex((s) => s.selector === selector);
+    if (existingIndex >= 0) {
+      selections.splice(existingIndex, 1);
+      selected = selections.at(-1);
+    } else {
+      selections.push(candidate);
+      selected = candidate;
+    }
+    updateBadges();
+    void win.__scrublineSelect?.(candidate, selections);
     move(event);
   };
   const key = (e: KeyboardEvent) => {
@@ -135,35 +204,52 @@ export function installOverlay() {
   function enable() {
     if (enabled) return;
     enabled = true;
-    document.body.append(banner, highlight);
+    document.body.append(banner, highlight, badgesContainer);
     document.addEventListener('mousemove', move, true);
     document.addEventListener('click', click, true);
     document.addEventListener('keydown', key, true);
+    window.addEventListener('scroll', updateBadges, true);
+    window.addEventListener('resize', updateBadges, true);
   }
   function disable() {
     enabled = false;
     banner.remove();
     highlight.remove();
+    badgesContainer.remove();
     document.removeEventListener('mousemove', move, true);
     document.removeEventListener('click', click, true);
     document.removeEventListener('keydown', key, true);
+    window.removeEventListener('scroll', updateBadges, true);
+    window.removeEventListener('resize', updateBadges, true);
   }
   function validate() {
-    if (!selected) return false;
+    const list = selections.length > 0 ? selections : (selected ? [selected] : []);
+    if (list.length === 0) return false;
     try {
-      const all = document.querySelectorAll(selected.selector);
-      return all.length === 1 && fingerprint(all[0]) === selected.fingerprint;
+      return list.every((item) => {
+        const all = document.querySelectorAll(item.selector);
+        return all.length === 1 && fingerprint(all[0]) === item.fingerprint;
+      });
     } catch {
       return false;
     }
+  }
+  function clear() {
+    selections = [];
+    selected = undefined;
+    updateBadges();
   }
   win.__scrublineTarget = {
     get selected() {
       return selected;
     },
+    get selections() {
+      return [...selections];
+    },
     enable,
     disable,
-    validate
+    validate,
+    clear
   };
   if (document.body) enable();
   else document.addEventListener('DOMContentLoaded', enable, { once: true });

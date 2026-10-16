@@ -8,14 +8,33 @@ export class TargetSession {
   private browser?: Browser;
   private page?: Page;
   private selection?: Selection;
+  private selections: Selection[] = [];
   private activeOrigin?: string;
 
   constructor(
     readonly executable: string,
     readonly storeRoot: string,
-    readonly notify: (value: Selection, crop?: string) => void,
+    readonly notify: (value: Selection, crop?: string, all?: Selection[]) => void,
     readonly unavailable: (message: string) => void
   ) {}
+  get currentSelections(): Selection[] {
+    return [...this.selections];
+  }
+  async clear() {
+    this.selections = [];
+    this.selection = undefined;
+    if (this.page) {
+      await this.page
+        .evaluate(() => {
+          (
+            window as unknown as {
+              __scrublineTarget?: { clear?: () => void };
+            }
+          ).__scrublineTarget?.clear?.();
+        })
+        .catch(() => {});
+    }
+  }
   async start(
     url: string,
     secrets: readonly string[],
@@ -49,6 +68,24 @@ export class TargetSession {
         )
       )
         return;
+      const existingIdx = this.selections.findIndex((s) => s.selector === value.selector);
+      if (existingIdx >= 0) {
+        this.selections.splice(existingIdx, 1);
+        this.selection = this.selections.at(-1);
+        if (this.page === page) {
+          if (this.selection) {
+            this.notify(this.selection, undefined, [...this.selections]);
+          } else {
+            this.notify(
+              { selector: '', tag: '', name: '', snippet: '', route: '', fingerprint: '' },
+              undefined,
+              []
+            );
+          }
+        }
+        return;
+      }
+      this.selections.push(value);
       this.selection = value;
       let crop: string | undefined;
       let cropPage: Page | undefined;
@@ -190,7 +227,8 @@ export class TargetSession {
       } finally {
         await cropPage?.close().catch(() => {});
       }
-      if (this.page === page && this.selection === value) this.notify(value, crop);
+      if (this.page === page && this.selection === value)
+        this.notify(value, crop, [...this.selections]);
     });
     await page.addInitScript({
       content: `const __name=(fn)=>fn;if(window===window.top&&location.origin===${JSON.stringify(parsed.origin)})(${installOverlay.toString()})();`
@@ -209,27 +247,34 @@ export class TargetSession {
     page.on('close', () => this.unavailable('Targeting stopped.'));
   }
   async validate(): Promise<boolean> {
-    if (!this.page || !this.selection) return false;
-    const selected = this.selection;
+    const list =
+      this.selections.length > 0
+        ? this.selections
+        : this.selection
+          ? [this.selection]
+          : [];
+    if (!this.page || list.length === 0) return false;
     return this.page
-      .evaluate((selected) => {
+      .evaluate((list) => {
         try {
-          const all = document.querySelectorAll(selected.selector);
-          if (all.length !== 1) return false;
-          const e = all[0];
-          const fingerprint = JSON.stringify({
-            tag: e.tagName,
-            name: (e.getAttribute('aria-label') ?? e.textContent ?? '').trim().slice(0, 300),
-            id: e.id,
-            testid: e.getAttribute('data-testid'),
-            role: e.getAttribute('role'),
-            href: e.getAttribute('href')
+          return list.every((selected) => {
+            const all = document.querySelectorAll(selected.selector);
+            if (all.length !== 1) return false;
+            const e = all[0];
+            const fingerprint = JSON.stringify({
+              tag: e.tagName,
+              name: (e.getAttribute('aria-label') ?? e.textContent ?? '').trim().slice(0, 300),
+              id: e.id,
+              testid: e.getAttribute('data-testid'),
+              role: e.getAttribute('role'),
+              href: e.getAttribute('href')
+            });
+            return fingerprint === selected.fingerprint;
           });
-          return fingerprint === selected.fingerprint;
         } catch {
           return false;
         }
-      }, selected)
+      }, list)
       .catch(() => false);
   }
   async stop() {
@@ -237,6 +282,7 @@ export class TargetSession {
     this.browser = undefined;
     this.page = undefined;
     this.selection = undefined;
+    this.selections = [];
     await browser?.close();
     const fs = await import('node:fs/promises');
     await fs.rm(path.join(this.storeRoot, 'targets'), { recursive: true, force: true });

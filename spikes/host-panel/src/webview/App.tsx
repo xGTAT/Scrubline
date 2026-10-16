@@ -32,6 +32,15 @@ export const App: React.FC = () => {
   });
   const [packetReviewed, setPacketReviewed] = useState(false);
   useEffect(() => setPacketReviewed(false), [state.targeting?.packet]);
+  const selections = state.targeting?.selections;
+  const [includedIndices, setIncludedIndices] = useState<number[]>([]);
+  useEffect(() => {
+    if (selections?.length) {
+      setIncludedIndices(selections.map((_, i) => i));
+    } else {
+      setIncludedIndices([]);
+    }
+  }, [selections?.length]);
   const [selected, setSelected] = useState<string | undefined>(bridge?.getState()?.selected);
   useEffect(() => {
     const handler = (event: MessageEvent<TimelineOutbound>) => {
@@ -535,12 +544,12 @@ export const App: React.FC = () => {
               <li key={b.id}>
                 <span title={b.base}>Fork: {b.name}</span>
                 <button
-                  title="Prototype: standalone static HTML navbar only. Framework components and shared CSS are not supported."
+                  title="Prototype: standalone static HTML section (nav, footer, etc). Framework components and shared CSS are not supported."
                   onClick={() =>
-                    bridge?.postMessage({ type: 'review-navbar', id: b.checkpoint, document: '' })
+                    bridge?.postMessage({ type: 'review-section', id: b.checkpoint, document: '' })
                   }
                 >
-                  Static navbar
+                  Static section
                 </button>
                 <button
                   onClick={() => bridge?.postMessage({ type: 'capture-branch', branch: b.id })}
@@ -637,6 +646,18 @@ export const App: React.FC = () => {
                 Restore {state.review.paths.length} file{state.review.paths.length === 1 ? '' : 's'}
                 ?
               </span>
+              {state.review.elements && state.review.elements.length > 0 && (
+                <details open>
+                  <summary>Applied elements ({state.review.elements.length})</summary>
+                  <ul className="paths">
+                    {state.review.elements.map((el, idx) => (
+                      <li key={idx}>
+                        <code>{el.selector ?? `Element ${idx + 1}`}</code>: {el.paths.join(', ')}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
               <details>
                 <summary>Confirmed files</summary>
                 <ul className="paths">
@@ -719,6 +740,61 @@ export const App: React.FC = () => {
             >
               Copy packet
             </button>
+          )}
+          {state.targeting.selections && state.targeting.selections.length > 0 && (
+            <div className="target-selections" role="region" aria-label="Selected elements">
+              <p>
+                <strong>Selected elements ({state.targeting.selections.length})</strong>
+              </p>
+              <ul className="paths">
+                {state.targeting.selections.map((sel, idx) => {
+                  const isChecked = includedIndices.includes(idx);
+                  return (
+                    <li key={sel.selector + idx}>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setIncludedIndices([...includedIndices, idx]);
+                            } else {
+                              setIncludedIndices(includedIndices.filter((i) => i !== idx));
+                            }
+                          }}
+                        />
+                        <span>#{idx + 1} &lt;{sel.tag}&gt;</span>
+                        {sel.name ? ` "${sel.name}"` : ''}
+                        <code>{sel.selector}</code>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+              <button
+                disabled={includedIndices.length === 0 || !state.preview?.checkpoint}
+                onClick={() => {
+                  const toApply = includedIndices
+                    .map((idx) => state.targeting!.selections![idx])
+                    .filter(Boolean)
+                    .map((sel) => ({
+                      checkpointId: state.preview!.checkpoint!,
+                      document: sel.route.replace(/^\//, '') || 'index.html',
+                      selector: sel.selector,
+                      fingerprint: sel.fingerprint
+                    }));
+                  bridge?.postMessage({
+                    type: 'review-multi-element',
+                    selections: toApply
+                  });
+                }}
+              >
+                Review multi-element apply ({includedIndices.length})
+              </button>
+              <button onClick={() => bridge?.postMessage({ type: 'clear-target-selections' })}>
+                Clear selections
+              </button>
+            </div>
           )}
           <button onClick={() => bridge?.postMessage({ type: 'stop-targeting' })}>
             Stop targeting
