@@ -1,5 +1,6 @@
 ## 0.9.1
 
+- The changes badge and "Read-only screenshot" caption no longer overlay the preview: they live in a bar below the frame, so short or content-filled pages are never covered at any panel width or change count.
 - Checkpoints and render history are now page-scoped: a checkpoint only appears (and renders) on pages whose own files changed. Page file sets cover the HTML document plus its local stylesheets, scripts and media, including recursive CSS @import/url() targets; changes to shared assets still appear on every page that uses them, and changes no page maps (config, framework sources) stay visible everywhere. Server-rendered routes without a static document keep the full timeline.
 
 ## 0.9.0

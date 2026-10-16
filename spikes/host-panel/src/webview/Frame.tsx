@@ -149,83 +149,87 @@ export function FrameView({ frame, requested }: { frame?: Frame; requested?: str
     height: `${(r.height / (shown.height ?? 600)) * 100}%`
   });
   return (
-    <figure
-      className="frame"
-      style={{
-        aspectRatio: `${shown.width ?? 960} / ${shown.height ?? 600}`,
-        maxWidth:
-          (shown.width ?? 960) < (shown.height ?? 600)
-            ? `${Math.round((600 * (shown.width ?? 960)) / (shown.height ?? 600))}px`
-            : undefined,
-        marginInline: 'auto',
-        width: '100%'
-      }}
-      data-checkpoint={shown.checkpoint}
-      ref={figure}
-      aria-busy={shown.checkpoint !== requested}
-    >
-      <img
-        className="frame-base"
-        crossOrigin="anonymous"
-        src={shown.image}
-        alt="Checkpoint screenshot"
-      />
-      <div ref={veil} className="frame-veil" aria-hidden="true" />
-      {highlights && shown.checkpoint === requested && focusRegion && (
-        <span
-          aria-hidden="true"
-          className={`change-focus change-focus-${focused.kind}`}
-          style={box(focusRegion)}
+    <div className="frame-wrap">
+      <figure
+        className="frame"
+        style={{
+          aspectRatio: `${shown.width ?? 960} / ${shown.height ?? 600}`,
+          maxWidth:
+            (shown.width ?? 960) < (shown.height ?? 600)
+              ? `${Math.round((600 * (shown.width ?? 960)) / (shown.height ?? 600))}px`
+              : undefined,
+          marginInline: 'auto',
+          width: '100%'
+        }}
+        data-checkpoint={shown.checkpoint}
+        ref={figure}
+        aria-busy={shown.checkpoint !== requested}
+      >
+        <img
+          className="frame-base"
+          crossOrigin="anonymous"
+          src={shown.image}
+          alt="Checkpoint screenshot"
         />
-      )}
-      {shown.comparison && (
-        <figcaption className="highlight-controls">
-          <button
-            className="changes-toggle"
-            aria-pressed={highlights}
-            disabled={shown.checkpoint !== requested || !significant.length}
-            onClick={() => setHighlights(!highlights)}
-          >
-            {highlights ? 'Hide changes' : `${significant.length} changes`}
-          </button>
-          {highlights && focused && shown.checkpoint === requested && (
-            <>
-              <button
-                aria-label="Previous change"
-                disabled={focusIndex === 0}
-                onClick={() => {
-                  setFocusIndex(Math.max(0, focusIndex - 1));
-                  setOldPosition(false);
-                }}
-              >
-                ‹
-              </button>
-              <span role="status">
-                {Math.min(focusIndex + 1, significant.length)} / {significant.length} ·{' '}
-                {focused.kind}
-              </span>
-              <button
-                aria-label="Next change"
-                disabled={focusIndex >= significant.length - 1}
-                onClick={() => {
-                  setFocusIndex(Math.min(significant.length - 1, focusIndex + 1));
-                  setOldPosition(false);
-                }}
-              >
-                ›
-              </button>
-              {focused.old && (
-                <button aria-pressed={oldPosition} onClick={() => setOldPosition(!oldPosition)}>
-                  {oldPosition ? 'Current position' : 'Previous position'}
+        <div ref={veil} className="frame-veil" aria-hidden="true" />
+        {highlights && shown.checkpoint === requested && focusRegion && (
+          <span
+            aria-hidden="true"
+            className={`change-focus change-focus-${focused.kind}`}
+            style={box(focusRegion)}
+          />
+        )}
+      </figure>
+      <div className="frame-bar">
+        {shown.comparison && (
+          <div className="highlight-controls">
+            <button
+              className="changes-toggle"
+              aria-pressed={highlights}
+              disabled={shown.checkpoint !== requested || !significant.length}
+              onClick={() => setHighlights(!highlights)}
+            >
+              {highlights ? 'Hide changes' : `${significant.length} changes`}
+            </button>
+            {highlights && focused && shown.checkpoint === requested && (
+              <>
+                <button
+                  aria-label="Previous change"
+                  disabled={focusIndex === 0}
+                  onClick={() => {
+                    setFocusIndex(Math.max(0, focusIndex - 1));
+                    setOldPosition(false);
+                  }}
+                >
+                  ‹
                 </button>
-              )}
-            </>
-          )}
-        </figcaption>
-      )}
-      <figcaption className="frame-caption">
-        {shown.checkpoint !== requested ? 'Loading selected checkpoint…' : 'Read-only screenshot'}
-      </figcaption>
-    </figure>
+                <span role="status">
+                  {Math.min(focusIndex + 1, significant.length)} / {significant.length} ·{' '}
+                  {focused.kind}
+                </span>
+                <button
+                  aria-label="Next change"
+                  disabled={focusIndex >= significant.length - 1}
+                  onClick={() => {
+                    setFocusIndex(Math.min(significant.length - 1, focusIndex + 1));
+                    setOldPosition(false);
+                  }}
+                >
+                  ›
+                </button>
+                {focused.old && (
+                  <button aria-pressed={oldPosition} onClick={() => setOldPosition(!oldPosition)}>
+                    {oldPosition ? 'Current position' : 'Previous position'}
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        )}
+        <span className="frame-caption">
+          {shown.checkpoint !== requested ? 'Loading selected checkpoint…' : 'Read-only screenshot'}
+        </span>
+      </div>
+    </div>
   );
 }
