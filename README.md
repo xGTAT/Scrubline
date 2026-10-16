@@ -58,6 +58,10 @@ Preview commands run in disposable historical folders, but are not OS security s
 
 Confirmation lives directly under Review, before forks, and is viewport-bounded. Render history and Alternatives use mutually exclusive sections to reduce panel crowding. Tools are disclosed when needed rather than removed.
 
+## Combine checkpoints
+
+Check any number of checkpoint cards to build a selection in the tray, order it, and choose a mode: **Combine changes** applies each checkpoint's delta to the current workspace in order, **Revert changes** unwinds them latest-first, and **Pick per file** chooses a winner per touched file. **Review** opens one combined candidate through the same exact-path review, guarded apply and Undo as a single restore: unsaved buffers, drift and concurrent edits block, a safety snapshot precedes writes, and Undo restores everything. The review previews the combined candidate with a receipt and names the set, order and mode; conflicting files are listed and disable confirmation until the selection changes. Combine applies changes only - single-checkpoint full restore is unchanged and separate. See [multi-checkpoint notes](docs/multi-checkpoint.md).
+
 ## Pick an element from a saved webpage
 
 1. Select a saved checkpoint, open **Changed paths**, and choose **Pick on page**. Each saved Alternative also offers **Pick on page**.

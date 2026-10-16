@@ -11,6 +11,8 @@ export interface Review {
   paths: string[];
   conflicts: string[];
   note?: string;
+  /** Present when the review is a multi-checkpoint composition. */
+  multi?: NonNullable<import('../bridge/timeline').TimelineState['review']>['multi'];
 }
 interface JournalEntry {
   path: string;
@@ -55,7 +57,8 @@ export class Restore {
     target: Checkpoint,
     unsaved: boolean,
     beforeWrite?: () => Promise<void>,
-    afterWrite?: () => Promise<void>
+    afterWrite?: () => Promise<void>,
+    attribution?: import('../bridge/timeline').Attribution
   ): Promise<Checkpoint> {
     const review = this.pending;
     this.pending = undefined;
@@ -151,9 +154,12 @@ export class Restore {
       const result = await scan(this.workspace, this.store.root, this.limits);
       if (changedPaths(target.files, result.files).length)
         throw new Error('Concurrent edit. Restore stopped.');
-      const accepted = await this.store.commit(result.files, result.contents, 'reconcile', {
-        kind: 'unattributed'
-      });
+      const accepted = await this.store.commit(
+        result.files,
+        result.contents,
+        'reconcile',
+        attribution ?? { kind: 'unattributed' }
+      );
       journal.phase = 'committed';
       await save();
       this.undoCheckpoint = safety;

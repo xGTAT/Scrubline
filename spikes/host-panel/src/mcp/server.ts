@@ -2,7 +2,9 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import * as fs from 'node:fs/promises';
-export function createMcpServer(call: (name: string, checkpoint?: string) => Promise<unknown>) {
+export function createMcpServer(
+  call: (name: string, checkpoint?: string, extra?: unknown) => Promise<unknown>
+) {
   const server = new McpServer(
     { name: 'scrubline', version: '0.8.12' },
     { maxToolInputElements: 8 }
@@ -32,6 +34,37 @@ export function createMcpServer(call: (name: string, checkpoint?: string) => Pro
       ]
     })
   );
+  server.registerTool(
+    'review_checkpoints',
+    {
+      description:
+        'Review a composition of several checkpoints (combine changes, revert changes, or pick per file) in the Scrubline panel. Does not write files. User must confirm there.',
+      inputSchema: {
+        checkpoints: z
+          .array(z.string().regex(/^[a-f0-9]{64}$/))
+          .min(1)
+          .max(50),
+        mode: z.enum(['combine', 'revert', 'mosaic']),
+        overrides: z
+          .record(
+            z.string(),
+            z.union([z.string(), z.object({ source: z.string(), element: z.string() })])
+          )
+          .optional()
+      },
+      annotations: { readOnlyHint: true }
+    },
+    async ({ checkpoints, mode, overrides }) => ({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(
+            await call('review_checkpoints', undefined, { checkpoints, mode, overrides })
+          )
+        }
+      ]
+    })
+  );
   return server;
 }
 export async function run(connection: string) {
@@ -45,11 +78,11 @@ export async function run(connection: string) {
     !/^[a-f0-9]{64}$/.test(data.token)
   )
     throw new Error('Invalid local connection.');
-  const server = createMcpServer(async (name, checkpoint) => {
+  const server = createMcpServer(async (name, checkpoint, extra) => {
     const response = await fetch(url, {
       method: 'POST',
       headers: { authorization: 'Bearer ' + data.token, 'content-type': 'application/json' },
-      body: JSON.stringify({ name, checkpoint }),
+      body: JSON.stringify({ name, checkpoint, ...(extra as object), ...(extra ? {} : {}) }),
       signal: AbortSignal.timeout(10000)
     });
     if (!response.ok) throw new Error('Scrubline refused request. Check the panel.');

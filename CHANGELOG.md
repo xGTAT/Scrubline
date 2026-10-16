@@ -1,3 +1,15 @@
+## 0.10.0
+
+- Multi-checkpoint composition: check any number of checkpoint cards (cap `scrubline.multiSelectLimit`, default 20, max 50), order them in the selection tray, and review one combined candidate.
+- Three modes: Combine changes (ordered per-checkpoint deltas onto the current workspace; divergence is a whole-file conflict), Revert changes (latest-first inverse deltas; dependent later changes are named and block), Pick per file (mosaic winner per touched file, current kept otherwise).
+- Composition plugs into the existing review/apply/Undo transaction: exact-path review, drift/dirty/concurrent-edit guards, safety snapshot, journal crash recovery, post-apply verification, and Undo of the whole combined apply.
+- Combined candidate renders a preview with a receipt before confirmation; the review names the checkpoint set, order and mode, degrades to the per-file table when rendering is unavailable.
+- Dependency hints name unselected checkpoints a selected change sits on, with one-click Add; composition conflicts disable confirmation.
+- Selection persists across panel reloads; shift-click extends ranges.
+- Read-only MCP `review_checkpoints` tool composes and opens the same review; apply stays panel-confirmed.
+- Mosaic element picks for static HTML: per-file optional element id narrows the winner to that subtree plus paired id-scoped CSS, with the existing refusal rules; a refusal conflicts only that file.
+- Composition identity binding: changing the set, order, mode or overrides after review disables Confirm and refuses apply with a stale-review error.
+- Limits: one element pick per file (static HTML only), combine folds whole files (no hunk merge).
 ## 0.9.1
 
 - Advisor chatbot in the panel (read-only; answers from timeline, preview and targeting context, never mutates the workspace).

@@ -27,7 +27,8 @@ export async function applySelective(
   unsaved: boolean,
   command: string,
   dirty: () => boolean = () => unsaved,
-  options?: SelectiveApplyOptions
+  options?: SelectiveApplyOptions,
+  attribution?: import('../bridge/timeline').Attribution
 ) {
   // Automated Dual-Verification Pass before applying changes
   let verificationReport: VerificationReport | undefined;
@@ -82,7 +83,7 @@ export async function applySelective(
     await fs.rm(directory, { recursive: true, force: true });
   }
 
-  const accepted = await restore.apply(token, target, dirty());
+  const accepted = await restore.apply(token, target, dirty(), undefined, undefined, attribution);
   try {
     await validateCandidate(command, restore.workspace);
     const actual = await scan(restore.workspace, restore.store.root, restore.limits);

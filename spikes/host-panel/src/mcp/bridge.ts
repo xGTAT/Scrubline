@@ -5,6 +5,11 @@ import * as path from 'node:path';
 export interface McpBackend {
   list: () => Promise<unknown>;
   review: (checkpoint: string) => Promise<unknown>;
+  reviewMulti: (
+    checkpoints: string[],
+    mode: 'combine' | 'revert' | 'mosaic',
+    overrides?: Record<string, string>
+  ) => Promise<unknown>;
 }
 export class McpBridge {
   private server?: Server;
@@ -56,6 +61,30 @@ export class McpBridge {
         if (body.name === 'list_checkpoints') result = await this.backend.list();
         else if (body.name === 'restore_checkpoint' && /^[a-f0-9]{64}$/.test(body.checkpoint ?? ''))
           result = await this.backend.review(body.checkpoint);
+        else if (
+          body.name === 'review_checkpoints' &&
+          Array.isArray(body.checkpoints) &&
+          body.checkpoints.length > 0 &&
+          body.checkpoints.length <= 50 &&
+          body.checkpoints.every(
+            (id: unknown) => typeof id === 'string' && /^[a-f0-9]{64}$/.test(id)
+          ) &&
+          ['combine', 'revert', 'mosaic'].includes(body.mode) &&
+          (body.overrides === undefined ||
+            (typeof body.overrides === 'object' &&
+              body.overrides !== null &&
+              Object.values(body.overrides).every(
+                (v: unknown) =>
+                  (typeof v === 'string' && (v === 'current' || /^[a-f0-9]{64}$/.test(v))) ||
+                  (typeof v === 'object' &&
+                    v !== null &&
+                    typeof (v as { source?: unknown }).source === 'string' &&
+                    /^[a-f0-9]{64}$/.test((v as { source: string }).source) &&
+                    typeof (v as { element?: unknown }).element === 'string' &&
+                    /^[A-Za-z][\w-]*$/.test((v as { element: string }).element))
+              )))
+        )
+          result = await this.backend.reviewMulti(body.checkpoints, body.mode, body.overrides);
         else {
           res.writeHead(400).end();
           return;

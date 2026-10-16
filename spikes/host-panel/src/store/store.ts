@@ -31,7 +31,13 @@ export function migrate(value: unknown): Checkpoint {
     !['baseline', 'watcher', 'save', 'reconcile'].includes(c.trigger) ||
     !Array.isArray(c.files) ||
     !c.attribution ||
-    !['unattributed', 'hook'].includes(c.attribution.kind)
+    !['unattributed', 'hook', 'composed'].includes(c.attribution.kind) ||
+    (c.attribution.kind === 'composed' &&
+      (!['combine', 'revert', 'mosaic'].includes(c.attribution.mode) ||
+        !Array.isArray(c.attribution.sources) ||
+        c.attribution.sources.some(
+          (id: unknown) => typeof id !== 'string' || !HASH.test(id as string)
+        )))
   )
     throw new Error('Invalid checkpoint.');
   if (

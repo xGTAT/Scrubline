@@ -1105,3 +1105,62 @@ html {
   gap: 6px;
   cursor: pointer;
 }
+.selection-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 8px;
+  margin: 6px 0;
+  border: 1px solid var(--vscode-panel-border, #3c3c3c);
+  border-radius: 4px;
+}
+.selection-tray ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.selection-tray li {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+}
+.timeline li {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* Multi-checkpoint review: readable table, no run-together cells. */
+.restore-confirmation--multi {
+  position: static;
+  max-height: none;
+  margin-top: 8px;
+}
+.multi-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  table-layout: fixed;
+}
+.multi-table th,
+.multi-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 6px 10px 6px 0;
+  overflow-wrap: anywhere;
+}
+.multi-table th {
+  border-bottom: 1px solid var(--vscode-panel-border, #444);
+}
+.multi-table td select,
+.multi-table td input {
+  max-width: 100%;
+  margin-top: 2px;
+}
+.multi-note {
+  margin: 8px 0;
+}
