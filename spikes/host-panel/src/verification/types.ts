@@ -77,4 +77,10 @@ export interface VerificationOptions {
   targetDiffThreshold?: number;
   invariantSelectors?: string[];
   captureVisualDiffs?: boolean;
+  /**
+   * Element-scoped reverts: every non-target element in the baseline must
+   * survive the candidate, not just landmark regions. Catches reverts that
+   * silently drop ordinary elements.
+   */
+  protectAllElements?: boolean;
 }

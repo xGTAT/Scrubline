@@ -19,6 +19,59 @@ interface HtmlNode {
   } | null;
 }
 // Plain HTML with explicit ownership. Never infer framework or shared-style ownership.
+
+/**
+ * Vanish guard for element reverts. A revert splices the old subtree into the
+ * current document over the byte range [start, end); every element of the
+ * current document outside that range must survive byte-identical in effect:
+ * same ids, same per-tag element counts outside the inserted subtree. If a
+ * match was ambiguous or the range swallowed siblings, this throws instead of
+ * silently dropping elements (the "revert works 70%, elements vanish" bug).
+ */
+export function assertSplicePreserves(
+  nowHtml: string,
+  start: number,
+  end: number,
+  result: string,
+  insertedLength: number
+): void {
+  const elementsWithIds = (html: string, from: number, to: number, invert: boolean) => {
+    const root = parse(html, { sourceCodeLocationInfo: true });
+    const ids: string[] = [];
+    const tagCounts = new Map<string, number>();
+    const visit = (n: HtmlNode) => {
+      const loc = n.sourceCodeLocation;
+      if (n.tagName && loc) {
+        const outside = loc.endOffset <= from || loc.startOffset >= to;
+        if (outside !== invert) {
+          tagCounts.set(n.tagName, (tagCounts.get(n.tagName) ?? 0) + 1);
+          const id = n.attrs?.find((a) => a.name === 'id')?.value;
+          if (id) ids.push(id);
+        }
+      }
+      for (const c of n.childNodes ?? []) visit(c);
+    };
+    visit(root);
+    return { ids, tagCounts };
+  };
+  const before = elementsWithIds(nowHtml, start, end, false);
+  const after = elementsWithIds(result, start, start + insertedLength, false);
+  const missingIds = before.ids.filter((id) => !after.ids.includes(id));
+  if (missingIds.length)
+    throw new Error(
+      `Revert refused: elements would vanish from the current document: ${missingIds
+        .map((id) => `#${id}`)
+        .join(', ')}.`
+    );
+  for (const [tag, count] of before.tagCounts) {
+    const afterCount = after.tagCounts.get(tag) ?? 0;
+    if (afterCount !== count)
+      throw new Error(
+        `Revert refused: ${count} <${tag}> element(s) outside the reverted element would become ${afterCount}.`
+      );
+  }
+}
+
 export async function elementCandidate(
   store: HistoryStore,
   source: Checkpoint,
@@ -181,10 +234,10 @@ export async function elementCandidate(
   if (JSON.stringify(old.links) !== JSON.stringify(now.links))
     throw new Error('Stylesheet list changed. Element ownership unresolved.');
   const changes = new Map<string, string>();
-  changes.set(
-    document,
-    nowHtml.slice(0, now.start) + oldHtml.slice(old.start, old.end) + nowHtml.slice(now.end)
-  );
+  const spliced =
+    nowHtml.slice(0, now.start) + oldHtml.slice(old.start, old.end) + nowHtml.slice(now.end);
+  assertSplicePreserves(nowHtml, now.start, now.end, spliced, old.end - old.start);
+  changes.set(document, spliced);
   inspect(changes.get(document)!, elementPath ? old.identity : undefined); // Refuse ids introduced by the restored subtree colliding with current markup.
   for (const href of old.links) {
     const p = path.posix.join(path.posix.dirname(document), href);

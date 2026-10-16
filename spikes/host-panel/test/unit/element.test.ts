@@ -244,3 +244,34 @@ test('Studio ancestor theme edits, shared CSS edits and SVG shapes do not veto o
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+import { assertSplicePreserves } from '../../src/branches/element';
+
+test('assertSplicePreserves passes when elements outside the replaced range survive', () => {
+  const nowHtml =
+    '<main><section id="a"><b>One</b></section><section id="b">Two</section><p id="tail">Keep</p></main>';
+  // Replace <section id="a">...</section> with a shorter subtree; everything else untouched.
+  const start = nowHtml.indexOf('<section id="a">');
+  const end = nowHtml.indexOf('</section>', start) + '</section>'.length;
+  const result =
+    nowHtml.slice(0, start) + '<section id="a"><i>Restored</i></section>' + nowHtml.slice(end);
+  expect(() => assertSplicePreserves(nowHtml, start, end, result, end - start)).not.toThrow();
+});
+
+test('assertSplicePreserves throws when parse recovery silently drops an outside element', () => {
+  const nowHtml =
+    '<main><section id="a"><b>One</b></section><section id="b">Two</section><p id="tail">Keep</p></main>';
+  const start = nowHtml.indexOf('<section id="a">');
+  const end = nowHtml.indexOf('</section>', start) + '</section>'.length;
+  const inserted = '<section id="a"><i>Restored</i></section>';
+  // A bad splice can leave the sibling mis-nested; parse5 then drops it
+  // (a <td> outside table context is discarded by the HTML parser). The
+  // element disappears without any error - the exact "revert works 70%"
+  // failure class this guard exists to refuse.
+  const result =
+    nowHtml.slice(0, start) + inserted + '<td id="b">Two</td><p id="tail">Keep</p></main>';
+  expect(result.includes('id="b"')).toBe(true); // text is there; the parser drops it
+  expect(() => assertSplicePreserves(nowHtml, start, end, result, inserted.length)).toThrow(
+    /would vanish/
+  );
+});

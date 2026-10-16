@@ -30,12 +30,13 @@ export const KEY_STRUCTURAL_SELECTORS = [
 export async function captureStructuralFingerprint(
   page: Page,
   targetSelector?: string,
-  extraSelectors: string[] = []
+  extraSelectors: string[] = [],
+  includeAllElements?: boolean
 ): Promise<StructuralFingerprint> {
   const combinedSelectors = Array.from(new Set([...KEY_STRUCTURAL_SELECTORS, ...extraSelectors]));
 
   return page.evaluate(
-    ({ selectors, targetSel }) => {
+    ({ selectors, targetSel, includeAll }) => {
       const targetEl = targetSel ? document.querySelector(targetSel) : null;
       const targetSiblings = targetEl?.parentElement
         ? Array.from(targetEl.parentElement.children).filter((el) => el !== targetEl)
@@ -48,6 +49,10 @@ export async function captureStructuralFingerprint(
         } catch {
           // Ignore invalid selector
         }
+      }
+
+      if (includeAll) {
+        document.querySelectorAll('*').forEach((el) => queryMatches.add(el));
       }
 
       // Also gather elements with IDs
@@ -141,7 +146,11 @@ export async function captureStructuralFingerprint(
         nodes
       };
     },
-    { selectors: combinedSelectors, targetSel: targetSelector }
+    {
+      selectors: combinedSelectors,
+      targetSel: targetSelector,
+      includeAll: includeAllElements ?? false
+    }
   );
 }
 
@@ -249,6 +258,7 @@ export function validateStructuralInvariants(
     if (baseNode.isTarget) continue;
 
     // Only protect key structural elements, siblings, or explicit landmarks
+    // (protectAllElements: every non-target element is protected).
     const isKeyStructural =
       ['header', 'nav', 'main', 'footer', 'aside'].includes(baseNode.tag) ||
       baseNode.isSibling ||
@@ -258,7 +268,7 @@ export function validateStructuralInvariants(
         )) ||
       baseNode.selector.includes('role=');
 
-    if (!isKeyStructural && !baseNode.id) continue;
+    if (!options.protectAllElements && !isKeyStructural && !baseNode.id) continue;
 
     // Find candidate counterpart
     let candNode = candidateBySelector.get(baseNode.selector);

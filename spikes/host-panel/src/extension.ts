@@ -1822,7 +1822,8 @@ export async function activate(context: vscode.ExtensionContext) {
                     historical,
                     current,
                     targetSelector: selectiveMeta?.targetSelector || '',
-                    documentPath: selectiveMeta?.documentPath || 'index.html'
+                    documentPath: selectiveMeta?.documentPath || 'index.html',
+                    protectAllElements: Boolean(selectiveMeta?.targetSelector)
                   }
                 },
                 multiAttribution

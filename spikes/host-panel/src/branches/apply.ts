@@ -16,6 +16,7 @@ export interface SelectiveApplyOptions {
     current?: Checkpoint;
     targetSelector?: string;
     documentPath?: string;
+    protectAllElements?: boolean;
     options?: VerificationOptions;
   };
 }
@@ -48,7 +49,7 @@ export async function applySelective(
         candidate: target,
         targetSelector: verify.targetSelector || '',
         documentPath: verify.documentPath || 'index.html',
-        options: verify.options
+        options: { ...verify.options, protectAllElements: verify.protectAllElements }
       });
     } else if (verify.current) {
       verificationReport = await DualVerificationEngine.verifyStaticDocuments({
@@ -57,7 +58,7 @@ export async function applySelective(
         candidate: target,
         targetSelector: verify.targetSelector || '',
         documentPath: verify.documentPath || 'index.html',
-        options: verify.options
+        options: { ...verify.options, protectAllElements: verify.protectAllElements }
       });
     }
 
