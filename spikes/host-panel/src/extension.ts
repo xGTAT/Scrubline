@@ -4,7 +4,7 @@ import { elementCandidate } from './branches/element';
 import { installMcpRuntime } from './mcp/install';
 import { measuredPacket } from './targeting/measured';
 import { specification, specificationKey } from './preview/spec';
-import { listPages, routeToDocument } from './pages';
+import { listPages, routeToDocument, isPickableDocument } from './pages';
 import { prepareRollback, applyRollback, type RollbackCandidate } from './investigation/rollback';
 import { investigate } from './investigation/run';
 import { sweep } from './layout/sweep';
@@ -187,6 +187,41 @@ export async function activate(context: vscode.ExtensionContext) {
     if (!merged.some((p) => p.route === configuredRoute))
       merged.push({ route: configuredRoute, document: routeToDocument(configuredRoute) });
     pages = merged;
+  };
+  /**
+   * File-level cherry-pick fallback for pages without a pickable static HTML
+   * document (framework/server-rendered routes) or refused element picks.
+   * Uses the same reviewed, conflict-guarded selective apply as Changed paths.
+   */
+  const reviewFilesFallback = async (
+    target: import('./bridge/timeline').Checkpoint,
+    reason: string
+  ) => {
+    if (!timeline || !restore || !alternatives) return;
+    const base = alternatives.base(target);
+    const changes = changedPaths(base.files, target.files);
+    if (!changes.length) {
+      void vscode.window.showInformationMessage(`${reason} No changed files to cherry-pick.`);
+      return;
+    }
+    const picked = await vscode.window.showQuickPick(changes, {
+      canPickMany: true,
+      placeHolder: `${reason} Select exact files to cherry-pick.`
+    });
+    if (!picked?.length) return;
+    const current = timeline.store.checkpoints.filter((c) => !c.branch).at(-1)!;
+    review = undefined;
+    selectiveTarget = undefined;
+    const merged = mergeFiles(base, current, target, picked);
+    if (merged.conflicts.length) throw new Error('Both sides changed. Selective apply blocked.');
+    selectiveTarget = merged.target;
+    selected = target.id;
+    review = await timeline.exclusive(() =>
+      restore!.review(selectiveTarget!, current, state.unsaved)
+    );
+    if (review)
+      review.note = `${reason} Whole files only; element-level picking needs static HTML.`;
+    publish(state);
   };
   const start = async () => {
     if (timeline || !folders.length) return;
@@ -1066,6 +1101,15 @@ export async function activate(context: vscode.ExtensionContext) {
           }
           const route = new URL(result.url).pathname;
           const document = route === '/' ? 'index.html' : route.replace(/^\//, '');
+          if (!isPickableDocument(document, pickedSource.files)) {
+            await elementPicker.stop();
+            await pickedRunner.stop();
+            await reviewFilesFallback(
+              pickedSource,
+              'This page has no tracked static HTML source (framework or server-rendered page).'
+            );
+            return;
+          }
           await elementPicker.start(
             runner.config.browserPath,
             result.url,
@@ -1093,9 +1137,9 @@ export async function activate(context: vscode.ExtensionContext) {
                   'Element selected. Review exact files and confirm in Scrubline.'
                 );
               } catch (e) {
-                void vscode.window.showErrorMessage(
-                  e instanceof Error ? e.message : 'Element selection failed.'
-                );
+                const reason = e instanceof Error ? e.message : 'Element selection failed.';
+                const choice = await vscode.window.showErrorMessage(reason, 'Pick files instead');
+                if (choice) await reviewFilesFallback(pickedSource, reason);
               }
             },
             () => pickedRunner.stop()
@@ -1111,6 +1155,14 @@ export async function activate(context: vscode.ExtensionContext) {
         if (message.type === 'review-element' && target) {
           const current = timeline.store.checkpoints.filter((c) => !c.branch).at(-1)!;
           const activeDocument = pages.find((p) => p.route === activePage)?.document;
+          if (
+            !message.document &&
+            !(activeDocument && target.files.some((f) => f.path === activeDocument)) &&
+            !target.files.some((f) => f.path.endsWith('.html'))
+          ) {
+            await reviewFilesFallback(target, 'No tracked HTML document on this page.');
+            return;
+          }
           const document =
             message.document ||
             (activeDocument && target.files.some((f) => f.path === activeDocument)

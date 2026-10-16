@@ -53,3 +53,11 @@ export async function listPages(root: string): Promise<PageInfo[]> {
   );
   return pages;
 }
+
+/**
+ * Element cherry-picking needs the page's document as a tracked static HTML
+ * file in the checkpoint. Framework or server-rendered routes lack one.
+ */
+export function isPickableDocument(document: string, files: { path: string }[]) {
+  return document.endsWith('.html') && files.some((f) => f.path === document);
+}

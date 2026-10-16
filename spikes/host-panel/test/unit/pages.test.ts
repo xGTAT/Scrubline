@@ -1,5 +1,5 @@
 import { test, expect } from 'vitest';
-import { listPages, documentToRoute, routeToDocument } from '../../src/pages';
+import { listPages, documentToRoute, routeToDocument, isPickableDocument } from '../../src/pages';
 import { specification } from '../../src/preview/spec';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
@@ -52,4 +52,14 @@ test('listPages returns an empty list when the workspace has no HTML pages', asy
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
+});
+
+test('isPickableDocument requires a tracked static HTML document', () => {
+  const files = [{ path: 'index.html' }, { path: 'about.html' }, { path: 'app.js' }];
+  expect(isPickableDocument('index.html', files)).toBe(true);
+  expect(isPickableDocument('about.html', files)).toBe(true);
+  expect(isPickableDocument('dashboard', files)).toBe(false);
+  expect(isPickableDocument('missing.html', files)).toBe(false);
+  expect(isPickableDocument('app.js', files)).toBe(false);
+  expect(isPickableDocument('index.html', [])).toBe(false);
 });

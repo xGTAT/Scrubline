@@ -26,19 +26,28 @@ Introduced on the `feature/multi-page` branch (0.9.0).
   page is selected.
 - **Hidden element ID** now defaults its document to the active page when that
   document is tracked in the checkpoint; the manual picker remains otherwise.
+- **Framework and server-rendered pages get file-level cherry-picking.**
+  When the active page has no tracked static HTML document (a framework route
+  like `/dashboard`), Pick on page automatically switches to exact-file
+  selection from the checkpoint's changed files, using the same reviewed,
+  conflict-guarded selective apply as Changed paths. When an element pick is
+  attempted but refused (script-bearing page, framework-generated DOM,
+  ambiguous structure), the error offers **Pick files instead** with the same
+  file-level flow. So every page in the dropdown has a working cherry-pick:
+  element-level where static HTML source exists, exact-file level otherwise.
 - All existing element-eligibility limits are unchanged and apply per page:
   ambiguous identity, duplicate IDs, script-bearing pages, framework-generated
-  DOM, embedded stylesheets and stylesheet-list changes are refused, and
-  shared CSS stays current. The pre/post apply build-test gate is unchanged.
-  A page whose route has no matching static HTML document in the checkpoint
-  (a server-rendered route, for example) previews and renders normally, but
-  element picking refuses with an explanatory error instead of guessing.
+  DOM, embedded stylesheets and stylesheet-list changes are refused at
+  element level, and shared CSS stays current. The pre/post apply
+  build-test gate is unchanged. File-level cherry-picking restores whole
+  files, not elements, and refuses when both sides changed the same file.
 
 ## Limits
 
 - Page discovery sees static `.html` files only. Framework routes that exist
   purely in code (React Router and similar) are not detected; add them with
-  **Add page route…**. Cherry-picking such routes hits the refusal above.
+  **Add page route…**. Cherry-picking on those routes is file-level, not
+  element-level.
 - Discovery caps (200 pages, depth 8) mean very large sites can miss deeply
   nested pages; add those routes manually.
 - Switching pages during an active render cancels it; the cancelled page's
@@ -46,7 +55,8 @@ Introduced on the `feature/multi-page` branch (0.9.0).
 
 ## Verification
 
-- Unit: route/document mapping, nested discovery, exclusions, empty workspaces.
+- Unit: route/document mapping, nested discovery, exclusions, empty workspaces,
+  pickable-document detection for the element/file fallback decision.
 - UI: dropdown rendering and option order, `set-page` / `add-page` messages,
   hidden-until-known behavior, axe accessibility, evidence screenshot
   (`docs/evidence/panel_page_select.png`).
