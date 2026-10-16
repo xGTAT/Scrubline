@@ -168,6 +168,26 @@ export const App: React.FC = () => {
           <span aria-label="Storage location">Local</span>
         )}
       </header>
+      {(state.pages?.length ?? 0) > 0 && (
+        <section className="page-select" aria-label="Page selection">
+          <label htmlFor="scrubline-page">Page</label>
+          <select
+            id="scrubline-page"
+            value={state.activePage ?? ''}
+            onChange={(e) => {
+              if (e.target.value === '__add__') bridge?.postMessage({ type: 'add-page' });
+              else bridge?.postMessage({ type: 'set-page', route: e.target.value });
+            }}
+          >
+            {state.pages!.map((p) => (
+              <option key={p.route} value={p.route}>
+                {p.document}
+              </option>
+            ))}
+            <option value="__add__">Add page route…</option>
+          </select>
+        </section>
+      )}
       <section className="status" aria-live="polite">
         <span>
           {state.status === 'loading'

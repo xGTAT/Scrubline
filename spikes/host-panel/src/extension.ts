@@ -3,7 +3,8 @@ import { ElementPicker } from './branches/picker';
 import { elementCandidate } from './branches/element';
 import { installMcpRuntime } from './mcp/install';
 import { measuredPacket } from './targeting/measured';
-import { specificationKey } from './preview/spec';
+import { specification, specificationKey } from './preview/spec';
+import { listPages, routeToDocument } from './pages';
 import { prepareRollback, applyRollback, type RollbackCandidate } from './investigation/rollback';
 import { investigate } from './investigation/run';
 import { sweep } from './layout/sweep';
@@ -137,7 +138,9 @@ export async function activate(context: vscode.ExtensionContext) {
       canUndo,
       targeting,
       branches: alternatives?.list(),
-      comparison
+      comparison,
+      pages,
+      activePage
     };
     for (const view of views) {
       try {
@@ -164,7 +167,27 @@ export async function activate(context: vscode.ExtensionContext) {
   let restore: Restore | undefined;
   let runner: PreviewRunner | undefined;
   let selected: string | undefined;
+  let pages: import('./pages').PageInfo[] = [];
+  let activePage: string | undefined;
   let previewQueue = Promise.resolve();
+  const discoverPages = async (root: string) => {
+    if (!runner) return;
+    const discovered = await listPages(root);
+    const merged = [...discovered];
+    for (const extra of context.workspaceState.get<string[]>('scrubline.extraPages', [])) {
+      try {
+        specification({ ...runner.config, route: extra });
+        if (!merged.some((p) => p.route === extra))
+          merged.push({ route: extra, document: routeToDocument(extra) });
+      } catch {
+        diagnostics.appendLine(`Ignoring invalid saved page route: ${extra}`);
+      }
+    }
+    const configuredRoute = runner.config.route ?? '/';
+    if (!merged.some((p) => p.route === configuredRoute))
+      merged.push({ route: configuredRoute, document: routeToDocument(configuredRoute) });
+    pages = merged;
+  };
   const start = async () => {
     if (timeline || !folders.length) return;
     if (folders.length !== 1) {
@@ -230,15 +253,32 @@ export async function activate(context: vscode.ExtensionContext) {
     );
     Object.assign(runner.config, await identifyBrowser(runner.config));
     cache = new RenderCache(storeRoot, renderKey(runner.config));
+    await discoverPages(root);
+    const rememberedPage = context.workspaceState.get<string>('scrubline.activePage');
+    if (rememberedPage && pages.some((p) => p.route === rememberedPage)) {
+      activePage = rememberedPage;
+      runner.config.route = rememberedPage;
+      cache = new RenderCache(storeRoot, renderKey(runner.config));
+    } else {
+      activePage = runner.config.route ?? '/';
+    }
     publish({ status: 'loading', rows: [], unsaved: false });
     const watcher = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(folders[0], '**/*')
     );
     context.subscriptions.push(
       watcher,
-      watcher.onDidCreate(() => timeline?.event('watcher')),
+      watcher.onDidCreate((uri) => {
+        timeline?.event('watcher');
+        if (uri.fsPath.endsWith('.html'))
+          void discoverPages(folders[0].uri.fsPath).then(() => publish(state));
+      }),
       watcher.onDidChange(() => timeline?.event('watcher')),
-      watcher.onDidDelete(() => timeline?.event('watcher'))
+      watcher.onDidDelete((uri) => {
+        timeline?.event('watcher');
+        if (uri.fsPath.endsWith('.html'))
+          void discoverPages(folders[0].uri.fsPath).then(() => publish(state));
+      })
     );
     const dirty = () =>
       timeline?.dirty(
@@ -864,6 +904,67 @@ export async function activate(context: vscode.ExtensionContext) {
           } else await start();
           return;
         }
+        if (message.type === 'set-page' && timeline && runner && cache) {
+          const page = pages.find((p) => p.route === message.route);
+          if (!page) throw new Error('Page not found in this workspace.');
+          if (page.route === activePage) return;
+          generation++;
+          cancelRender = true;
+          await previewQueue.catch(() => {});
+          await elementPicker.stop();
+          await elementRunner?.stop();
+          await runner.stop();
+          runner.config.route = page.route;
+          specification(runner.config);
+          cache = new RenderCache(timeline.store.root, renderKey(runner.config));
+          rendered = [];
+          preview = undefined;
+          review = undefined;
+          selectiveTarget = undefined;
+          activePage = page.route;
+          void context.workspaceState.update('scrubline.activePage', page.route);
+          publish(state);
+          if (selected) await enqueuePreview(selected);
+          return;
+        }
+        if (message.type === 'add-page' && timeline && runner && cache) {
+          const input = await vscode.window.showInputBox({
+            prompt: 'Local page route, for example /about.html or /dashboard',
+            value: '/'
+          });
+          if (!input) return;
+          let route: string;
+          try {
+            route = specification({ ...runner.config, route: input.trim() }).route;
+          } catch {
+            void vscode.window.showErrorMessage(
+              'Page route must be a local path starting with / and without a fragment.'
+            );
+            return;
+          }
+          if (!pages.some((p) => p.route === route)) {
+            pages = [...pages, { route, document: routeToDocument(route) }];
+            const extras = context.workspaceState.get<string[]>('scrubline.extraPages', []);
+            void context.workspaceState.update('scrubline.extraPages', [...extras, route]);
+          }
+          generation++;
+          cancelRender = true;
+          await previewQueue.catch(() => {});
+          await elementPicker.stop();
+          await elementRunner?.stop();
+          await runner.stop();
+          runner.config.route = route;
+          cache = new RenderCache(timeline.store.root, renderKey(runner.config));
+          rendered = [];
+          preview = undefined;
+          review = undefined;
+          selectiveTarget = undefined;
+          activePage = route;
+          void context.workspaceState.update('scrubline.activePage', route);
+          publish(state);
+          if (selected) await enqueuePreview(selected);
+          return;
+        }
         if (!timeline || !restore || !vscode.workspace.isTrusted) return;
         const target =
           'id' in message ? timeline.store.checkpoints.find((c) => c.id === message.id) : undefined;
@@ -1009,12 +1110,15 @@ export async function activate(context: vscode.ExtensionContext) {
         }
         if (message.type === 'review-element' && target) {
           const current = timeline.store.checkpoints.filter((c) => !c.branch).at(-1)!;
+          const activeDocument = pages.find((p) => p.route === activePage)?.document;
           const document =
             message.document ||
-            (await vscode.window.showQuickPick(
-              target.files.filter((f) => f.path.endsWith('.html')).map((f) => f.path),
-              { placeHolder: 'Plain HTML document' }
-            ));
+            (activeDocument && target.files.some((f) => f.path === activeDocument)
+              ? activeDocument
+              : await vscode.window.showQuickPick(
+                  target.files.filter((f) => f.path.endsWith('.html')).map((f) => f.path),
+                  { placeHolder: 'Plain HTML document' }
+                ));
           if (!document) return;
           const element =
             message.element ||
@@ -1452,6 +1556,10 @@ export async function activate(context: vscode.ExtensionContext) {
             (message) => diagnostics.appendLine(message)
           );
           Object.assign(runner.config, await identifyBrowser(runner.config));
+          await discoverPages(folders[0].uri.fsPath);
+          if (activePage && pages.some((p) => p.route === activePage))
+            runner.config.route = activePage;
+          else activePage = runner.config.route ?? '/';
           cache = new RenderCache(timeline.store.root, renderKey(runner.config));
           rendered = await cache.available(timeline.store.checkpoints);
           preview = undefined;

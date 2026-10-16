@@ -1,3 +1,10 @@
+## 0.9.0 (unreleased)
+
+- Page dropdown lists discovered static HTML pages, the configured preview route and custom routes; the active page persists per workspace.
+- Scrubbing, render history, interactive preview and rechecks run against the selected page with per-page render caches.
+- Pick on page and Hidden element ID cherry-pick against the active page's document; existing static-HTML eligibility refusals are unchanged per page.
+- Live dropdown refresh on HTML file create/delete; discovery skips dependency/build folders and caps at 200 pages.
+
 ## 0.8.2
 
 - Static CSS culprit investigation scans selected ancestry with an approved geometry assertion.
