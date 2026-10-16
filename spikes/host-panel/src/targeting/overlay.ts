@@ -140,12 +140,15 @@ export function installOverlay() {
           zIndex: '2147483646'
         });
         badgesContainer.append(box, badge);
-      } catch {}
+      } catch {
+        /* Element not found or invalid selector */
+      }
     });
   };
   const move = (event: MouseEvent) => {
     const e = event.target;
-    if (!(e instanceof Element) || e === banner || e === highlight || badgesContainer.contains(e)) return;
+    if (!(e instanceof Element) || e === banner || e === highlight || badgesContainer.contains(e))
+      return;
     const b = e.getBoundingClientRect();
     Object.assign(highlight.style, {
       display: 'block',
@@ -157,7 +160,8 @@ export function installOverlay() {
   };
   const click = (event: MouseEvent) => {
     const e = event.target;
-    if (!(e instanceof Element) || e === banner || e === highlight || badgesContainer.contains(e)) return;
+    if (!(e instanceof Element) || e === banner || e === highlight || badgesContainer.contains(e))
+      return;
     event.preventDefault();
     event.stopImmediatePropagation();
     const selector = selectorFor(e);
@@ -223,7 +227,7 @@ export function installOverlay() {
     window.removeEventListener('resize', updateBadges, true);
   }
   function validate() {
-    const list = selections.length > 0 ? selections : (selected ? [selected] : []);
+    const list = selections.length > 0 ? selections : selected ? [selected] : [];
     if (list.length === 0) return false;
     try {
       return list.every((item) => {

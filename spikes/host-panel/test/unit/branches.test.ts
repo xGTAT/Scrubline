@@ -9,6 +9,7 @@ import { Restore } from '../../src/review/restore';
 import { staticNavbarPaths, staticSectionPaths } from '../../src/branches/static-mapping';
 import { resolveElementFiles, mergeMultiElements } from '../../src/branches/multi-merge';
 import { validateCandidate } from '../../src/branches/validate';
+import { applySelective } from '../../src/branches/apply';
 async function fixture() {
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'scrubline-branches-'));
   const root = path.join(temp, 'project');
@@ -289,9 +290,7 @@ test('multi-element cherry-pick applies two independent elements (nav + footer) 
     await applySelective(restore, merged.target, r.token, false, 'node -e "process.exit(0)"');
 
     // 4. Assert workspace state: navbar & footer updated, index.html preserved!
-    expect(await fs.readFile(path.join(f.root, 'navbar.html'), 'utf8')).toContain(
-      'Branch 1 Nav'
-    );
+    expect(await fs.readFile(path.join(f.root, 'navbar.html'), 'utf8')).toContain('Branch 1 Nav');
     expect(await fs.readFile(path.join(f.root, 'navbar.css'), 'utf8')).toBe(
       'nav{display:flex}nav .brand{font-weight:bold}'
     );
@@ -307,14 +306,123 @@ test('multi-element cherry-pick applies two independent elements (nav + footer) 
 
     // 5. Undo restores all files
     await restore.undo(f.store.checkpoints.at(-1)!, false);
-    expect(await fs.readFile(path.join(f.root, 'navbar.html'), 'utf8')).toBe(
-      '<nav>Base Nav</nav>'
-    );
+    expect(await fs.readFile(path.join(f.root, 'navbar.html'), 'utf8')).toBe('<nav>Base Nav</nav>');
     expect(await fs.readFile(path.join(f.root, 'footer.html'), 'utf8')).toBe(
       '<footer>Base Footer</footer>'
     );
     expect(await fs.readFile(path.join(f.root, 'index.html'), 'utf8')).toBe(
       '<main><h1>Workspace Edited Main</h1></main>'
+    );
+  } finally {
+    await fs.rm(f.temp, { recursive: true, force: true });
+  }
+});
+
+test('two elements picked on the same page (same document) merge cleanly and undo restores exact original', async () => {
+  const f = await fixture();
+  try {
+    // index.html on the same page has a nav, main, and footer
+    await fs.writeFile(
+      path.join(f.root, 'index.html'),
+      '<!DOCTYPE html><html><body><nav id="nav">Base Nav</nav><main id="content">Base Content</main><footer id="footer">Base Footer</footer></body></html>'
+    );
+    let s = await scan(f.root, f.store.root);
+    const baseWithIndex = await f.store.commit(s.files, s.contents, 'save', {
+      kind: 'unattributed'
+    });
+
+    // Branch 1: modifies the nav on index.html
+    const b1 = await f.alternatives.fork(baseWithIndex, 'Nav-Branch');
+    await fs.writeFile(
+      path.join(b1.directory, 'index.html'),
+      '<!DOCTYPE html><html><body><nav id="nav">Branch 1 Nav</nav><main id="content">Base Content</main><footer id="footer">Base Footer</footer></body></html>'
+    );
+    const selected1 = await f.alternatives.capture(b1.id);
+
+    // Branch 2: modifies the footer on the same index.html
+    const b2 = await f.alternatives.fork(baseWithIndex, 'Footer-Branch');
+    await fs.writeFile(
+      path.join(b2.directory, 'index.html'),
+      '<!DOCTYPE html><html><body><nav id="nav">Base Nav</nav><main id="content">Base Content</main><footer id="footer">Branch 2 Footer</footer></body></html>'
+    );
+    const selected2 = await f.alternatives.capture(b2.id);
+
+    // Workspace concurrently edits unrelated file
+    await fs.writeFile(path.join(f.root, 'notes.txt'), 'workspace notes');
+    s = await scan(f.root, f.store.root);
+    const current = await f.store.commit(s.files, s.contents, 'save', {
+      kind: 'unattributed'
+    });
+
+    // Pick two elements on the same page (index.html)
+    const selections = [
+      { checkpoint: selected1, base: baseWithIndex, document: 'index.html', selector: '#nav' },
+      { checkpoint: selected2, base: baseWithIndex, document: 'index.html', selector: '#footer' }
+    ];
+
+    const resolved = await resolveElementFiles(f.store, selections);
+    expect(resolved).toHaveLength(2);
+    expect(resolved[0].document).toBe('index.html');
+    expect(resolved[1].document).toBe('index.html');
+
+    // Merge both elements into current
+    const items = resolved.map((r) => ({
+      base: r.selection.base,
+      selected: r.selection.checkpoint,
+      paths: r.paths,
+      document: r.document,
+      selector: r.selection.selector
+    }));
+    const merged = mergeMultiElements(current, items, f.store);
+    expect(merged.conflicts).toEqual([]);
+    expect(merged.elements).toHaveLength(2);
+
+    const restore = new Restore(f.root, f.store, defaultLimits);
+    const r = await restore.review(merged.target, current, false);
+    expect(r.paths).toEqual(['index.html']);
+    await applySelective(restore, merged.target, r.token, false, 'node -e "process.exit(0)"');
+
+    // index.html now has BOTH Branch 1 Nav and Branch 2 Footer, while Base Content is preserved
+    const appliedHtml = await fs.readFile(path.join(f.root, 'index.html'), 'utf8');
+    expect(appliedHtml).toContain('<nav id="nav">Branch 1 Nav</nav>');
+    expect(appliedHtml).toContain('<main id="content">Base Content</main>');
+    expect(appliedHtml).toContain('<footer id="footer">Branch 2 Footer</footer>');
+    expect(await fs.readFile(path.join(f.root, 'notes.txt'), 'utf8')).toBe('workspace notes');
+
+    // Undo restores index.html back to original
+    await restore.undo(f.store.checkpoints.at(-1)!, false);
+    const restoredHtml = await fs.readFile(path.join(f.root, 'index.html'), 'utf8');
+    expect(restoredHtml).toContain('<nav id="nav">Base Nav</nav>');
+    expect(restoredHtml).toContain('<footer id="footer">Base Footer</footer>');
+  } finally {
+    await fs.rm(f.temp, { recursive: true, force: true });
+  }
+});
+
+test('nested or duplicate element selections on the same page are blocked', async () => {
+  const f = await fixture();
+  try {
+    await fs.writeFile(
+      path.join(f.root, 'index.html'),
+      '<!DOCTYPE html><html><body><main id="main"><p id="child">Inside</p></main></body></html>'
+    );
+    const s = await scan(f.root, f.store.root);
+    const cp = await f.store.commit(s.files, s.contents, 'save', { kind: 'unattributed' });
+
+    // Nested selections: #main and #child inside #main
+    const nestedSelections = [
+      { checkpoint: cp, base: cp, document: 'index.html', selector: '#main' },
+      { checkpoint: cp, base: cp, document: 'index.html', selector: '#child' }
+    ];
+    await expect(resolveElementFiles(f.store, nestedSelections)).rejects.toThrow('non-overlapping');
+
+    // Duplicate selections: same selector twice
+    const duplicateSelections = [
+      { checkpoint: cp, base: cp, document: 'index.html', selector: '#main' },
+      { checkpoint: cp, base: cp, document: 'index.html', selector: '#main' }
+    ];
+    await expect(resolveElementFiles(f.store, duplicateSelections)).rejects.toThrow(
+      'non-overlapping'
     );
   } finally {
     await fs.rm(f.temp, { recursive: true, force: true });

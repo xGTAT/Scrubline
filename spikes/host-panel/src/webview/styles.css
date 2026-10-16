@@ -596,4 +596,13 @@ html {
   gap: 6px;
   cursor: pointer;
 }
-
+.target-selections select {
+  font-size: 11px;
+  padding: 2px 4px;
+  background: var(--vscode-dropdown-background, #252526);
+  color: var(--vscode-dropdown-foreground, #ccc);
+  border: 1px solid var(--vscode-dropdown-border, #454545);
+  border-radius: 3px;
+  margin-top: 4px;
+  max-width: 100%;
+}

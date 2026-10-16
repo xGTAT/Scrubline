@@ -34,6 +34,7 @@ export const App: React.FC = () => {
   useEffect(() => setPacketReviewed(false), [state.targeting?.packet]);
   const selections = state.targeting?.selections;
   const [includedIndices, setIncludedIndices] = useState<number[]>([]);
+  const [selectionCheckpoints, setSelectionCheckpoints] = useState<Record<number, string>>({});
   useEffect(() => {
     if (selections?.length) {
       setIncludedIndices(selections.map((_, i) => i));
@@ -749,6 +750,8 @@ export const App: React.FC = () => {
               <ul className="paths">
                 {state.targeting.selections.map((sel, idx) => {
                   const isChecked = includedIndices.includes(idx);
+                  const chosenCp =
+                    selectionCheckpoints[idx] ?? state.preview?.checkpoint ?? state.rows.at(-1)?.id;
                   return (
                     <li key={sel.selector + idx}>
                       <label>
@@ -763,26 +766,68 @@ export const App: React.FC = () => {
                             }
                           }}
                         />
-                        <span>#{idx + 1} &lt;{sel.tag}&gt;</span>
+                        <span>
+                          #{idx + 1} &lt;{sel.tag}&gt;
+                        </span>
                         {sel.name ? ` "${sel.name}"` : ''}
                         <code>{sel.selector}</code>
                       </label>
+                      <select
+                        value={chosenCp}
+                        aria-label={`Source checkpoint for element ${idx + 1}`}
+                        onChange={(e) =>
+                          setSelectionCheckpoints({
+                            ...selectionCheckpoints,
+                            [idx]: e.target.value
+                          })
+                        }
+                      >
+                        {state.branches && state.branches.length > 0 && (
+                          <optgroup label="Alternatives">
+                            {state.branches.map((b) => (
+                              <option key={b.id} value={b.checkpoint}>
+                                {b.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        <optgroup label="Checkpoints">
+                          {state.rows
+                            .slice()
+                            .reverse()
+                            .map((r) => (
+                              <option key={r.id} value={r.id}>
+                                {r.alternative
+                                  ? `${r.alternative} (${r.id.slice(0, 7)})`
+                                  : `Checkpoint ${r.id.slice(0, 7)}`}
+                              </option>
+                            ))}
+                        </optgroup>
+                      </select>
                     </li>
                   );
                 })}
               </ul>
               <button
-                disabled={includedIndices.length === 0 || !state.preview?.checkpoint}
+                disabled={includedIndices.length === 0}
                 onClick={() => {
-                  const toApply = includedIndices
-                    .map((idx) => state.targeting!.selections![idx])
-                    .filter(Boolean)
-                    .map((sel) => ({
-                      checkpointId: state.preview!.checkpoint!,
-                      document: sel.route.replace(/^\//, '') || 'index.html',
-                      selector: sel.selector,
-                      fingerprint: sel.fingerprint
-                    }));
+                  const toApply = includedIndices.flatMap((idx) => {
+                    const sel = state.targeting?.selections?.[idx];
+                    if (!sel) return [];
+                    const cpId =
+                      selectionCheckpoints[idx] ??
+                      state.preview?.checkpoint ??
+                      state.rows.at(-1)?.id;
+                    if (!cpId) return [];
+                    return [
+                      {
+                        checkpointId: cpId,
+                        document: sel.route.replace(/^\//, '') || 'index.html',
+                        selector: sel.selector,
+                        fingerprint: sel.fingerprint
+                      }
+                    ];
+                  });
                   bridge?.postMessage({
                     type: 'review-multi-element',
                     selections: toApply
