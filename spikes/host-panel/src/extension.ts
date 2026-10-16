@@ -1,4 +1,5 @@
 import { replaceActivation } from './lifecycle';
+import { ChatbotController } from './chatbot/controller';
 import { ElementPicker } from './branches/picker';
 import { elementCandidate } from './branches/element';
 import {
@@ -101,6 +102,7 @@ export async function activate(context: vscode.ExtensionContext) {
   let selectiveTarget: import('./bridge/timeline').Checkpoint | undefined;
   let comparison: TimelineState['comparison'];
   let mcpBridge: McpBridge | undefined;
+  let chatbotController: ChatbotController | undefined;
   const elementPicker = new ElementPicker();
   let elementRunner: PreviewRunner | undefined;
   let targetSession: TargetSession | undefined;
@@ -157,7 +159,8 @@ export async function activate(context: vscode.ExtensionContext) {
       branches: alternatives?.list(),
       comparison,
       pages,
-      activePage
+      activePage,
+      chatbot: chatbotController?.getState()
     };
     for (const view of views) {
       try {
@@ -419,6 +422,14 @@ export async function activate(context: vscode.ExtensionContext) {
     await timeline.start();
     rendered = await cache!.available(timeline.store.checkpoints);
     alternatives = new Alternatives(timeline.store, timeline.limits);
+    chatbotController = new ChatbotController(
+      timeline.store,
+      () => cache,
+      secrets,
+      (cState) => {
+        publish({ ...state, chatbot: cState });
+      }
+    );
     publish(state);
     dirty();
   };
@@ -1554,6 +1565,25 @@ export async function activate(context: vscode.ExtensionContext) {
             `${message.path}: base to selected`
           );
         }
+        if (message.type === 'ask-chatbot') {
+          if (!chatbotController) throw new Error('Chatbot unavailable. Open a workspace first.');
+          await chatbotController.handleQuery(
+            message.query,
+            message.checkpointId ?? selected,
+            message.compareCheckpointId
+          );
+          return;
+        }
+        if (message.type === 'clear-chatbot-history') {
+          chatbotController?.clearHistory();
+          return;
+        }
+        if (message.type === 'request-chatbot-state') {
+          if (chatbotController) {
+            void view.postMessage({ type: 'chatbot-state', data: chatbotController.getState() });
+          }
+          return;
+        }
       } catch (e) {
         if (message.type === 'apply-reviewed') {
           review = undefined;
@@ -1703,6 +1733,9 @@ export async function activate(context: vscode.ExtensionContext) {
       attach(panelView);
       panel.onDidDispose(() => views.delete(panelView));
     }),
+    vscode.commands.registerCommand('scrubline.openChatbot', () => {
+      vscode.commands.executeCommand('scrubline.openPanel');
+    }),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (!event.affectsConfiguration('scrubline', folders[0]?.uri) || !runner || !timeline) return;
       if (refreshPromise) {
@@ -1823,7 +1856,10 @@ export async function activate(context: vscode.ExtensionContext) {
         )
       ),
     undo: () =>
-      timeline?.exclusive(() => restore!.undo(timeline!.store.checkpoints.at(-1)!, state.unsaved))
+      timeline?.exclusive(() => restore!.undo(timeline!.store.checkpoints.at(-1)!, state.unsaved)),
+    getChatbot: () => chatbotController,
+    askChatbot: (query: string, checkpointId?: string, compareId?: string) =>
+      chatbotController?.handleQuery(query, checkpointId, compareId)
   };
 }
 let shutdown: (() => Promise<void>) | undefined;
