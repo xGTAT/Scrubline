@@ -200,6 +200,7 @@ export class PreviewRunner {
       collector?.attach(page);
       // Server startup and browser rendering have separate budgets.
       const renderTimeout = Math.max(this.config.timeoutMs, 15000);
+      const renderStart = Date.now();
       await page.goto(url, { waitUntil: 'networkidle', timeout: renderTimeout });
       if (new URL(page.url()).origin !== new URL(url).origin)
         throw new Error('Preview redirected off origin.');
@@ -277,6 +278,7 @@ export class PreviewRunner {
           })
         );
       }
+      const renderMs = Date.now() - renderStart;
       const image = await page.screenshot({ timeout: renderTimeout });
       const geometry = JSON.stringify(regions);
       await atomicWrite(destination, image);
@@ -313,6 +315,9 @@ export class PreviewRunner {
           repeatability: 'not-rechecked'
         };
         await atomicWrite(`${destination}.receipt.json`, JSON.stringify(receipt));
+        // Render time is measured, not content-derived, so it lives in a
+        // sidecar (render-timings.json), never in the immutable manifest.
+        await this.store.recordRenderTiming(checkpoint.id, renderMs);
       }
     } finally {
       await browser.close();

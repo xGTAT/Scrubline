@@ -4,7 +4,6 @@ import { resolve } from 'node:path';
 
 const evidenceDir = resolve(__dirname, '../../../../docs/evidence');
 const ID = 'a'.repeat(64);
-const PREV = 'b'.repeat(64);
 
 test.beforeAll(() => {
   if (!existsSync(evidenceDir)) mkdirSync(evidenceDir, { recursive: true });
@@ -44,11 +43,66 @@ const timeline = {
         'Query values, headers, cookies and bodies are never recorded.'
       ],
       entries: [
-        { method: 'GET', host: '127.0.0.1:4100', path: '/', queryKeys: [], status: 200, resourceType: 'document', startedAt: 0, durationMs: 42, sameOrigin: true, mutation: false },
-        { method: 'GET', host: '127.0.0.1:4100', path: '/api/status', queryKeys: ['verbose'], status: 200, resourceType: 'fetch', startedAt: 55, durationMs: 18, sameOrigin: true, mutation: false },
-        { method: 'POST', host: '127.0.0.1:4100', path: '/api/items', queryKeys: [], status: 201, resourceType: 'fetch', startedAt: 80, durationMs: 61, sameOrigin: true, mutation: true },
-        { method: 'GET', host: '127.0.0.1:4100', path: '/api/missing', queryKeys: [], status: 404, resourceType: 'fetch', startedAt: 150, durationMs: 12, sameOrigin: true, mutation: false },
-        { method: 'GET', host: 'cdn.example.net', path: '/lib.js', queryKeys: [], status: 200, resourceType: 'script', startedAt: 20, durationMs: 90, sameOrigin: false, mutation: false }
+        {
+          method: 'GET',
+          host: '127.0.0.1:4100',
+          path: '/',
+          queryKeys: [],
+          status: 200,
+          resourceType: 'document',
+          startedAt: 0,
+          durationMs: 42,
+          sameOrigin: true,
+          mutation: false
+        },
+        {
+          method: 'GET',
+          host: '127.0.0.1:4100',
+          path: '/api/status',
+          queryKeys: ['verbose'],
+          status: 200,
+          resourceType: 'fetch',
+          startedAt: 55,
+          durationMs: 18,
+          sameOrigin: true,
+          mutation: false
+        },
+        {
+          method: 'POST',
+          host: '127.0.0.1:4100',
+          path: '/api/items',
+          queryKeys: [],
+          status: 201,
+          resourceType: 'fetch',
+          startedAt: 80,
+          durationMs: 61,
+          sameOrigin: true,
+          mutation: true
+        },
+        {
+          method: 'GET',
+          host: '127.0.0.1:4100',
+          path: '/api/missing',
+          queryKeys: [],
+          status: 404,
+          resourceType: 'fetch',
+          startedAt: 150,
+          durationMs: 12,
+          sameOrigin: true,
+          mutation: false
+        },
+        {
+          method: 'GET',
+          host: 'cdn.example.net',
+          path: '/lib.js',
+          queryKeys: [],
+          status: 200,
+          resourceType: 'script',
+          startedAt: 20,
+          durationMs: 90,
+          sameOrigin: false,
+          mutation: false
+        }
       ]
     },
     matches: [-1, 0, 1, -1, -1],

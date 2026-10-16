@@ -12,6 +12,7 @@ import { HistoryStore, hashBytes, atomicWrite, safePath } from '../store/store';
 import type { Checkpoint } from '../bridge/timeline';
 import { indexJsx } from './jsx';
 import { indexSfc } from './sfc';
+import { discoverNgTemplates, indexNgTemplate } from './ng';
 import { matchPicked, mapIdentity } from './match';
 import { ownedBySubtree } from './selectors';
 import {
@@ -123,6 +124,32 @@ export async function frameworkElementCandidate(
     files = files.filter((p) => p === opts.document);
     if (!files.length) throw new Error('Document not tracked in both versions.');
   }
+  // Angular component templates: .html files referenced via templateUrl from
+  // a tracked TypeScript component, tracked in both versions. Static HTML
+  // documents are never indexed here - they stay on the exact element path.
+  const ngStyles = new Map<string, string[]>();
+  if (!opts.document) {
+    for (const f of source.files) {
+      if (!f.path.endsWith('.ts') || !currentPaths.has(f.path)) continue;
+      let tsText: string;
+      try {
+        tsText = await read(source, f.path);
+      } catch {
+        continue;
+      }
+      if (tsText.length > MAX_INDEX_BYTES || !tsText.includes('templateUrl')) continue;
+      for (const [tpl, styles] of discoverNgTemplates(f.path, tsText)) {
+        if (currentPaths.has(tpl) && sourcePaths.has(tpl) && !files.includes(tpl)) {
+          files.push(tpl);
+          ngStyles.set(tpl, styles);
+        }
+      }
+    }
+  }
+
+  const indexer = (file: string, text: string): SourceIndex =>
+    ngStyles.has(file) ? indexNgTemplate(file, text, ngStyles.get(file)!) : indexFile(file, text);
+
   const oldIndexes: SourceIndex[] = [];
   const nowIndexes = new Map<string, SourceIndex>();
   const texts = new Map<string, { oldText: string; nowText: string }>();
@@ -130,8 +157,8 @@ export async function frameworkElementCandidate(
     const [oldText, nowText] = await Promise.all([read(source, file), read(current, file)]);
     if (oldText.length > MAX_INDEX_BYTES || nowText.length > MAX_INDEX_BYTES) continue;
     try {
-      oldIndexes.push(indexFile(file, oldText));
-      nowIndexes.set(file, indexFile(file, nowText));
+      oldIndexes.push(indexer(file, oldText));
+      nowIndexes.set(file, indexer(file, nowText));
       texts.set(file, { oldText, nowText });
     } catch {
       if (opts.document) throw new Error(`Could not parse ${file}. Review the whole file instead.`);
@@ -140,6 +167,10 @@ export async function frameworkElementCandidate(
   }
   const selected = matchPicked(oldIndexes, pick);
   const file = selected.file;
+  if (ngStyles.has(file))
+    notes.push(
+      'Angular component template: markup restored; component logic and non-owned styles stay current. Inline template: strings are not supported.'
+    );
   const oldIdx = oldIndexes.find((i) => i.file === file)!;
   const nowIdx = nowIndexes.get(file)!;
   const { oldText, nowText } = texts.get(file)!;
@@ -213,7 +244,7 @@ export async function frameworkElementCandidate(
   let newText = nowText;
   for (const s of splices) newText = newText.slice(0, s.start) + s.text + newText.slice(s.end);
   // Post-edit sanity: the mapped identity must still resolve uniquely.
-  const recheck = indexFile(file, newText);
+  const recheck = indexer(file, newText);
   const mapped = mapIdentity(selected, oldIdx, recheck);
   if (newText.slice(mapped.start, mapped.end) !== oldText.slice(selected.start, selected.end))
     throw new Error('Post-edit mapping changed. Nothing applied.');

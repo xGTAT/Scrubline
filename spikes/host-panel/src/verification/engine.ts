@@ -39,8 +39,18 @@ export class DualVerificationEngine {
     const { candidatePage, historicalPage, baselinePage, targetSelector, options = {} } = params;
 
     // Step 1 & 3: Structural Invariant Verification
-    const baselineFingerprint = await captureStructuralFingerprint(baselinePage, targetSelector);
-    const candidateFingerprint = await captureStructuralFingerprint(candidatePage, targetSelector);
+    const baselineFingerprint = await captureStructuralFingerprint(
+      baselinePage,
+      targetSelector,
+      [],
+      options.protectAllElements
+    );
+    const candidateFingerprint = await captureStructuralFingerprint(
+      candidatePage,
+      targetSelector,
+      [],
+      options.protectAllElements
+    );
 
     const structuralViolations = validateStructuralInvariants(
       baselineFingerprint,
