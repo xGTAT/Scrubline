@@ -90,7 +90,7 @@ function parseAttrs(raw: string): { name: string; value: string }[] {
   return attrs;
 }
 
-function indexTemplate(file: string, html: string, offset: number): SourceElement[] {
+export function indexTemplate(file: string, html: string, offset: number): SourceElement[] {
   const root = parse(html, { sourceCodeLocationInfo: true });
   const elements: SourceElement[] = [];
   const visit = (n: HtmlNode, ancestors: string[], parent = -1) => {

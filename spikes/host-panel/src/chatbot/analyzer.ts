@@ -1,3 +1,4 @@
+import { contrastRatio, parseColor } from './contrast';
 import type {
   DesignQueryContext,
   DesignAdviceResponse,
@@ -91,6 +92,7 @@ export class DesignAnalyzer {
     this.analyzeTypography(context, findings, recommendations, snippets);
     this.analyzeNavigation(context, findings, recommendations, snippets);
     this.analyzeConsistency(context, findings, recommendations, snippets);
+    this.analyzeContrast(context, findings, recommendations);
 
     if (context.compareCheckpoint || intent.isVersionDiff) {
       this.analyzeDiff(context, findings, recommendations);
@@ -386,6 +388,68 @@ export class DesignAnalyzer {
         : `/* Alternative Sidebar Navigation */\n.sidebar-nav {\n  display: flex;\n  flex-direction: column;\n  width: 220px;\n  padding: 16px 8px;\n  border-right: 1px solid var(--vscode-panel-border, #333);\n}`,
       evidence: []
     });
+  }
+
+  /**
+   * Advisory color-clash heuristic: flags selector rules whose literal text
+   * and background colors fall below the WCAG 4.5:1 contrast guideline.
+   * Only literal colors resolve; gradients, var(), inheritance and opacity
+   * are not modeled, so findings are advisory, never verdicts.
+   */
+  private analyzeContrast(
+    context: DesignQueryContext,
+    findings: DesignAnalysisFinding[],
+    recommendations: DesignRecommendation[]
+  ) {
+    const byRule = new Map<string, { path: string; color?: string; background?: string }>();
+    for (const d of context.cssDeclarations) {
+      const key = `${d.path}::${d.selector}`;
+      const entry = byRule.get(key) ?? { path: d.path };
+      if (d.property === 'color') entry.color = d.value;
+      if (d.property === 'background-color' || d.property === 'background')
+        entry.background = d.value;
+      byRule.set(key, entry);
+    }
+    let flagged = 0;
+    for (const [key, entry] of byRule) {
+      if (flagged >= 3) break;
+      if (!entry.color || !entry.background) continue;
+      const fg = parseColor(entry.color);
+      const bg = parseColor(entry.background);
+      if (!fg || !bg) continue;
+      const ratio = contrastRatio(fg, bg);
+      if (ratio >= 4.5) continue;
+      flagged++;
+      const selector = key.split('::')[1];
+      findings.push({
+        type: 'issue',
+        category: 'accessibility',
+        title: `Possible low-contrast text on ${selector}`,
+        details: `The literal colors ${entry.color} on ${entry.background} measure a ${ratio.toFixed(2)}:1 contrast ratio, below the WCAG 4.5:1 guideline for body text. Advisory heuristic: inheritance, gradients, CSS variables and opacity are not modeled.`,
+        evidence: [
+          {
+            category: 'css_ast',
+            file: entry.path,
+            selector,
+            property: 'color',
+            value: entry.color,
+            description: `Text color ${entry.color} on background ${entry.background} measures ${ratio.toFixed(2)}:1`,
+            verified: true
+          }
+        ]
+      });
+      recommendations.push({
+        id: `contrast-${flagged}`,
+        category: 'accessibility',
+        priority: ratio < 3 ? 'high' : 'medium',
+        title: `Raise text contrast on ${selector}`,
+        description: `Darken the text color or lighten the background for ${selector} toward the 4.5:1 guideline.`,
+        rationale: `Measured ${ratio.toFixed(2)}:1 between the literal colors ${entry.color} and ${entry.background}.`,
+        tradeOffs: 'Brand palette constraints may justify exceptions for large or decorative text.',
+        targetFile: entry.path,
+        evidence: []
+      });
+    }
   }
 
   private analyzeConsistency(

@@ -278,3 +278,51 @@ test('sfc index: vue template offsets and style blocks', () => {
     '.a { color: red; }'
   );
 });
+
+test('angular: template element restores via templateUrl, paired styleUrls roll back owned rules', async () => {
+  const { root, store, capture, edit, blob } = await setup('angular');
+  try {
+    const old = await capture();
+    await edit(
+      'src/app/app.component.html',
+      '<h1 data-testid="title">Hola</h1>',
+      '<h1 data-testid="title">Hello</h1>'
+    );
+    await edit('src/app/app.component.css', 'color: gray;', 'color: purple;');
+    const now = await capture();
+    const { candidate, notes } = await frameworkElementCandidate(store, old, now, {
+      tag: 'section',
+      text: 'Hola Go'
+    });
+    const html = await blob(candidate, 'src/app/app.component.html');
+    expect(html).toContain('<h1 data-testid="title">Hola</h1>'); // template restored
+    expect(html).toContain('*ngFor'); // untouched parts of the template stay current
+    const css = await blob(candidate, 'src/app/app.component.css');
+    expect(css).toContain('color: gray;'); // owned styleUrls rule rolled back
+    expect(css).toContain('text-decoration: none;'); // unrelated rules stay current
+    expect(notes.some((n) => n.includes('Angular component template'))).toBe(true);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('angular: static HTML documents never enter template indexing', async () => {
+  const { root, store, capture, edit } = await setup('angular');
+  try {
+    await fs.writeFile(
+      path.join(root, 'project', 'index.html'),
+      '<html><body><p data-testid="static-p">Static</p></body></html>'
+    );
+    const old = await capture();
+    await edit('index.html', 'Static', 'Changed');
+    const now = await capture();
+    // The static document must not be claimed by the Angular template path:
+    // picking its element restores through the exact document path instead,
+    // so frameworkElementCandidate must not match it as a template.
+    await expect(
+      frameworkElementCandidate(store, old, now, { testId: 'static-p' })
+    ).rejects.toThrow();
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
