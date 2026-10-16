@@ -1,0 +1,14 @@
+footer {
+  display: flex;
+  justify-content: space-between;
+  padding: 16px 24px;
+  background: #0f172a;
+  color: #94a3b8;
+  font-size: 12px;
+}
+footer .copyright {
+  margin: 0;
+}
+footer .version {
+  color: #64748b;
+}

@@ -1,9 +1,58 @@
 import { parse } from 'parse5';
 import type { Checkpoint } from '../bridge/timeline';
 import { HistoryStore, safePath } from '../store/store';
-// Conservative prototype: a single standalone navbar document and its unique stylesheet.
+
+export const SECTION_TAGS = new Set([
+  'nav',
+  'footer',
+  'header',
+  'section',
+  'aside',
+  'article'
+]);
+
+export const APPROVED_TAGS = new Set([
+  'html',
+  'head',
+  'body',
+  'meta',
+  'title',
+  'link',
+  'nav',
+  'footer',
+  'header',
+  'section',
+  'aside',
+  'article',
+  'main',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'p',
+  'img',
+  'div',
+  'figure',
+  'figcaption',
+  'blockquote',
+  'time',
+  'address',
+  'ol',
+  'ul',
+  'li',
+  'a',
+  'span',
+  'strong',
+  'em',
+  'small',
+  'button'
+]);
+
+// Conservative prototype: a single standalone semantic section document and its unique stylesheet.
 // Embedded regions, scripts, shared selectors, external styles and framework components are refused.
-export async function staticNavbarPaths(
+export async function staticSectionPaths(
   store: HistoryStore,
   checkpoint: Checkpoint,
   document: string
@@ -26,45 +75,29 @@ export async function staticNavbarPaths(
   }
   visit(tree);
   const nodes = found.filter((n) => n.tagName);
-  const nav = nodes.filter((n) => n.tagName === 'nav');
-  const approved = new Set([
-    'html',
-    'head',
-    'body',
-    'meta',
-    'title',
-    'link',
-    'nav',
-    'a',
-    'span',
-    'ul',
-    'li',
-    'strong',
-    'em',
-    'small',
-    'button'
-  ]);
   if (
     nodes.some(
       (n) =>
-        !approved.has(n.tagName!) ||
+        !APPROVED_TAGS.has(n.tagName!) ||
         n.attrs?.some((a) => a.name.startsWith('on') || a.name === 'style')
     )
   )
     throw new Error('Ambiguous static ownership blocked.');
+  const sections = nodes.filter((n) => SECTION_TAGS.has(n.tagName!));
+  if (
+    sections.length !== 1 ||
+    nodes.some((n) => ['script', 'iframe', 'style'].includes(n.tagName!))
+  )
+    throw new Error('Ambiguous element ownership. Use exact files.');
+  const rootTag = sections[0].tagName!;
   const body = nodes.find((n) => n.tagName === 'body');
   if (
     body?.childNodes?.some((node) => {
       const n = node as (typeof found)[number];
-      return !!n.tagName && !['nav', 'link'].includes(n.tagName);
+      return !!n.tagName && n.tagName !== rootTag && n.tagName !== 'link';
     })
   )
     throw new Error('Embedded element ownership blocked.');
-  if (
-    nav.length !== 1 ||
-    nodes.some((n) => ['footer', 'main', 'script', 'iframe', 'style'].includes(n.tagName!))
-  )
-    throw new Error('Ambiguous element ownership. Use exact files.');
   const links = nodes.filter((n) => n.tagName === 'link');
   if (links.length > 1) throw new Error('Shared styles blocked.');
   const paths = [document];
@@ -94,13 +127,22 @@ export async function staticNavbarPaths(
     }
     const text = (await store.readBlob(css.hash)).toString();
     if (/@|url\(|:root|\*|\\/i.test(text)) throw new Error('Ambiguous CSS blocked.');
+    const selectorRegex = new RegExp(`^${rootTag}(?:\\s+\\.[a-zA-Z][\\w-]*)?$`);
     for (const rule of text.split('}').filter((r) => r.trim())) {
       if (rule.split('{').length !== 2) throw new Error('Invalid CSS blocked.');
       const selector = rule.split('{')[0].trim();
-      if (!/^nav(?:\s+\.[a-zA-Z][\w-]*)?$/.test(selector))
+      if (!selectorRegex.test(selector))
         throw new Error('Shared CSS selector blocked.');
     }
     paths.push(cssPath);
   }
   return paths;
+}
+
+export async function staticNavbarPaths(
+  store: HistoryStore,
+  checkpoint: Checkpoint,
+  document: string
+) {
+  return staticSectionPaths(store, checkpoint, document);
 }

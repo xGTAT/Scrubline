@@ -6,7 +6,8 @@ import { HistoryStore } from '../../src/store/store';
 import { scan, defaultLimits } from '../../src/capture/scanner';
 import { Alternatives, mergeFiles } from '../../src/branches/alternatives';
 import { Restore } from '../../src/review/restore';
-import { staticNavbarPaths } from '../../src/branches/static-mapping';
+import { staticNavbarPaths, staticSectionPaths } from '../../src/branches/static-mapping';
+import { resolveElementFiles, mergeMultiElements } from '../../src/branches/multi-merge';
 import { validateCandidate } from '../../src/branches/validate';
 async function fixture() {
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'scrubline-branches-'));
@@ -164,6 +165,283 @@ test('unique static navbar CSS allowed; mixed document and framework mapping ref
     await fs.rm(f.temp, { recursive: true, force: true });
   }
 });
+
+test('staticSectionPaths supports any standalone semantic section and rejects mixed or script content', async () => {
+  const f = await fixture();
+  try {
+    // 1. Standalone footer with unique CSS
+    await fs.writeFile(
+      path.join(f.root, 'footer.html'),
+      '<link rel="stylesheet" href="footer.css"><footer><small class="copy">Scrubline</small></footer>'
+    );
+    await fs.writeFile(
+      path.join(f.root, 'footer.css'),
+      'footer{background:#000}footer .copy{color:#fff}'
+    );
+    let s = await scan(f.root, f.store.root);
+    let cp = await f.store.commit(s.files, s.contents, 'save-footer', { kind: 'unattributed' });
+    expect(await staticSectionPaths(f.store, cp, 'footer.html')).toEqual([
+      'footer.html',
+      'footer.css'
+    ]);
+
+    // 2. Standalone section with heading + paragraph
+    await fs.writeFile(
+      path.join(f.root, 'hero.html'),
+      '<section><h1>Hero Heading</h1><p>Description text</p></section>'
+    );
+    s = await scan(f.root, f.store.root);
+    cp = await f.store.commit(s.files, s.contents, 'save-section', { kind: 'unattributed' });
+    expect(await staticSectionPaths(f.store, cp, 'hero.html')).toEqual(['hero.html']);
+
+    // 3. Standalone aside with navigation
+    await fs.writeFile(
+      path.join(f.root, 'sidebar.html'),
+      '<aside><ul><li><a href="#link">Item</a></li></ul></aside>'
+    );
+    s = await scan(f.root, f.store.root);
+    cp = await f.store.commit(s.files, s.contents, 'save-aside', { kind: 'unattributed' });
+    expect(await staticSectionPaths(f.store, cp, 'sidebar.html')).toEqual(['sidebar.html']);
+
+    // 4. Mixed document with both nav and footer rejected (ambiguous ownership)
+    await fs.writeFile(
+      path.join(f.root, 'mixed.html'),
+      '<nav><a href="/">Home</a></nav><footer>Copyright</footer>'
+    );
+    s = await scan(f.root, f.store.root);
+    cp = await f.store.commit(s.files, s.contents, 'save-mixed', { kind: 'unattributed' });
+    await expect(staticSectionPaths(f.store, cp, 'mixed.html')).rejects.toThrow(
+      'Ambiguous element ownership'
+    );
+
+    // 5. Section with inline script rejected
+    await fs.writeFile(
+      path.join(f.root, 'scripted.html'),
+      '<section><script>console.log("bad")</script></section>'
+    );
+    s = await scan(f.root, f.store.root);
+    cp = await f.store.commit(s.files, s.contents, 'save-scripted', { kind: 'unattributed' });
+    await expect(staticSectionPaths(f.store, cp, 'scripted.html')).rejects.toThrow('ownership');
+
+    // 6. CSS selector mismatch (nav selector in footer stylesheet) rejected
+    await fs.writeFile(
+      path.join(f.root, 'mismatch.html'),
+      '<link rel="stylesheet" href="mismatch.css"><footer>Bad CSS</footer>'
+    );
+    await fs.writeFile(path.join(f.root, 'mismatch.css'), 'nav{color:red}');
+    s = await scan(f.root, f.store.root);
+    cp = await f.store.commit(s.files, s.contents, 'save-mismatch', { kind: 'unattributed' });
+    await expect(staticSectionPaths(f.store, cp, 'mismatch.html')).rejects.toThrow(
+      'Shared CSS selector blocked'
+    );
+  } finally {
+    await fs.rm(f.temp, { recursive: true, force: true });
+  }
+});
+
+test('multi-element cherry-pick applies two independent elements (nav + footer) from different branches with Undo', async () => {
+  const { applySelective } = await import('../../src/branches/apply');
+  const f = await fixture();
+  try {
+    // Initial workspace: navbar.html, footer.html, index.html
+    await fs.writeFile(path.join(f.root, 'navbar.html'), '<nav>Base Nav</nav>');
+    await fs.writeFile(path.join(f.root, 'footer.html'), '<footer>Base Footer</footer>');
+    await fs.writeFile(path.join(f.root, 'index.html'), '<main><h1>Base Main</h1></main>');
+    let s = await scan(f.root, f.store.root);
+    const base = await f.store.commit(s.files, s.contents, 'baseline', { kind: 'unattributed' });
+
+    // Branch 1: update navbar.html and add navbar.css
+    const b1 = await f.alternatives.fork(base, 'Nav-Branch');
+    await fs.writeFile(
+      path.join(b1.directory, 'navbar.html'),
+      '<link rel="stylesheet" href="navbar.css"><nav><span class="brand">Branch 1 Nav</span></nav>'
+    );
+    await fs.writeFile(
+      path.join(b1.directory, 'navbar.css'),
+      'nav{display:flex}nav .brand{font-weight:bold}'
+    );
+    const selected1 = await f.alternatives.capture(b1.id);
+
+    // Branch 2: update footer.html and add footer.css
+    const b2 = await f.alternatives.fork(base, 'Footer-Branch');
+    await fs.writeFile(
+      path.join(b2.directory, 'footer.html'),
+      '<link rel="stylesheet" href="footer.css"><footer><small class="meta">Branch 2 Footer</small></footer>'
+    );
+    await fs.writeFile(
+      path.join(b2.directory, 'footer.css'),
+      'footer{padding:10px}footer .meta{color:#666}'
+    );
+    const selected2 = await f.alternatives.capture(b2.id);
+
+    // Workspace concurrently edits index.html (unrelated file)
+    await fs.writeFile(
+      path.join(f.root, 'index.html'),
+      '<main><h1>Workspace Edited Main</h1></main>'
+    );
+    s = await scan(f.root, f.store.root);
+    const current = await f.store.commit(s.files, s.contents, 'workspace-edit', {
+      kind: 'unattributed'
+    });
+
+    // 1. Resolve files for both selections
+    const selections = [
+      { checkpoint: selected1, base, document: 'navbar.html', selector: 'nav' },
+      { checkpoint: selected2, base, document: 'footer.html', selector: 'footer' }
+    ];
+    const resolved = await resolveElementFiles(f.store, selections);
+    expect(resolved).toHaveLength(2);
+    expect(resolved[0].paths).toEqual(['navbar.html', 'navbar.css']);
+    expect(resolved[1].paths).toEqual(['footer.html', 'footer.css']);
+
+    // 2. Multi-element merge
+    const items = resolved.map((r) => ({
+      base: r.selection.base,
+      selected: r.selection.checkpoint,
+      paths: r.paths,
+      selector: r.selection.selector
+    }));
+    const merged = mergeMultiElements(current, items);
+    expect(merged.conflicts).toEqual([]);
+    expect(merged.elements).toHaveLength(2);
+
+    // 3. Review and apply selective
+    const restore = new Restore(f.root, f.store, defaultLimits);
+    const r = await restore.review(merged.target, current, false);
+    expect(r.paths.sort()).toEqual(['footer.css', 'footer.html', 'navbar.css', 'navbar.html']);
+    await applySelective(restore, merged.target, r.token, false, 'node -e "process.exit(0)"');
+
+    // 4. Assert workspace state: navbar & footer updated, index.html preserved!
+    expect(await fs.readFile(path.join(f.root, 'navbar.html'), 'utf8')).toContain(
+      'Branch 1 Nav'
+    );
+    expect(await fs.readFile(path.join(f.root, 'navbar.css'), 'utf8')).toBe(
+      'nav{display:flex}nav .brand{font-weight:bold}'
+    );
+    expect(await fs.readFile(path.join(f.root, 'footer.html'), 'utf8')).toContain(
+      'Branch 2 Footer'
+    );
+    expect(await fs.readFile(path.join(f.root, 'footer.css'), 'utf8')).toBe(
+      'footer{padding:10px}footer .meta{color:#666}'
+    );
+    expect(await fs.readFile(path.join(f.root, 'index.html'), 'utf8')).toBe(
+      '<main><h1>Workspace Edited Main</h1></main>'
+    );
+
+    // 5. Undo restores all files
+    await restore.undo(f.store.checkpoints.at(-1)!, false);
+    expect(await fs.readFile(path.join(f.root, 'navbar.html'), 'utf8')).toBe(
+      '<nav>Base Nav</nav>'
+    );
+    expect(await fs.readFile(path.join(f.root, 'footer.html'), 'utf8')).toBe(
+      '<footer>Base Footer</footer>'
+    );
+    expect(await fs.readFile(path.join(f.root, 'index.html'), 'utf8')).toBe(
+      '<main><h1>Workspace Edited Main</h1></main>'
+    );
+  } finally {
+    await fs.rm(f.temp, { recursive: true, force: true });
+  }
+});
+
+test('overlapping file ownership across selections is rejected', async () => {
+  const f = await fixture();
+  try {
+    const selections = [
+      { checkpoint: f.base, base: f.base, document: 'navbar.html', selector: 'nav' },
+      { checkpoint: f.base, base: f.base, document: 'navbar.html', selector: 'nav' }
+    ];
+    await expect(resolveElementFiles(f.store, selections)).rejects.toThrow(
+      'Overlapping file ownership blocked'
+    );
+  } finally {
+    await fs.rm(f.temp, { recursive: true, force: true });
+  }
+});
+
+test('one element fails static ownership -> entire multi-element batch rejected', async () => {
+  const f = await fixture();
+  try {
+    await fs.writeFile(
+      path.join(f.root, 'bad.html'),
+      '<section><script>alert("exploit")</script></section>'
+    );
+    const s = await scan(f.root, f.store.root);
+    const cp = await f.store.commit(s.files, s.contents, 'save-bad', { kind: 'unattributed' });
+    const selections = [
+      { checkpoint: cp, base: f.base, document: 'navbar.html', selector: 'nav' },
+      { checkpoint: cp, base: f.base, document: 'bad.html', selector: 'section' }
+    ];
+    await expect(resolveElementFiles(f.store, selections)).rejects.toThrow('ownership');
+  } finally {
+    await fs.rm(f.temp, { recursive: true, force: true });
+  }
+});
+
+test('three-way conflict on any element blocks multi-element merge', async () => {
+  const f = await fixture();
+  try {
+    const b1 = await f.alternatives.fork(f.base, 'Nav');
+    await fs.writeFile(path.join(b1.directory, 'navbar.html'), '<nav>Branch Nav</nav>');
+    const selected1 = await f.alternatives.capture(b1.id);
+
+    const b2 = await f.alternatives.fork(f.base, 'Footer');
+    await fs.writeFile(path.join(b2.directory, 'footer.html'), '<footer>Branch Footer</footer>');
+    const selected2 = await f.alternatives.capture(b2.id);
+
+    // Workspace concurrently edits navbar.html (conflict with Branch 1)
+    await fs.writeFile(path.join(f.root, 'navbar.html'), '<nav>Workspace Conflict Nav</nav>');
+    const s = await scan(f.root, f.store.root);
+    const current = await f.store.commit(s.files, s.contents, 'conflict', { kind: 'unattributed' });
+
+    const items = [
+      { base: f.base, selected: selected1, paths: ['navbar.html'], selector: 'nav' },
+      { base: f.base, selected: selected2, paths: ['footer.html'], selector: 'footer' }
+    ];
+    const merged = mergeMultiElements(current, items);
+    expect(merged.conflicts).toEqual(['navbar.html']);
+  } finally {
+    await fs.rm(f.temp, { recursive: true, force: true });
+  }
+});
+
+test('build/test failure on combined multi-element candidate triggers full rollback', async () => {
+  const { applySelective } = await import('../../src/branches/apply');
+  const f = await fixture();
+  try {
+    const b1 = await f.alternatives.fork(f.base, 'Nav');
+    await fs.writeFile(path.join(b1.directory, 'navbar.html'), '<nav>New Nav</nav>');
+    const selected1 = await f.alternatives.capture(b1.id);
+
+    const b2 = await f.alternatives.fork(f.base, 'Footer');
+    await fs.writeFile(path.join(b2.directory, 'footer.html'), '<footer>New Footer</footer>');
+    const selected2 = await f.alternatives.capture(b2.id);
+
+    const items = [
+      { base: f.base, selected: selected1, paths: ['navbar.html'], selector: 'nav' },
+      { base: f.base, selected: selected2, paths: ['footer.html'], selector: 'footer' }
+    ];
+    const merged = mergeMultiElements(f.base, items);
+    expect(merged.conflicts).toEqual([]);
+
+    const restore = new Restore(f.root, f.store, defaultLimits);
+    const r = await restore.review(merged.target, f.base, false);
+
+    // Failing build/test gate
+    await expect(
+      applySelective(restore, merged.target, r.token, false, 'node -e "process.exit(1)"')
+    ).rejects.toThrow('failed');
+
+    // Both files remain untouched in workspace
+    expect(await fs.readFile(path.join(f.root, 'navbar.html'), 'utf8')).toBe('<nav>Old</nav>');
+    expect(await fs.readFile(path.join(f.root, 'footer.html'), 'utf8')).toBe(
+      '<footer>Original</footer>'
+    );
+  } finally {
+    await fs.rm(f.temp, { recursive: true, force: true });
+  }
+});
+
 test('selective build/test pass, failure before writes, post-failure rollback and late drift', async () => {
   const { applySelective } = await import('../../src/branches/apply');
   const f = await fixture();

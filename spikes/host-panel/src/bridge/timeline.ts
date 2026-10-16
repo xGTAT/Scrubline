@@ -58,6 +58,7 @@ export interface TimelineState {
     paths: string[];
     conflicts: string[];
     note?: string;
+    elements?: { selector?: string; paths: string[] }[];
   };
   measuredPacket?: import('../targeting/measured').MeasuredPacket;
   rollback?: { message: string; changes?: import('../investigation/change-units').CssUnit[] };
@@ -74,6 +75,8 @@ export interface TimelineState {
     packet?: string;
     crop?: string;
     summary?: string;
+    selection?: import('../targeting/packet').Selection;
+    selections?: import('../targeting/packet').Selection[];
   };
   chatbot?: import('../chatbot/types').ChatbotState;
   verificationReport?: import('../verification/types').VerificationReport;
@@ -102,7 +105,18 @@ export type TimelineInbound =
   | { type: 'pick-element'; id: string }
   | { type: 'review-element'; id: string; document: string; element: string }
   | { type: 'review-navbar'; id: string; document: string }
+  | { type: 'review-section'; id: string; document: string }
   | { type: 'review-selective'; id: string; paths: string[] }
+  | {
+      type: 'review-multi-element';
+      selections: {
+        checkpointId: string;
+        document: string;
+        selector?: string;
+        fingerprint?: string;
+      }[];
+    }
+  | { type: 'clear-target-selections' }
   | { type: 'start-targeting' }
   | { type: 'stop-targeting' }
   | { type: 'copy-packet' }

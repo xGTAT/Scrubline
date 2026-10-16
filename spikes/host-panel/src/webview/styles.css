@@ -1089,3 +1089,20 @@ html {
   color: #ff007f;
   text-align: center;
 }
+
+.target-selections {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--vscode-widget-border, #333);
+  border-radius: 4px;
+}
+.target-selections label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+

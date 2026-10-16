@@ -38,7 +38,12 @@ import { scopedStore } from './store/identity';
 import { Alternatives, mainlineBase, mergeFiles } from './branches/alternatives';
 import { changedPaths } from './capture/scanner';
 import { applySelective } from './branches/apply';
-import { staticNavbarPaths } from './branches/static-mapping';
+import { staticNavbarPaths, staticSectionPaths } from './branches/static-mapping';
+import {
+  resolveElementFiles,
+  mergeMultiElements,
+  type ElementSelection
+} from './branches/multi-merge';
 import { McpBridge } from './mcp/bridge';
 import { redact } from './targeting/redact';
 import { TargetSession } from './targeting/session';
@@ -1372,22 +1377,25 @@ export async function activate(context: vscode.ExtensionContext) {
           return;
         }
         if (
-          (message.type === 'review-selective' || message.type === 'review-navbar') &&
+          (message.type === 'review-selective' ||
+            message.type === 'review-navbar' ||
+            message.type === 'review-section') &&
           target &&
           alternatives
         ) {
-          let document = message.type === 'review-navbar' ? message.document : '';
-          if (message.type === 'review-navbar' && !document) {
+          const isSection = message.type === 'review-navbar' || message.type === 'review-section';
+          let document = isSection ? message.document : '';
+          if (isSection && !document) {
             const picked = await vscode.window.showQuickPick(
               target.files.filter((f) => f.path.endsWith('.html')).map((f) => f.path),
-              { placeHolder: 'Standalone navbar document' }
+              { placeHolder: 'Standalone section document' }
             );
             if (!picked) return;
             document = picked;
           }
           let paths =
-            message.type === 'review-navbar'
-              ? await staticNavbarPaths(timeline.store, target, document)
+            isSection
+              ? await staticSectionPaths(timeline.store, target, document)
               : message.paths;
           if (message.type === 'review-selective' && !paths.length) {
             const base = alternatives.base(target);
@@ -1400,9 +1408,9 @@ export async function activate(context: vscode.ExtensionContext) {
             paths = picked;
           }
           const current = timeline.store.checkpoints.filter((c) => !c.branch).at(-1)!;
-          if (message.type === 'review-navbar') {
-            await staticNavbarPaths(timeline.store, alternatives.base(target), document);
-            await staticNavbarPaths(timeline.store, current, document);
+          if (isSection) {
+            await staticSectionPaths(timeline.store, alternatives.base(target), document);
+            await staticSectionPaths(timeline.store, current, document);
           }
           review = undefined;
           selectiveTarget = undefined;
@@ -1414,6 +1422,64 @@ export async function activate(context: vscode.ExtensionContext) {
             restore!.review(selectiveTarget!, current, state.unsaved)
           );
           publish(state);
+        }
+        if (message.type === 'review-multi-element' && alternatives) {
+          if (!message.selections || message.selections.length === 0) {
+            throw new Error('No elements selected.');
+          }
+          const current = timeline.store.checkpoints.filter((c) => !c.branch).at(-1)!;
+          const elementSelections: ElementSelection[] = [];
+          for (const s of message.selections) {
+            const targetCp = timeline.store.checkpoints.find((c) => c.id === s.checkpointId);
+            if (!targetCp) throw new Error(`Checkpoint ${s.checkpointId} not found.`);
+            const baseCp = alternatives.base(targetCp);
+            elementSelections.push({
+              checkpoint: targetCp,
+              base: baseCp,
+              document: s.document,
+              selector: s.selector,
+              fingerprint: s.fingerprint
+            });
+          }
+
+          const resolved = await resolveElementFiles(timeline.store, elementSelections);
+
+          for (const sel of elementSelections) {
+            await staticSectionPaths(timeline.store, sel.base, sel.document);
+            await staticSectionPaths(timeline.store, current, sel.document);
+          }
+
+          const multiItems = resolved.map((r) => ({
+            base: r.selection.base,
+            selected: r.selection.checkpoint,
+            paths: r.paths,
+            selector: r.selection.selector
+          }));
+          const merged = mergeMultiElements(current, multiItems);
+          if (merged.conflicts.length) {
+            throw new Error(
+              `Both sides changed in ${merged.conflicts.join(', ')}. Multi-element apply blocked.`
+            );
+          }
+
+          review = undefined;
+          selectiveTarget = merged.target;
+          const rev = await timeline.exclusive(() =>
+            restore!.review(selectiveTarget!, current, state.unsaved)
+          );
+          review = {
+            ...rev,
+            elements: merged.elements
+          };
+          publish(state);
+        }
+        if (message.type === 'clear-target-selections') {
+          await targetSession?.clear();
+          if (targeting) {
+            targeting.selections = [];
+            targeting.selection = undefined;
+            publish(state);
+          }
         }
         if (message.type === 'start-targeting') {
           if (!preview?.url || !preview.checkpoint)
@@ -1428,13 +1494,15 @@ export async function activate(context: vscode.ExtensionContext) {
           targetSession = new TargetSession(
             executable,
             timeline.store.root,
-            (selection, crop) => {
+            (selection, crop, all) => {
               const packet = makePacket(cp, previous, selection, redactions);
               targeting = {
                 status: 'ready',
                 packet: packet.body,
                 summary: packet.summary,
-                crop: crop ? view.asWebviewUri(vscode.Uri.file(crop)).toString() : undefined
+                crop: crop ? view.asWebviewUri(vscode.Uri.file(crop)).toString() : undefined,
+                selection,
+                selections: all ?? (selection ? [selection] : [])
               };
               publish(state);
             },
