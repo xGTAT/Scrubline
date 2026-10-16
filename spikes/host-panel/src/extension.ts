@@ -159,6 +159,15 @@ export async function activate(context: vscode.ExtensionContext) {
   let verificationReport: TimelineState['verificationReport'];
   let selectiveMeta: { targetSelector?: string; documentPath?: string } | undefined;
   let comparison: TimelineState['comparison'];
+  const branchPreviews = new Map<
+    string,
+    { checkpoint: string; renderKey: string; image?: string; message?: string }
+  >();
+  let previewingBranches = false;
+  /** Opening the Alternatives menu lazily renders at most this many alternative
+   * webpages, sequentially, through the same isolated preview path as scrubbing.
+   * Beyond the cap no preview command is executed. */
+  const MAX_BRANCH_PREVIEWS = 8;
   let backend: TimelineState['backend'];
   const backendCache = new Map<string, TimelineState['backend']>();
   let mcpBridge: McpBridge | undefined;
@@ -191,6 +200,17 @@ export async function activate(context: vscode.ExtensionContext) {
       lockDrift = touched.length
         ? touched.map((l) => ({ selector: l.selector, document: l.document, label: l.label }))
         : undefined;
+    }
+    const branchList = alternatives?.list();
+    const branchRenderKey = runner ? specificationKey(runner.config) : undefined;
+    for (const [id, entry] of branchPreviews) {
+      const branch = branchList?.find((b) => b.id === id);
+      if (
+        !branch ||
+        branch.checkpoint !== entry.checkpoint ||
+        (branchRenderKey !== undefined && entry.renderKey !== branchRenderKey)
+      )
+        branchPreviews.delete(id);
     }
     state = {
       ...next,
@@ -235,8 +255,9 @@ export async function activate(context: vscode.ExtensionContext) {
       selection,
       canUndo,
       targeting,
-      branches: alternatives?.list(),
+      branches: branchList,
       comparison,
+      branchPreviews: Object.fromEntries(branchPreviews),
       backend,
       pages,
       activePage,
@@ -649,6 +670,68 @@ export async function activate(context: vscode.ExtensionContext) {
       };
       publish(state);
     });
+  };
+  /** Renders each alternative's head checkpoint into a per-branch webpage preview
+   * for the Alternatives menu. Sequential, on demand; branches whose stored
+   * preview already matches their head are skipped. */
+  const renderBranchPreviews = async (view: vscode.Webview) => {
+    if (!alternatives || !runner || previewingBranches) return;
+    previewingBranches = true;
+    const renderKey = specificationKey(runner.config);
+    const previewRunner = new PreviewRunner(
+      { ...runner.config, port: runner.config.port + 8 },
+      timeline!.store,
+      undefined,
+      (line) => diagnostics.appendLine(line)
+    );
+    try {
+      let rendered = 0;
+      for (const branch of alternatives.list()) {
+        if (branchPreviews.get(branch.id)?.checkpoint === branch.checkpoint) continue;
+        const head = timeline!.store.checkpoints.find((c) => c.id === branch.checkpoint);
+        if (!head) continue;
+        if (rendered >= MAX_BRANCH_PREVIEWS) {
+          branchPreviews.set(branch.id, {
+            checkpoint: branch.checkpoint,
+            renderKey,
+            message: 'Preview not rendered (limit reached).'
+          });
+          continue;
+        }
+        rendered += 1;
+        try {
+          const result = await previewRunner.historical(head, true);
+          // The branch head may have moved while this render was in flight;
+          // never bind an image produced for the old head.
+          const now = alternatives.list().find((b) => b.id === branch.id);
+          if (!now || now.checkpoint !== branch.checkpoint) continue;
+          // Only a fresh render of this exact head and render specification may be
+          // shown; preserved-evidence fallbacks and failures are marked, never imaged.
+          const fresh = result.screenshot && !result.error ? result.screenshot : undefined;
+          branchPreviews.set(branch.id, {
+            checkpoint: branch.checkpoint,
+            renderKey,
+            image: fresh ? view.asWebviewUri(vscode.Uri.file(fresh)).toString() : undefined,
+            message: fresh ? undefined : 'Preview unavailable.'
+          });
+        } catch (error) {
+          branchPreviews.set(branch.id, {
+            checkpoint: branch.checkpoint,
+            renderKey,
+            message: 'Preview unavailable.'
+          });
+          diagnostics.appendLine(
+            `[branch ${branch.id}] Preview failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+        }
+        publish(state);
+      }
+    } finally {
+      await previewRunner.stop();
+      previewingBranches = false;
+    }
   };
   const attach = (view: vscode.Webview, fullscreen = false) => {
     views.add(view);
@@ -1508,6 +1591,9 @@ export async function activate(context: vscode.ExtensionContext) {
             await a.stop();
             await b.stop();
           }
+        }
+        if (message.type === 'preview-branches') {
+          void renderBranchPreviews(view);
         }
         if (message.type === 'pick-element' && target) {
           if (!runner || !vscode.workspace.isTrusted) throw new Error('Trusted preview required.');
@@ -2409,6 +2495,10 @@ export async function activate(context: vscode.ExtensionContext) {
         )
       ),
     captureBranch: (id: string) => timeline!.exclusive(() => alternatives!.capture(id)),
+    previewBranches: async () => {
+      const target = [...views][0];
+      if (target) await renderBranchPreviews(target);
+    },
     reviewFiles: (id: string, paths: string[]) =>
       timeline!.exclusive(async () => {
         const target = timeline!.store.checkpoints.find((c) => c.id === id)!;

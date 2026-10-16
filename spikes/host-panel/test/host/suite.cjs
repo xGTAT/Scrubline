@@ -90,6 +90,37 @@ exports.run = async () => {
   const selective = await api.reviewFiles(forkCheckpoint.id, ['baseline.txt']);
   assert.equal(selective.review.conflicts.length, 0);
   assert.equal(selective.review.paths.join(','), 'baseline.txt');
+  // Alternatives webpage previews: each branch head renders to its own preview.
+  await vscode.commands.executeCommand('scrubline.openPanel');
+  let branchPreview;
+  const previewDeadline = Date.now() + 60000;
+  do {
+    await api.previewBranches();
+    branchPreview = api.getTimeline().branchPreviews?.[fork.id];
+    if (branchPreview?.image) break;
+    await new Promise((r) => setTimeout(r, 500));
+  } while (Date.now() < previewDeadline);
+  assert.ok(branchPreview, 'branch preview published');
+  assert.equal(branchPreview.checkpoint, forkCheckpoint.id, 'preview bound to branch head');
+  assert.ok(branchPreview.image, 'branch preview screenshot produced');
+  // A capture that moves the branch head invalidates the old preview: the next
+  // render rebinds to the new head instead of serving the stale image.
+  await fs.writeFile(path.join(fork.directory, 'moved.txt'), 'head moved');
+  const movedHead = await api.captureBranch(fork.id);
+  await api.previewBranches();
+  const rebound = api.getTimeline().branchPreviews?.[fork.id];
+  assert.ok(rebound?.image, 'preview re-rendered after head moved');
+  assert.equal(rebound.checkpoint, movedHead.id, 'preview rebound to new branch head');
+  // Sequential lifecycle: the dedicated preview runner releases its port.
+  const settings = JSON.parse(await fs.readFile(path.join(root, '.vscode/settings.json'), 'utf8'));
+  const net = require('node:net');
+  await new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once('error', reject);
+    probe.listen(settings['scrubline.previewPort'] + 8, '127.0.0.1', () =>
+      probe.close(() => resolve())
+    );
+  });
   await vscode.workspace
     .getConfiguration('scrubline', vscode.workspace.workspaceFolders[0].uri)
     .update(

@@ -272,6 +272,7 @@ test('M4 fork list and two alternatives comparison stay usable at narrow width',
           directory: 'test-only'
         }
       ],
+      branchPreviews: { branch: { checkpoint: 'b'.repeat(64), image } },
       comparison: { leftId: 'a', rightId: 'b', left: image, right: image }
     });
   });
@@ -279,16 +280,161 @@ test('M4 fork list and two alternatives comparison stay usable at narrow width',
     40
   );
   await page.getByText('Alternatives (1)').click();
-  await expect(page.getByRole('button', { name: 'Choose files' })).toBeVisible();
-  const bounds = await page.getByRole('button', { name: 'Choose files' }).boundingBox();
-  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(280);
-  await expect(page.getByRole('button', { name: 'Static section', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Pick on page', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Hidden element ID', exact: true })).toBeVisible();
+  for (const removed of ['Static section', 'Capture', 'Compare', 'Inspect', 'Choose files'])
+    await expect(page.getByRole('button', { name: removed, exact: true })).toHaveCount(0);
+  const preview = page.locator('.alternatives-menu .branch-preview');
+  await expect(preview).toBeVisible();
+  const previewBounds = (await preview.boundingBox())!;
+  expect(previewBounds.x + previewBounds.width).toBeLessThanOrEqual(280);
   expect(
     (await new AxeBuilder({ page }).analyze()).violations.filter(
       (v) => v.impact === 'serious' || v.impact === 'critical'
     )
   ).toEqual([]);
   await page.screenshot({ path: `${evidenceDir}/panel_m4_comparison.png`, fullPage: true });
+});
+
+test('alternatives show their own webpage previews and picking targets the right checkpoint', async ({
+  page
+}) => {
+  // Real webpage renders from the local fixture server stand in for the two
+  // alternatives' pages: actual headings/content, not color placeholders.
+  await page.setViewportSize({ width: 800, height: 500 });
+  await page.goto('http://127.0.0.1:4702/');
+  await expect(page.locator('body')).toBeVisible();
+  const wideShot = await page.screenshot();
+  await page.setViewportSize({ width: 480, height: 320 });
+  const compactShot = await page.screenshot();
+  const one = 'data:image/png;base64,' + wideShot.toString('base64');
+  const two = 'data:image/png;base64,' + compactShot.toString('base64');
+  expect(one).not.toEqual(two);
+
+  await page.goto('/');
+  await expect(page.getByText('No checkpoints yet')).toBeVisible();
+  const posted = () =>
+    page.evaluate(
+      () =>
+        (window as unknown as { __postedMessages: { type: string; id?: string }[] })
+          .__postedMessages
+    );
+  const state = (branchPreviews?: unknown) => {
+    (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
+      status: 'ready',
+      unsaved: false,
+      rows: [
+        {
+          id: 'a'.repeat(64),
+          createdAt: '2026-10-05T15:00:00Z',
+          changedPaths: ['index.html'],
+          attribution: { kind: 'unattributed' }
+        }
+      ],
+      branches: [
+        {
+          id: 'branch-one',
+          name: 'Calm',
+          base: 'a'.repeat(64),
+          checkpoint: 'c'.repeat(64),
+          directory: 'one'
+        },
+        {
+          id: 'branch-two',
+          name: 'Bold',
+          base: 'a'.repeat(64),
+          checkpoint: 'd'.repeat(64),
+          directory: 'two'
+        }
+      ],
+      branchPreviews
+    });
+  };
+  await page.evaluate(state, undefined);
+  await page.getByText('Alternatives (2)', { exact: true }).click();
+  // No previews yet: the webview asks the extension to render them.
+  await page.waitForFunction(() =>
+    (window as unknown as { __postedMessages: { type: string }[] }).__postedMessages?.some(
+      (m) => m.type === 'preview-branches'
+    )
+  );
+  await expect(page.locator('.branch-preview-pending').first()).toBeVisible();
+  // Previews arrive: each alternative shows only its own webpage.
+  await page.evaluate(
+    ({ one, two }) => {
+      (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
+        status: 'ready',
+        unsaved: false,
+        rows: [
+          {
+            id: 'a'.repeat(64),
+            createdAt: '2026-10-05T15:00:00Z',
+            changedPaths: ['index.html'],
+            attribution: { kind: 'unattributed' }
+          }
+        ],
+        branches: [
+          {
+            id: 'branch-one',
+            name: 'Calm',
+            base: 'a'.repeat(64),
+            checkpoint: 'c'.repeat(64),
+            directory: 'one'
+          },
+          {
+            id: 'branch-two',
+            name: 'Bold',
+            base: 'a'.repeat(64),
+            checkpoint: 'd'.repeat(64),
+            directory: 'two'
+          }
+        ],
+        branchPreviews: {
+          'branch-one': { checkpoint: 'c'.repeat(64), image: one },
+          'branch-two': { checkpoint: 'd'.repeat(64), image: two }
+        }
+      });
+    },
+    { one, two }
+  );
+  const cards = page.locator('.alternatives-menu li');
+  await expect(cards).toHaveCount(2);
+  const srcOne = await cards.nth(0).locator('.branch-preview').getAttribute('src');
+  const srcTwo = await cards.nth(1).locator('.branch-preview').getAttribute('src');
+  expect(srcOne).toEqual(one);
+  expect(srcTwo).toEqual(two);
+  // Both previews decode to real images with webpage content dimensions.
+  for (const locator of [
+    cards.nth(0).locator('.branch-preview'),
+    cards.nth(1).locator('.branch-preview')
+  ])
+    expect(await locator.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+  // Each card's action targets its own branch head checkpoint.
+  await cards.nth(0).getByRole('button', { name: 'Pick on page' }).click();
+  await cards.nth(1).getByRole('button', { name: 'Hidden element ID' }).click();
+  const messages = await posted();
+  expect(messages.some((m) => m.type === 'pick-element' && m.id === 'c'.repeat(64))).toBe(true);
+  expect(messages.some((m) => m.type === 'review-element' && m.id === 'd'.repeat(64))).toBe(true);
+  // Evidence at a natural scrolled position: cards unobscured by the sticky
+  // scrub bar (viewport shots, not fullPage, so sticky cannot double-render).
+  await page.setViewportSize({ width: 800, height: 740 });
+  await page.evaluate(() => {
+    const li = document.querySelector('.alternatives-menu li')!;
+    const bar = document.querySelector('.scrub')!.getBoundingClientRect().height;
+    window.scrollTo(0, li.getBoundingClientRect().top + window.scrollY - bar - 8);
+  });
+  const scrubBox = (await page.locator('.scrub').boundingBox())!;
+  const previewBox = (await cards.nth(0).locator('.branch-preview').boundingBox())!;
+  expect(previewBox.y).toBeGreaterThanOrEqual(scrubBox.y + scrubBox.height);
+  await page.screenshot({ path: `${evidenceDir}/alternatives_preview_wide.png` });
+  await page.setViewportSize({ width: 280, height: 740 });
+  await page.evaluate(() => {
+    const li = document.querySelector('.alternatives-menu li')!;
+    const bar = document.querySelector('.scrub')!.getBoundingClientRect().height;
+    window.scrollTo(0, li.getBoundingClientRect().top + window.scrollY - bar - 8);
+  });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: `${evidenceDir}/alternatives_preview_narrow.png` });
 });
 
 for (const theme of ['dark', 'light', 'contrast'] as const) {

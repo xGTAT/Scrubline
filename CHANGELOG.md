@@ -1,5 +1,8 @@
 ## Unreleased
 
+- Alternatives menu: each saved alternative now shows its own webpage preview beneath its name - the alternative render only, not a workspace comparison. Previews render lazily when the menu opens, sequentially through the same isolated historical preview path as scrubbing, capped at 8 per request (scrubline executes the branch's preview command for those renders; no renders happen while the menu stays closed). Each preview is bound to the exact branch head checkpoint and render specification it came from: a capture or preview-setting change marks it stale and it re-renders. Failed or fallback renders are marked "Preview unavailable" instead of showing an old image.
+- Alternative card actions reduced to Pick on page and Hidden element ID. Capture, Compare, Inspect, Choose files and the prototype Static section no longer appear on the card; their underlying handlers and review/drift/Undo gates are unchanged.
+
 - Backend visuals: a new **Backend** tab in the checkpoint panel shows the HTTP requests the page made during rendering (waterfall), API routes found by static source scan, a backend import graph, and a request-count diff against the parent checkpoint.
 - Capture is metadata-only: paths, status, timing and protocol only; bodies, headers, cookies and query values are never stored. Heuristic redaction of token-looking path segments and secret-looking query keys (bounded, not guaranteed - see docs/backend-visuals.md).
 - Observed browser requests are labeled separately from static scan results; neither claims server-side or database causality.
