@@ -179,11 +179,12 @@
           "type": "string",
           "enum": [
             "auto",
+            "ide",
             "agy",
             "deterministic"
           ],
           "default": "auto",
-          "description": "UI Advisor backend. auto: use the Antigravity CLI (agy) with offline heuristics as fallback; agy: Antigravity models only; deterministic: offline heuristics only.",
+          "description": "UI Advisor backend. auto: Antigravity IDE models (vscode.lm) first, agy CLI as fallback, offline heuristics last; ide: IDE models only; agy: agy CLI only; deterministic: offline heuristics only.",
           "scope": "resource"
         },
         "scrubline.agyPath": {

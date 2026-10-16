@@ -4,6 +4,7 @@ import { replaceActivation } from './lifecycle';
 import { ChatbotController } from './chatbot/controller';
 import { DesignAdvisorService, DeterministicAdvisorProvider } from './chatbot/advisor';
 import { AgyCliAdvisorProvider } from './advisor/agy-cli';
+import { AntigravityLmAdvisorProvider, ChainedAdvisorProvider } from './advisor/lm';
 import { LockRegistry } from './locks/registry';
 import { ElementPicker } from './branches/picker';
 import { elementCandidate } from './branches/element';
@@ -506,15 +507,29 @@ export async function activate(context: vscode.ExtensionContext) {
     if (advisorBackend === 'deterministic') {
       advisorService = new DesignAdvisorService(deterministicAdvisor);
     } else {
-      const agyAdvisor = new AgyCliAdvisorProvider({
+      const cliAdvisor = new AgyCliAdvisorProvider({
         agyPath: config.get<string>('agyPath') || undefined,
         timeoutMs: config.get<number>('advisorTimeoutMs') || undefined,
         model: config.get<string>('advisorModel') || undefined
       });
-      advisorService =
+      const ideAdvisor = new AntigravityLmAdvisorProvider(
+        vscode.lm,
+        (text) => vscode.LanguageModelChatMessage.User(text),
+        {
+          timeoutMs: config.get<number>('advisorTimeoutMs') || undefined,
+          model: config.get<string>('advisorModel') || undefined
+        }
+      );
+      const primary =
         advisorBackend === 'agy'
-          ? new DesignAdvisorService(agyAdvisor)
-          : new DesignAdvisorService(agyAdvisor, deterministicAdvisor);
+          ? cliAdvisor
+          : advisorBackend === 'ide'
+            ? ideAdvisor
+            : new ChainedAdvisorProvider([ideAdvisor, cliAdvisor]);
+      advisorService =
+        advisorBackend === 'auto'
+          ? new DesignAdvisorService(primary, deterministicAdvisor)
+          : new DesignAdvisorService(primary);
     }
     chatbotController = new ChatbotController(
       timeline.store,

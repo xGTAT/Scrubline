@@ -127,7 +127,7 @@ const ADVICE_SCHEMA = {
 const MAX_FILE_CHARS = 4000;
 const MAX_TOTAL_CHARS = 24000;
 
-function buildPrompt(context: DesignQueryContext): string {
+export function buildPrompt(context: DesignQueryContext): string {
   const parts: string[] = [
     'You are the Scrubline UI Advisor inside a VS Code style IDE. Answer the design question using ONLY the checkpoint evidence below.',
     'Do not use any tools. Do not read or write files. Answer from this prompt alone.',
