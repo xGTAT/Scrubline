@@ -2,20 +2,15 @@ import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 // Windows command shims (agy.cmd / agy.bat) cannot be spawned directly: cmd.exe
 // must interpret them. Resolve a real executable when the given path has no
-// extension, and wrap .cmd/.bat launches in cmd.exe with quoted arguments.
-function quoteForCmd(arg: string): string {
-  return `"${arg.replace(/(\\*)"/g, '$1$1\\"')}"`;
-}
-
+// extension, and let Node/libuv compose the cmd.exe command line (shell: true)
+// instead of hand-quoting, which breaks on cmd's quote-stripping rules.
 function spawnAgy(agyPath: string, args: string[]) {
   if (process.platform !== 'win32')
     return spawn(agyPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
   const lower = agyPath.toLowerCase();
   const needsCmd = lower.endsWith('.cmd') || lower.endsWith('.bat') || !/\.exe$/.test(lower);
   if (!needsCmd) return spawn(agyPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-  const comspec = process.env.ComSpec ?? 'cmd.exe';
-  const line = [agyPath, ...args].map(quoteForCmd).join(' ');
-  return spawn(comspec, ['/d', '/s', '/c', line], { stdio: ['ignore', 'pipe', 'pipe'] });
+  return spawn(agyPath, args, { shell: true, stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
 async function resolveAgyExecutable(agyPath: string): Promise<string> {
