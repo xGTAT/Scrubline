@@ -1,5 +1,7 @@
 import { test, expect } from 'vitest';
 import { listPages, documentToRoute, routeToDocument, isPickableDocument } from '../../src/pages';
+import { mainlineBase } from '../../src/branches/alternatives';
+import type { Checkpoint } from '../../src/bridge/timeline';
 import { specification } from '../../src/preview/spec';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
@@ -62,4 +64,26 @@ test('isPickableDocument requires a tracked static HTML document', () => {
   expect(isPickableDocument('missing.html', files)).toBe(false);
   expect(isPickableDocument('app.js', files)).toBe(false);
   expect(isPickableDocument('index.html', [])).toBe(false);
+});
+
+test('mainlineBase resolves the parent for timeline checkpoints only', () => {
+  const cp = (id: string, parentId?: string, branch?: { id: string; name: string }): Checkpoint =>
+    ({
+      id,
+      parentId,
+      branch,
+      schemaVersion: 1,
+      createdAt: '2026-10-16T00:00:00Z',
+      trigger: 'save',
+      files: [],
+      attribution: { kind: 'unattributed' }
+    }) as Checkpoint;
+  const root = cp('a'.repeat(64));
+  const child = cp('b'.repeat(64), root.id);
+  const branchCp = cp('c'.repeat(64), root.id, { id: 'br1', name: 'Alt' });
+  const checkpoints = [root, child, branchCp];
+  expect(mainlineBase(child, checkpoints)?.id).toBe(root.id);
+  expect(mainlineBase(root, checkpoints)).toBeUndefined();
+  expect(mainlineBase(branchCp, checkpoints)).toBeUndefined();
+  expect(mainlineBase(cp('d'.repeat(64), 'f'.repeat(64)), checkpoints)).toBeUndefined();
 });

@@ -18,7 +18,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { RenderCache, renderKey, prepareHistory } from './preview/cache';
 import { scopedStore } from './store/identity';
-import { Alternatives, mergeFiles } from './branches/alternatives';
+import { Alternatives, mainlineBase, mergeFiles } from './branches/alternatives';
 import { changedPaths } from './capture/scanner';
 import { applySelective } from './branches/apply';
 import { staticNavbarPaths } from './branches/static-mapping';
@@ -198,7 +198,13 @@ export async function activate(context: vscode.ExtensionContext) {
     reason: string
   ) => {
     if (!timeline || !restore || !alternatives) return;
-    const base = alternatives.base(target);
+    const base = target.branch
+      ? alternatives.base(target)
+      : mainlineBase(target, timeline.store.checkpoints);
+    if (!base) {
+      void vscode.window.showInformationMessage(`${reason} No base checkpoint to compare against.`);
+      return;
+    }
     const changes = changedPaths(base.files, target.files);
     if (!changes.length) {
       void vscode.window.showInformationMessage(`${reason} No changed files to cherry-pick.`);

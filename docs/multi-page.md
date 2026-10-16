@@ -35,6 +35,12 @@ Introduced on the `feature/multi-page` branch (0.9.0).
   ambiguous structure), the error offers **Pick files instead** with the same
   file-level flow. So every page in the dropdown has a working cherry-pick:
   element-level where static HTML source exists, exact-file level otherwise.
+  File-level candidates are the checkpoint's changed files, not filtered to
+  the selected page's route; route-targeted picking exists only at element
+  level on static HTML pages. Main-timeline checkpoints compare against
+  their parent; alternative checkpoints against their fork base. Every
+  selection is reviewed as exact paths with conflicts shown and must be
+  confirmed before apply, with the configured build/test gate and Undo.
 - All existing element-eligibility limits are unchanged and apply per page:
   ambiguous identity, duplicate IDs, script-bearing pages, framework-generated
   DOM, embedded stylesheets and stylesheet-list changes are refused at
@@ -56,7 +62,8 @@ Introduced on the `feature/multi-page` branch (0.9.0).
 ## Verification
 
 - Unit: route/document mapping, nested discovery, exclusions, empty workspaces,
-  pickable-document detection for the element/file fallback decision.
+  pickable-document detection for the element/file fallback decision,
+  parent-base resolution for main-timeline cherry-picks.
 - UI: dropdown rendering and option order, `set-page` / `add-page` messages,
   hidden-until-known behavior, axe accessibility, evidence screenshot
   (`docs/evidence/panel_page_select.png`).
