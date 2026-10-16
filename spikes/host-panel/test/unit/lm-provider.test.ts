@@ -63,10 +63,10 @@ function stubModel(answer: string, id = 'gemini-3-pro'): LmChatModelLike {
 
 const userMessage = (text: string) => ({ role: 'user', text });
 
-test('unsigned IDE (no models) fails with a sign-in hint', async () => {
+test('IDE with no exposed models fails loudly so fallback engages', async () => {
   const lm: VsCodeLmLike = { selectChatModels: async () => [] };
   const provider = new AntigravityLmAdvisorProvider(lm, userMessage);
-  await expect(provider.generateAdvice(context())).rejects.toThrow(/Sign in to Antigravity/);
+  await expect(provider.generateAdvice(context())).rejects.toThrow(/exposes no language models/);
 });
 
 test('model lookup errors are surfaced, not swallowed', async () => {

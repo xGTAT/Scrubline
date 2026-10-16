@@ -103,7 +103,7 @@ export class AntigravityLmAdvisorProvider implements DesignAdvisorProvider {
     }
     if (!models.length)
       throw new Error(
-        'Antigravity IDE exposes no language models to extensions. Sign in to Antigravity (Accounts menu), then retry.'
+        'This IDE exposes no language models to extensions (verified on Antigravity: none even when signed in). Falling back.'
       );
     return models;
   }

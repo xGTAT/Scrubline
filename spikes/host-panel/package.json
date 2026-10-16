@@ -184,7 +184,7 @@
             "deterministic"
           ],
           "default": "auto",
-          "description": "UI Advisor backend. auto: Antigravity IDE models (vscode.lm) first, agy CLI as fallback, offline heuristics last; ide: IDE models only; agy: agy CLI only; deterministic: offline heuristics only.",
+          "description": "UI Advisor backend. auto: IDE language models if the IDE exposes any to extensions (Antigravity currently exposes none), then the agy CLI, then offline heuristics; ide: IDE models only; agy: agy CLI only; deterministic: offline heuristics only.",
           "scope": "resource"
         },
         "scrubline.agyPath": {

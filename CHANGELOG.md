@@ -21,6 +21,8 @@
 - IDE-native advisor backend (F4): the UI Advisor now answers through the Antigravity IDE's own language models via the `vscode.lm` extension API (`selectChatModels` + `sendRequest`) - no CLI and no subprocess. `scrubline.advisorBackend` gains `ide`; `auto` now tries IDE models first, then the agy CLI, then offline heuristics (`ide` and `agy` remain strict single-backend modes). When the IDE is signed out `selectChatModels()` returns no models and the advisor falls back with a sign-in hint. The agy CLI provider stays as the fallback path.
 - Windows fix: the Antigravity CLI provider now resolves .exe/.cmd/.bat executables and routes command shims through cmd.exe with quoted arguments, so the UI Advisor works on Windows (previously the spawn failed with ENOENT).
 
+- Correction after signed-in verification (post-merge follow-up): Antigravity exposes no language models to extensions (`vscode.lm.selectChatModels()` returns none even when signed in), so the `ide` backend and the IDE step of `auto` currently no-op on Antigravity. The effective model route on Antigravity is the agy CLI fallback; the chain, labels and README now say so plainly.
+
 ## 0.9.1
 
 - Advisor chatbot in the panel (read-only; answers from timeline, preview and targeting context, never mutates the workspace).
