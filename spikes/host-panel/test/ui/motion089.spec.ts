@@ -63,6 +63,7 @@ test('all six saved alternatives are accessible, not a two-item list', async ({ 
     const w = window as unknown as { __sendTimeline: (v: unknown) => void };
     w.__sendTimeline({
       status: 'ready',
+      uiMode: 'dev',
       rows: [
         {
           id: 'a',

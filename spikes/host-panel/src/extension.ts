@@ -139,6 +139,15 @@ export async function activate(context: vscode.ExtensionContext) {
     unsaved: false,
     message: 'Open a folder to begin.'
   };
+  // Panel presentation mode, persisted across reloads in globalState so the
+  // user's Standard/Dev choice survives window restarts. Published with every
+  // timeline so all views (sidebar, editor panel) stay in sync.
+  const readUiMode = (): 'standard' | 'dev' =>
+    context.globalState.get<string>('scrubline.uiMode') === 'dev' ? 'dev' : 'standard';
+  let uiMode: 'standard' | 'dev' = readUiMode();
+  // Seed the first published state with the persisted mode so a request-timeline
+  // answered before any capture still restores the user's choice.
+  state.uiMode = uiMode;
   let preview: TimelineState['preview'];
   let review: TimelineState['review'];
   let selection: TimelineState['selection'];
@@ -262,7 +271,8 @@ export async function activate(context: vscode.ExtensionContext) {
       pages,
       activePage,
       chatbot: chatbotController?.getState(),
-      verificationReport
+      verificationReport,
+      uiMode
     };
     for (const view of views) {
       try {
@@ -1211,6 +1221,13 @@ export async function activate(context: vscode.ExtensionContext) {
           previewQueue = job.catch(() => {});
           await job;
           await enqueuePreview(cp.id);
+          return;
+        }
+        if (message.type === 'set-ui-mode') {
+          if (message.mode !== 'standard' && message.mode !== 'dev') return;
+          uiMode = message.mode;
+          void context.globalState.update('scrubline.uiMode', uiMode);
+          publish(state);
           return;
         }
         if (message.type === 'request-timeline') {

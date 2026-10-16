@@ -26,3 +26,11 @@ temp-preview/
 .snapshots/
 
 .vscode-test/
+
+# Aider AI tooling artifacts
+.aider.chat.history.md
+.aider.input.history
+.aider.tags.cache.v4/
+
+# Motion recording evidence (too large for git)
+docs/evidence/motion/*.webm

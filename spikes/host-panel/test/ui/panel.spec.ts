@@ -14,6 +14,9 @@ test('panel shows an honest empty state', async ({ page }) => {
   await expect(page.getByText('Scrubline', { exact: true })).toBeVisible();
   await expect(page.getByText('No checkpoints yet')).toBeVisible();
   await expect(page.getByText('Open a folder to begin.')).toBeVisible();
+  // The host footer is a Dev-mode diagnostic; Standard keeps the empty state clean.
+  await expect(page.getByText('Scrubline Harness')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Dev', exact: true }).click();
   await expect(page.getByText('Scrubline Harness')).toBeVisible();
 });
 
@@ -205,6 +208,7 @@ for (const status of ['on', 'ready', 'stale', 'error'] as const) {
     await page.evaluate((status) => {
       (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
         status: 'ready',
+        uiMode: 'dev',
         rows: [
           {
             id: 'a'.repeat(64),
@@ -254,6 +258,7 @@ test('M4 fork list and two alternatives comparison stay usable at narrow width',
       'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="140"%3E%3Crect width="200" height="140" fill="%23343a40"/%3E%3C/svg%3E';
     (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
       status: 'ready',
+      uiMode: 'dev',
       unsaved: false,
       rows: [
         {
@@ -452,6 +457,7 @@ for (const theme of ['dark', 'light', 'contrast'] as const) {
       const w = window as unknown as { __sendTimeline: (v: unknown) => void };
       w.__sendTimeline({
         status: 'ready',
+        uiMode: 'dev',
         rows: Array.from({ length: 1000 }, (_, i) => ({
           id: String(i),
           createdAt: '2026-10-05T15:00:00Z',
@@ -533,6 +539,7 @@ test('v0.7 paged card slider changed paths and preview never disagree; render pr
     const w = window as unknown as { __sendTimeline: (v: unknown) => void };
     w.__sendTimeline({
       status: 'ready',
+      uiMode: 'dev',
       rows: [
         {
           id: 'a',
@@ -592,6 +599,7 @@ test('v0.7 render failures cancellation and late host selection stay explicit', 
   await page.evaluate(() => {
     (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
       status: 'ready',
+      uiMode: 'dev',
       rows: [
         {
           id: 'a',
@@ -1101,6 +1109,7 @@ test('alternative inspection keeps review controls and returns to the main timel
     }));
     (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
       status: 'ready',
+      uiMode: 'dev',
       rows,
       selected: 'alt',
       unsaved: false,
@@ -1131,6 +1140,7 @@ test('portrait evidence uses decoded dimensions and shows a bounded render recei
       );
     (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
       status: 'ready',
+      uiMode: 'dev',
       rows: [
         {
           id: 'portrait',
@@ -1171,6 +1181,7 @@ test('breakpoint map shows sampled failures and unknowns with explicit evidence 
   await page.evaluate(() => {
     (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
       status: 'ready',
+      uiMode: 'dev',
       unsaved: false,
       rows: [
         {
@@ -1228,6 +1239,7 @@ test('CSS investigation evidence reports its bounded claim without an apply cont
   await page.evaluate(() =>
     (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
       status: 'ready',
+      uiMode: 'dev',
       unsaved: false,
       rows: [
         {
@@ -1285,6 +1297,7 @@ test('measured repair packet is text-only and copy is inside explicit review', a
           type: 'timeline',
           data: {
             status: 'ready',
+            uiMode: 'dev',
             rows: [],
             unsaved: false,
             measuredPacket: {
@@ -1318,6 +1331,7 @@ test('restore confirmation stays in view with expanded alternatives and branches
   await page.evaluate(() => {
     (window as unknown as { __sendTimeline: (v: unknown) => void }).__sendTimeline({
       status: 'ready',
+      uiMode: 'dev',
       unsaved: false,
       rows: [
         {
