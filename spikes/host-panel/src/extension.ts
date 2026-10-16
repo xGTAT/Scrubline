@@ -38,7 +38,7 @@ import { scopedStore } from './store/identity';
 import { Alternatives, mainlineBase, mergeFiles } from './branches/alternatives';
 import { changedPaths } from './capture/scanner';
 import { applySelective } from './branches/apply';
-import { staticNavbarPaths, staticSectionPaths } from './branches/static-mapping';
+import { staticSectionPaths } from './branches/static-mapping';
 import {
   resolveElementFiles,
   mergeMultiElements,
@@ -1393,10 +1393,9 @@ export async function activate(context: vscode.ExtensionContext) {
             if (!picked) return;
             document = picked;
           }
-          let paths =
-            isSection
-              ? await staticSectionPaths(timeline.store, target, document)
-              : message.paths;
+          let paths = isSection
+            ? await staticSectionPaths(timeline.store, target, document)
+            : message.paths;
           if (message.type === 'review-selective' && !paths.length) {
             const base = alternatives.base(target);
             const changes = changedPaths(base.files, target.files);
