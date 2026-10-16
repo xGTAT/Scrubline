@@ -4,7 +4,7 @@ A local source timeline for agent-edited frontends. Capture disk checkpoints, in
 
 ## Install 0.8.12
 
-The unsigned VSIX is in [`releases/scrubline-panel-0.8.12.vsix`](releases/scrubline-panel-0.8.12.vsix). In VS Code or Antigravity, run **Extensions: Install from VSIX**, choose the file, and follow any IDE reload prompt. Open a trusted, single-folder workspace and run **Scrubline: Open Timeline Panel**.
+Download the unsigned VSIX from the latest [GitHub Release](https://github.com/xGTAT/Scrubline/releases) (each `v*` tag attaches `scrubline-panel-<version>.vsix`), or grab the `scrubline-panel-vsix` artifact from the latest successful [CI run](https://github.com/xGTAT/Scrubline/actions/workflows/ci.yml) on `main`. In VS Code or Antigravity, run **Extensions: Install from VSIX**, choose the file, and follow any IDE reload prompt. Open a trusted, single-folder workspace and run **Scrubline: Open Timeline Panel**.
 
 0.8.12 closes the round-6 full feature audit against the real web-lab repository. It fixes investigation false refusals on files containing custom properties or var()/url() values unrelated to the change, an EEXIST crash on identical investigation reruns, preview errors going invisible after any settings change, a double configuration refresh per settings write that wiped fresh preview state, webview messages dropped during a settings refresh, and restores stale-acknowledgement immunity for timeline selection. Audit notes are below.
 
@@ -19,6 +19,10 @@ A true dissolve briefly blends both versions, including changed text, during the
 New activations drain the old capture queue, release its writer, close previews and dispose old commands/webviews before taking ownership. A same-IDE-session endpoint handoff also handles separate extension-host instances. A different IDE window cannot take over an active writer.
 
 The already-installed 0.8.7 runtime cannot gain this handoff protocol retroactively. When upgrading from that older build, one **Developer: Reload Window** may still be needed. The tested idle native VSIX-dialog upgrade from 0.8.9 to 0.8.10 retained History, and the IDE requested Restart Extensions to load the new code. The idle native 0.8.10 to 0.8.11 dialog upgrade also retained all eight checkpoints and four alternatives. The reported every-update no-restart ownership failure on Windows_NT x64 10.0.26300 (Antigravity 2.5.5 / VSCode OSS 1.107.0) has not been reproduced on the Linux bench running those IDE/core versions; the slow-queue regression above reproduces the same error but does not establish the user's exact trigger. If the IDE itself asks for a window reload to load extension code, follow that prompt; Scrubline cannot override the IDE's installer lifecycle.
+
+## Releasing
+
+Bump `spikes/host-panel/package.json`, update `CHANGELOG.md`, commit, then tag `v<version>` and push the tag. CI runs the full gate, packages the VSIX and attaches it to a new GitHub Release. The tag must match the package version. Built VSIX files are not committed to the repository.
 
 ## Capture and preview
 
@@ -114,7 +118,7 @@ Source tests cover SVG shapes, repeated elements and current shared-CSS preserva
 - `fixtures`: test sites and captured regression images
 - `.agents`: sanitized hook recorder; [configuration](docs/hooks.md)
 - `docs`: implementation limits and milestone notes
-- `releases`: locally installable VSIX builds
+- `.github/workflows/ci.yml`: Windows CI; every run uploads the packaged VSIX as an artifact, and pushing a `v*` tag publishes it to GitHub Releases
 
 ## Round-6 audit record (2026-10-15)
 
