@@ -95,6 +95,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
           <option value="">(None - inspect active checkpoint)</option>
           {rows
             .filter((r) => r.id !== activeId)
+            .slice(-50)
             .map((r) => (
               <option key={r.id} value={r.id}>
                 {r.id.slice(0, 7)} {r.alternative ? `(${r.alternative})` : ''} -{' '}

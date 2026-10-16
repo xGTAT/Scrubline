@@ -93,8 +93,9 @@ for (const status of ['loading', 'error', 'limit', 'ready'] as const) {
         { exact: true }
       )
     ).toBeVisible();
+    // Budget includes the collapsed advisor chatbot summary added in 0.9.1.
     expect((await page.locator('body').innerText()).trim().split(/\s+/).length).toBeLessThanOrEqual(
-      40
+      45
     );
     expect(
       (await new AxeBuilder({ page }).analyze()).violations.filter(
@@ -176,8 +177,9 @@ for (const mode of [
     await expect(slider).toHaveValue('1');
     await page.keyboard.press('Home');
     await expect(slider).toHaveValue('0');
+    // Budget includes the collapsed advisor chatbot summary added in 0.9.1.
     expect((await page.locator('body').innerText()).trim().split(/\s+/).length).toBeLessThanOrEqual(
-      40
+      45
     );
     expect(
       (await new AxeBuilder({ page }).analyze()).violations.filter(
@@ -221,8 +223,9 @@ for (const status of ['on', 'ready', 'stale', 'error'] as const) {
         }
       });
     }, status);
+    // Budget includes the collapsed advisor chatbot summary added in 0.9.1.
     expect((await page.locator('body').innerText()).trim().split(/\s+/).length).toBeLessThanOrEqual(
-      40
+      45
     );
     expect(
       (await new AxeBuilder({ page }).analyze()).violations.filter(
@@ -279,7 +282,7 @@ test('M4 fork list and two alternatives comparison stay usable at narrow width',
   await expect(page.getByRole('button', { name: 'Choose files' })).toBeVisible();
   const bounds = await page.getByRole('button', { name: 'Choose files' }).boundingBox();
   expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(280);
-  await expect(page.getByRole('button', { name: 'Static navbar', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Static section', exact: true })).toBeVisible();
   expect(
     (await new AxeBuilder({ page }).analyze()).violations.filter(
       (v) => v.impact === 'serious' || v.impact === 'critical'
@@ -313,7 +316,11 @@ for (const theme of ['dark', 'light', 'contrast'] as const) {
       });
     }, theme);
     await expect(page.locator('.row')).toHaveCount(1);
-    expect(await page.locator('main *').count()).toBeLessThan(65);
+    // 1000 checkpoints must not blow up the DOM: rows stay virtualized (1 .row) and the
+    // chatbot compare selector caps its options. The bound covers the static chrome added
+    // by the chatbot/verification/restore merges (~146 elements); pre-cap this was 1095.
+    expect(await page.locator('main *').count()).toBeLessThan(200);
+    expect(await page.locator('#chatbot-compare-select option').count()).toBeLessThanOrEqual(51);
     await page.locator('#scrub').focus();
     await page.keyboard.press('End');
     await expect(page.locator('#scrub')).toHaveValue('999');
