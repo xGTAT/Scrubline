@@ -1,6 +1,8 @@
 import { DualVerificationEngine } from './verification/engine';
 import { replaceActivation } from './lifecycle';
 import { ChatbotController } from './chatbot/controller';
+import { DesignAdvisorService, DeterministicAdvisorProvider } from './chatbot/advisor';
+import { AgyCliAdvisorProvider } from './advisor/agy-cli';
 import { ElementPicker } from './branches/picker';
 import { elementCandidate } from './branches/element';
 import {
@@ -474,13 +476,30 @@ export async function activate(context: vscode.ExtensionContext) {
     await timeline.start();
     rendered = await cache!.available(timeline.store.checkpoints);
     alternatives = new Alternatives(timeline.store, timeline.limits);
+    const advisorBackend = config.get<string>('advisorBackend') ?? 'auto';
+    const deterministicAdvisor = new DeterministicAdvisorProvider();
+    let advisorService: DesignAdvisorService;
+    if (advisorBackend === 'deterministic') {
+      advisorService = new DesignAdvisorService(deterministicAdvisor);
+    } else {
+      const agyAdvisor = new AgyCliAdvisorProvider({
+        agyPath: config.get<string>('agyPath') || undefined,
+        timeoutMs: config.get<number>('advisorTimeoutMs') || undefined,
+        model: config.get<string>('advisorModel') || undefined
+      });
+      advisorService =
+        advisorBackend === 'agy'
+          ? new DesignAdvisorService(agyAdvisor)
+          : new DesignAdvisorService(agyAdvisor, deterministicAdvisor);
+    }
     chatbotController = new ChatbotController(
       timeline.store,
       () => cache,
       secrets,
       (cState) => {
         publish({ ...state, chatbot: cState });
-      }
+      },
+      advisorService
     );
     publish(state);
     dirty();

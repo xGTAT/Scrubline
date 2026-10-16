@@ -10,6 +10,8 @@
 - Mosaic element picks for static HTML: per-file optional element id narrows the winner to that subtree plus paired id-scoped CSS, with the existing refusal rules; a refusal conflicts only that file.
 - Composition identity binding: changing the set, order, mode or overrides after review disables Confirm and refuses apply with a stale-review error.
 - Limits: one element pick per file (static HTML only), combine folds whole files (no hunk merge).
+- UI Advisor can now answer through Antigravity models: the advisor calls the Antigravity CLI headless mode (`agy -p --output-format json --json-schema`) on the user's own credentials, with structured output mapped into the advice response. Offline heuristic analysis remains as automatic fallback (`scrubline.advisorBackend`: auto/agy/deterministic; `scrubline.agyPath`, `scrubline.advisorTimeoutMs`, `scrubline.advisorModel`). The chat shows which backend answered.
+
 ## 0.9.1
 
 - Advisor chatbot in the panel (read-only; answers from timeline, preview and targeting context, never mutates the workspace).

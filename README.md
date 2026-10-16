@@ -109,6 +109,11 @@ History is bound to the canonical folder path; moving a folder starts a new bind
 ## Panel features (0.9.1)
 
 - **Advisor chatbot.** The panel includes a read-only UI advisor chat (context from the timeline, preview and targeting state). It answers questions and suggests next steps; it never mutates the workspace or history.
+
+### Advisor backends (Antigravity models)
+
+By default (`scrubline.advisorBackend: "auto"`) the advisor answers through Antigravity models by calling the Antigravity CLI in headless mode (`agy -p ... --output-format json --json-schema ...`). This uses your own Antigravity sign-in and quota: run `agy` once interactively so the credentials are cached. If the CLI is missing, signed out, too slow (`scrubline.advisorTimeoutMs`, default 90s) or returns an unusable answer, the advisor falls back to its built-in offline heuristic analysis and says so in the chat. Set `scrubline.advisorBackend` to `"agy"` to require the model (errors instead of fallback) or `"deterministic"` to stay fully offline. `scrubline.agyPath` overrides the CLI location; `scrubline.advisorModel` passes a `--model` override. The advisor never writes files either way.
+
 - **Output verification.** Restores are checked against structural and visual invariants before applying: a failed verification blocks the restore and shows the violations and visual diff highlights of vanished or collapsed regions.
 - **Multi-element cherry-pick.** Select element supports picking several elements in one pass; the restore review lists each applied element with its owned files, and ownership conflicts across the selection are refused.
 
