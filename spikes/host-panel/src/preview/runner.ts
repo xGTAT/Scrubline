@@ -116,9 +116,16 @@ export class PreviewRunner {
     // Dev servers may bind only IPv6 (::1) or only IPv4 (127.0.0.1) for
     // "localhost"; probe both stacks and keep the one that answers. When the
     // server reports a different port than configured (hardcoded in the npm
-    // script), probe the detected port too.
-    const probePort = () => detectedPort ?? this.config.port;
-    const candidates = () => [`http://127.0.0.1:${probePort()}`, `http://[::1]:${probePort()}`];
+    // script), probe the detected port as a fallback. Always try the
+    // configured port first: the detected port could belong to a stale
+    // server from a previous preview.
+    const candidates = () => {
+      const urls = [`http://127.0.0.1:${this.config.port}`, `http://[::1]:${this.config.port}`];
+      if (detectedPort && detectedPort !== this.config.port) {
+        urls.push(`http://127.0.0.1:${detectedPort}`, `http://[::1]:${detectedPort}`);
+      }
+      return urls;
+    };
     const deadline = Date.now() + this.config.timeoutMs;
     try {
       while (Date.now() < deadline) {
@@ -151,10 +158,24 @@ export class PreviewRunner {
   }
   /** Find the directory containing package.json within a snapshot, checking
    * the root first, then one level of subdirectories (monorepo/workspace
-   * layouts where VS Code opens the parent of the project). Returns the
-   * absolute path to the project root, or the snapshot root if no
-   * package.json exists anywhere. */
+   * layouts where VS Code opens the parent of the project). When the current
+   * route maps to a file that exists in the snapshot root (a static page),
+   * always serve from the root even if a subdirectory has a package.json.
+   * Returns the absolute path to the project root, or the snapshot root if
+   * no package.json exists anywhere. */
   private async findProjectRoot(snapshotRoot: string): Promise<string> {
+    // Static pages: the route maps to a real file in the snapshot. Serve
+    // from the root so the file is reachable at its URL path.
+    const route = this.config.route ?? '/';
+    if (route !== '/') {
+      const routeFile = route.replace(/^\//, '').split('?')[0].split('#')[0];
+      try {
+        await fs.access(path.join(snapshotRoot, routeFile));
+        return snapshotRoot;
+      } catch {
+        // Route file not at root; fall through to package.json detection.
+      }
+    }
     try {
       await fs.access(path.join(snapshotRoot, 'package.json'));
       return snapshotRoot;
