@@ -79,11 +79,27 @@ export class PreviewRunner {
     let exited = false;
     let stderr = '';
     let lastProbeError = '';
+    // Dev servers may ignore the injected port when the npm script hardcodes
+    // its own (e.g. "ng serve --port 4200"). Watch stdout for the actual
+    // listening URL so we probe the right port.
+    let detectedPort: number | undefined;
+    const portPattern =
+      /(?:Local|local|localhost|listening|Listening|running|Running|started|Started)\s*(?:at|on|At|On)?\s*[: ]*\s*https?:\/\/(?:localhost|127\.0\.0\.1|\[?::1\]?):(\d+)/;
+    const detectPort = (data: Buffer) => {
+      if (detectedPort) return;
+      const match = data.toString().match(portPattern);
+      if (match) {
+        const p = parseInt(match[1], 10);
+        if (p >= 1024 && p <= 65535) detectedPort = p;
+      }
+    };
     this.process.stderr?.on('data', (data: Buffer) => {
       stderr = (stderr + data.toString()).slice(-2048);
+      detectPort(data);
     });
     this.process.stdout?.on('data', (data: Buffer) => {
       stderr = (stderr + '[out] ' + data.toString()).slice(-2048);
+      detectPort(data);
     });
     this.process.once('exit', (code, signal) => {
       exited = true;
@@ -98,14 +114,17 @@ export class PreviewRunner {
       exited = true;
     });
     // Dev servers may bind only IPv6 (::1) or only IPv4 (127.0.0.1) for
-    // "localhost"; probe both stacks and keep the one that answers.
-    const candidates = [`http://127.0.0.1:${this.config.port}`, `http://[::1]:${this.config.port}`];
+    // "localhost"; probe both stacks and keep the one that answers. When the
+    // server reports a different port than configured (hardcoded in the npm
+    // script), probe the detected port too.
+    const probePort = () => detectedPort ?? this.config.port;
+    const candidates = () => [`http://127.0.0.1:${probePort()}`, `http://[::1]:${probePort()}`];
     const deadline = Date.now() + this.config.timeoutMs;
     try {
       while (Date.now() < deadline) {
         if (this.stopped || exited)
           throw new Error(this.lastExit ?? 'Preview process exited. Check command.');
-        for (const candidate of candidates) {
+        for (const candidate of candidates()) {
           try {
             const response = await fetch(candidate, { signal: AbortSignal.timeout(500) });
             if (response.ok) {
@@ -256,9 +275,14 @@ export class PreviewRunner {
       await fs.symlink(source, target, process.platform === 'win32' ? 'junction' : 'dir');
       this.diagnostic?.('Linked workspace dependencies into the snapshot.');
     } catch (error) {
-      this.diagnostic?.(
-        `No workspace dependency link: ${error instanceof Error ? error.message : String(error)}`
-      );
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg.includes('ENOENT')) {
+        this.diagnostic?.(
+          `Dependencies not installed in ${wsRoot}. Run npm install (or npm ci) there, then retry the preview.`
+        );
+      } else {
+        this.diagnostic?.(`No workspace dependency link: ${msg}`);
+      }
     }
   }
   async screenshot(url: string, destination: string, checkpoint?: Checkpoint) {
