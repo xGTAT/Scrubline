@@ -678,7 +678,9 @@ export function BackendView({ backend }: { backend: BackendState }) {
           <summary className="bv-section-header">
             Module Imports ({backend.graph.nodes.length} files)
           </summary>
-          <Graph graph={backend.graph} />
+          <div className="bv-graph-scroll">
+            <Graph graph={backend.graph} />
+          </div>
           {backend.graph.truncated && (
             <small className="bv-note">Graph truncated for display.</small>
           )}

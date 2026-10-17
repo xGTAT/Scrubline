@@ -1505,8 +1505,13 @@ html {
     min-width: 30px;
     margin: 0 4px;
   }
-  .bv-graph-container svg {
-    min-width: 400px;
+  .bv-graph-scroll {
+    overflow-x: auto;
+    margin: 0 -8px;
+    padding: 0 8px;
+  }
+  .bv-graph {
+    min-width: 500px;
   }
   .bv-summary {
     flex-wrap: wrap;
@@ -1649,6 +1654,10 @@ html {
 }
 
 /* Module graph */
+.bv-graph-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
 .bv-graph {
   width: 100%;
   max-width: 100%;
