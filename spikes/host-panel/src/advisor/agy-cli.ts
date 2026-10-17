@@ -203,6 +203,7 @@ async function runAgy(
   prompt: string,
   options: AgyCliOptions
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
+  const log = options.log ?? (() => {});
   const agyPath = options.agyPath ?? 'agy';
   const resolvedPath = await resolveAgyExecutable(agyPath);
   // On Windows, shell:true spawns cmd.exe successfully even when the target
@@ -237,8 +238,21 @@ async function runAgy(
     schemaPath
   ];
   if (options.model) args.push('--model', options.model);
+  const useShell =
+    process.platform === 'win32' &&
+    (/\.(cmd|bat)$/i.test(resolvedPath) || !/\.exe$/i.test(resolvedPath));
+  const promptBytes = Buffer.byteLength(prompt, 'utf8');
+  log(
+    `[agy] spawn ${JSON.stringify(resolvedPath)} ${args.map((a) => (a.includes(os.tmpdir()) ? '<schema>' : a)).join(' ')}` +
+      ` | shell=${useShell} | prompt=${prompt.length}chars/${promptBytes}B | timeout=${timeoutMs}ms`
+  );
   try {
     return await new Promise((resolve, reject) => {
+      const spawnAt = Date.now();
+      const elapsed = () => `${Date.now() - spawnAt}ms`;
+      let firstStdoutAt: number | undefined;
+      let lastEventType = 'none';
+      let lastEventAt: number | undefined;
       let child;
       try {
         child = spawnAgy(resolvedPath, args, true);
@@ -246,6 +260,7 @@ async function runAgy(
         reject(err instanceof Error ? err : new Error(String(err)));
         return;
       }
+      log(`[agy] spawned pid=${child.pid} shell=${useShell} at ${elapsed()}`);
       let stdout = '';
       let stderr = '';
       let settled = false;
@@ -256,6 +271,13 @@ async function runAgy(
         fn();
       };
       const timer = setTimeout(() => {
+        const lastSeen =
+          lastEventType !== 'none'
+            ? `last event=${lastEventType} at ${lastEventAt != null ? lastEventAt - spawnAt : '?'}ms`
+            : firstStdoutAt != null
+              ? `first stdout at ${firstStdoutAt - spawnAt}ms but no parsed events`
+              : 'no stdout received';
+        log(`[agy] TIMEOUT after ${timeoutMs}ms | ${lastSeen} | killing`);
         child.kill('SIGKILL');
         settle(() => reject(new Error(`agy CLI timed out after ${timeoutMs}ms`)));
       }, timeoutMs);
@@ -265,6 +287,10 @@ async function runAgy(
       // the answer is already available.
       let buffer = '';
       child.stdout!.on('data', (d) => {
+        if (firstStdoutAt == null) {
+          firstStdoutAt = Date.now();
+          log(`[agy] first stdout byte at ${elapsed()}`);
+        }
         const chunk = d.toString();
         stdout += chunk;
         buffer += chunk;
@@ -275,7 +301,12 @@ async function runAgy(
           if (!trimmed) continue;
           try {
             const event = JSON.parse(trimmed) as { event?: string; result?: unknown };
+            const eventType = event.event ?? 'unknown';
+            lastEventType = eventType;
+            lastEventAt = Date.now();
+            log(`[agy] event=${eventType} at ${elapsed()}`);
             if (event.event === 'result' && event.result) {
+              log(`[agy] finishing: result event at ${elapsed()}`);
               child.kill('SIGKILL');
               settle(() => resolve({ stdout, stderr, code: 0 }));
               return;
@@ -285,18 +316,31 @@ async function runAgy(
           }
         }
       });
-      child.stderr!.on('data', (d) => (stderr += d.toString()));
+      child.stderr!.on('data', (d) => {
+        const text = d.toString();
+        stderr += text;
+        for (const line of text.split('\n')) {
+          const trimmed = line.trim();
+          if (trimmed) log(`[agy] stderr at ${elapsed()}: ${trimmed.slice(0, 200)}`);
+        }
+      });
       child.on('error', (err) => {
+        log(`[agy] spawn error at ${elapsed()}: ${err.message}`);
         settle(() => reject(new Error(`agy CLI failed to start: ${err.message}`)));
       });
-      child.on('close', (code) => {
+      child.on('close', (code, signal) => {
+        log(
+          `[agy] process closed at ${elapsed()} code=${code} signal=${signal} | last event=${lastEventType}`
+        );
         settle(() => resolve({ stdout, stderr, code }));
       });
       // The CLI may exit before reading the prompt (auth failure); never let an
       // early EPIPE crash the write.
       child.stdin!.on('error', () => {});
-      child.stdin!.write(JSON.stringify({ event: 'user', message: { content: prompt } }) + '\n');
+      const stdinPayload = JSON.stringify({ event: 'user', message: { content: prompt } }) + '\n';
+      child.stdin!.write(stdinPayload);
       child.stdin!.end();
+      log(`[agy] stdin written (${stdinPayload.length}B) and ended at ${elapsed()}`);
     });
   } finally {
     await fs.promises.unlink(schemaPath).catch(() => {});

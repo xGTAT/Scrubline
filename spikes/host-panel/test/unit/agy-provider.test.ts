@@ -142,6 +142,52 @@ test('strict agy mode surfaces the backend error instead of falling back', async
   delete process.env.AGY_DOUBLE_BEHAVIOR;
 });
 
+test('debug log captures spawn, stream events, timing and finish reason', async () => {
+  const shim = await makeAgyShim();
+  const logs: string[] = [];
+  const provider = new AgyCliAdvisorProvider({
+    agyPath: shim,
+    timeoutMs: 15000,
+    log: (msg) => logs.push(msg)
+  });
+  await provider.generateAdvice(context());
+  const joined = logs.join('\n');
+  // Spawn details: path, args (schema redacted), shell mode, prompt size, timeout.
+  expect(joined).toMatch(/\[agy\] spawn .*shell=(true|false)/);
+  expect(joined).toMatch(/prompt=\d+chars\/\d+B/);
+  expect(joined).toMatch(/timeout=15000ms/);
+  expect(joined).not.toContain('nav spacing'); // never log prompt content
+  // Process spawned with PID.
+  expect(joined).toMatch(/\[agy\] spawned pid=\d+/);
+  // stdin written and ended.
+  expect(joined).toMatch(/\[agy\] stdin written \(\d+B\) and ended/);
+  // First stdout byte timestamped.
+  expect(joined).toMatch(/\[agy\] first stdout byte at \d+ms/);
+  // Stream events logged with timing.
+  expect(joined).toMatch(/\[agy\] event=init at \d+ms/);
+  expect(joined).toMatch(/\[agy\] event=step_update at \d+ms/);
+  expect(joined).toMatch(/\[agy\] event=result at \d+ms/);
+  // Finish reason: result event.
+  expect(joined).toMatch(/\[agy\] finishing: result event at \d+ms/);
+});
+
+test('debug log on timeout shows last seen state', async () => {
+  const shim = await makeAgyShim();
+  process.env.AGY_DOUBLE_BEHAVIOR = 'slow';
+  const logs: string[] = [];
+  const provider = new AgyCliAdvisorProvider({
+    agyPath: shim,
+    timeoutMs: 300,
+    log: (msg) => logs.push(msg)
+  });
+  await expect(provider.generateAdvice(context())).rejects.toThrow(/timed out/);
+  const joined = logs.join('\n');
+  expect(joined).toMatch(/\[agy\] TIMEOUT after 300ms/);
+  // The slow double never writes stdout, so last seen should be "no stdout received".
+  expect(joined).toMatch(/no stdout received/);
+  delete process.env.AGY_DOUBLE_BEHAVIOR;
+});
+
 describe('parseAgyModelsOutput', () => {
   it('parses the real agy 1.2.16 models table (slugs + display names with parentheses)', () => {
     const sample = [
