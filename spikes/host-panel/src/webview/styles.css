@@ -1178,7 +1178,9 @@ html {
   line-height: 1;
   padding: 4px 10px;
   border-radius: 999px;
-  color: var(--vscode-descriptionForeground, #9d9d9d);
+  /* Full foreground for the unpressed state: descriptionForeground grey failed
+     axe color-contrast in CI. */
+  color: var(--vscode-foreground, #cccccc);
   background: transparent;
 }
 .mode-switch button[aria-pressed='true'] {
