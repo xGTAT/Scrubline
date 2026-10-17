@@ -339,13 +339,13 @@ export async function activate(context: vscode.ExtensionContext) {
         )
         .join('');
       return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src http://127.0.0.1:${port}; style-src 'unsafe-inline'; script-src 'unsafe-inline';"></head><body>
-<h2>Locked elements (${locks.length})</h2>
+<div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0">Locked elements (${locks.length})</h2><button data-dismiss style="background:none;border:1px solid #555;border-radius:4px;padding:4px 12px;cursor:pointer;font:inherit;color:inherit" title="Close this preview">Dismiss</button></div>
 <p>These elements must not change. Each one is shown below with its pinned content highlighted.</p>
 ${cards || '<p>No locked elements yet. Pick an element and use Lock element.</p>'}
 <details style="margin-top:16px"><summary>Page context (locked elements outlined in their source page)</summary>
 ${frames}
 </details>
-<script>const vscode = acquireVsCodeApi(); document.querySelectorAll('[data-unlock]').forEach((b) => b.addEventListener('click', () => vscode.postMessage({ type: 'unlock', selector: b.getAttribute('data-s'), document: b.getAttribute('data-d') })));</script>
+<script>const vscode = acquireVsCodeApi(); document.querySelectorAll('[data-unlock]').forEach((b) => b.addEventListener('click', () => vscode.postMessage({ type: 'unlock', selector: b.getAttribute('data-s'), document: b.getAttribute('data-d') }))); document.querySelector('[data-dismiss]')?.addEventListener('click', () => vscode.postMessage({ type: 'dismiss' }));</script>
 </body></html>`;
     };
     previewPanel.webview.html = renderHtml();
@@ -356,6 +356,11 @@ ${frames}
       locksPreviewRefresh = undefined;
     });
     previewPanel.webview.onDidReceiveMessage(async (m) => {
+      if (m?.type === 'dismiss') {
+        locksPreviewRefresh = undefined;
+        previewPanel.dispose();
+        return;
+      }
       if (m?.type === 'unlock' && lockRegistry) {
         await lockRegistry.remove(m.selector, m.document);
         publish(state);
