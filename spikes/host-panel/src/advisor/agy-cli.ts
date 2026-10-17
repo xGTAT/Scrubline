@@ -248,19 +248,49 @@ async function runAgy(
       }
       let stdout = '';
       let stderr = '';
+      let settled = false;
+      const settle = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        fn();
+      };
       const timer = setTimeout(() => {
         child.kill('SIGKILL');
-        reject(new Error(`agy CLI timed out after ${timeoutMs}ms`));
+        settle(() => reject(new Error(`agy CLI timed out after ${timeoutMs}ms`)));
       }, timeoutMs);
-      child.stdout!.on('data', (d) => (stdout += d.toString()));
+      // Resolve as soon as the result event arrives in the stream. agy may
+      // linger after producing the result (agentic tool cleanup, browser
+      // teardown), and waiting for process exit would time out even though
+      // the answer is already available.
+      let buffer = '';
+      child.stdout!.on('data', (d) => {
+        const chunk = d.toString();
+        stdout += chunk;
+        buffer += chunk;
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            const event = JSON.parse(trimmed) as { event?: string; result?: unknown };
+            if (event.event === 'result' && event.result) {
+              child.kill('SIGKILL');
+              settle(() => resolve({ stdout, stderr, code: 0 }));
+              return;
+            }
+          } catch {
+            // Not a JSON line; keep accumulating.
+          }
+        }
+      });
       child.stderr!.on('data', (d) => (stderr += d.toString()));
       child.on('error', (err) => {
-        clearTimeout(timer);
-        reject(new Error(`agy CLI failed to start: ${err.message}`));
+        settle(() => reject(new Error(`agy CLI failed to start: ${err.message}`)));
       });
       child.on('close', (code) => {
-        clearTimeout(timer);
-        resolve({ stdout, stderr, code });
+        settle(() => resolve({ stdout, stderr, code }));
       });
       // The CLI may exit before reading the prompt (auth failure); never let an
       // early EPIPE crash the write.

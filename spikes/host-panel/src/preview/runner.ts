@@ -130,6 +130,36 @@ export class PreviewRunner {
       throw e;
     }
   }
+  /** Find the directory containing package.json within a snapshot, checking
+   * the root first, then one level of subdirectories (monorepo/workspace
+   * layouts where VS Code opens the parent of the project). Returns the
+   * absolute path to the project root, or the snapshot root if no
+   * package.json exists anywhere. */
+  private async findProjectRoot(snapshotRoot: string): Promise<string> {
+    try {
+      await fs.access(path.join(snapshotRoot, 'package.json'));
+      return snapshotRoot;
+    } catch {
+      // Not at root; check one level down.
+    }
+    try {
+      const entries = await fs.readdir(snapshotRoot, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const candidate = path.join(snapshotRoot, entry.name, 'package.json');
+        try {
+          await fs.access(candidate);
+          return path.join(snapshotRoot, entry.name);
+        } catch {
+          // Not this subdirectory.
+        }
+      }
+    } catch {
+      // Cannot read snapshot root.
+    }
+    return snapshotRoot;
+  }
+
   async historical(
     c: Checkpoint,
     trusted: boolean,
@@ -147,8 +177,15 @@ export class PreviewRunner {
     const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'scrubline-preview-'));
     try {
       await this.store.materialize(c, temp);
-      await this.linkWorkspaceDeps(temp);
-      const origin = await this.start(temp, trusted);
+      const projectRoot = await this.findProjectRoot(temp);
+      // The snapshot mirrors the workspace layout: if the project is in a
+      // subdirectory, the same relative path applies to the workspace.
+      const relProject = path.relative(temp, projectRoot);
+      const wsProjectRoot = relProject
+        ? path.join(this.workspaceRoot ?? '', relProject)
+        : this.workspaceRoot;
+      await this.linkWorkspaceDeps(projectRoot, wsProjectRoot);
+      const origin = await this.start(projectRoot, trusted);
       const url = new URL(spec.route, origin).toString();
       this.temp = temp;
       let screenshot: string | undefined;
@@ -204,15 +241,16 @@ export class PreviewRunner {
    * Caveat: linked dependencies are the workspace's current install, not the
    * checkpoint's lockfile; the preview is visually, not byte, faithful there.
    */
-  private async linkWorkspaceDeps(temp: string) {
-    if (!this.workspaceRoot) return;
+  private async linkWorkspaceDeps(projectRoot: string, workspaceProjectRoot?: string) {
+    const wsRoot = workspaceProjectRoot ?? this.workspaceRoot;
+    if (!wsRoot) return;
     try {
-      await fs.access(path.join(temp, 'package.json'));
+      await fs.access(path.join(projectRoot, 'package.json'));
     } catch {
       return;
     }
-    const source = path.join(this.workspaceRoot, 'node_modules');
-    const target = path.join(temp, 'node_modules');
+    const source = path.join(wsRoot, 'node_modules');
+    const target = path.join(projectRoot, 'node_modules');
     try {
       await fs.access(source);
       await fs.symlink(source, target, process.platform === 'win32' ? 'junction' : 'dir');
