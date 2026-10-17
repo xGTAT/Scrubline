@@ -2523,7 +2523,8 @@ ${frames}
       let models;
       try {
         models = await listAgyModels({
-          agyPath: config.get<string>('agyPath') || undefined
+          agyPath: config.get<string>('agyPath') || undefined,
+          log: (line) => diagnostics.appendLine(line)
         });
       } catch (e) {
         void vscode.window.showErrorMessage(
@@ -2533,7 +2534,7 @@ ${frames}
       }
       if (!models.length) {
         void vscode.window.showWarningMessage(
-          'The agy CLI returned no models. Run `agy models` in a terminal to check your sign-in.'
+          'The agy CLI returned no models. Run `agy models` in a terminal to check your sign-in. Diagnostics are in the Scrubline output channel.'
         );
         return;
       }

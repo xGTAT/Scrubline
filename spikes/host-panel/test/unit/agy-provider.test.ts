@@ -133,4 +133,47 @@ describe('parseAgyModelsOutput', () => {
       { slug: 'gpt-oss-120b-medium', name: 'GPT-OSS 120B (Medium)' }
     ]);
   });
+
+  it('parses CRLF output from Windows pipes', () => {
+    const sample =
+      'gemini-3.8-flash-high     Gemini 3.8 Flash (High)\r\n' +
+      'claude-sonnet-4-6         Claude Sonnet 4.6 (Thinking)\r\n';
+    expect(parseAgyModelsOutput(sample)).toEqual([
+      { slug: 'gemini-3.8-flash-high', name: 'Gemini 3.8 Flash (High)' },
+      { slug: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6 (Thinking)' }
+    ]);
+  });
+
+  it('strips ANSI styling some Windows CLIs emit when piped', () => {
+    const sample =
+      '\u001b[32mgemini-3.8-flash-high\u001b[0m     \u001b[1mGemini 3.8 Flash (High)\u001b[0m\n' +
+      '\u001b[32mclaude-sonnet-4-6\u001b[0m         Claude Sonnet 4.6 (Thinking)\n';
+    expect(parseAgyModelsOutput(sample)).toEqual([
+      { slug: 'gemini-3.8-flash-high', name: 'Gemini 3.8 Flash (High)' },
+      { slug: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6 (Thinking)' }
+    ]);
+  });
+
+  it('parses tab-separated non-TTY output', () => {
+    const sample =
+      'gemini-3.8-flash-high\tGemini 3.8 Flash (High)\n' +
+      'claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n';
+    expect(parseAgyModelsOutput(sample)).toEqual([
+      { slug: 'gemini-3.8-flash-high', name: 'Gemini 3.8 Flash (High)' },
+      { slug: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6 (Thinking)' }
+    ]);
+  });
+
+  it('skips headers, blanks and single-space prose lines', () => {
+    const sample = [
+      'Available models:',
+      '',
+      'gemini-3.8-flash-high     Gemini 3.8 Flash (High)',
+      'single space is not a table row',
+      'tip: run agy models --json for scripting'
+    ].join('\n');
+    expect(parseAgyModelsOutput(sample)).toEqual([
+      { slug: 'gemini-3.8-flash-high', name: 'Gemini 3.8 Flash (High)' }
+    ]);
+  });
 });

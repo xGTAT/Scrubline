@@ -40,6 +40,8 @@ export interface AgyCliOptions {
   timeoutMs?: number;
   /** Optional model override passed as --model. */
   model?: string;
+  /** Diagnostic log sink (e.g. the extension output channel). */
+  log?: (message: string) => void;
 }
 
 /**
@@ -243,11 +245,24 @@ export interface AgyModel {
   name: string;
 }
 
-/** Parses `agy models` output lines: "slug<2+ spaces>Display Name". */
+// Some CLIs still emit ANSI styling when piped on Windows, where the console
+// host enables virtual terminal processing, so strip escape sequences before
+// parsing instead of trusting isTTY behavior.
+/* eslint-disable no-control-regex -- matching ANSI escape sequences requires control chars */
+const ANSI_PATTERN =
+  /[\u001b\u009b][[\]()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
+/* eslint-enable no-control-regex */
+
+/**
+ * Parses `agy models` output lines: "slug<2+ spaces>Display Name".
+ * Tolerates CRLF endings, ANSI styling, padded columns (2+ spaces) and the
+ * tab-separated form non-TTY output can take. A single plain space is not a
+ * separator, so prose lines (headers, hints) never parse as models.
+ */
 export function parseAgyModelsOutput(stdout: string): AgyModel[] {
   const models: AgyModel[] = [];
-  for (const line of stdout.split('\n')) {
-    const m = line.trim().match(/^[-*\u2022]?\s*(\S+)\s{2,}(.+)$/);
+  for (const rawLine of stdout.replace(ANSI_PATTERN, '').split(/\r?\n/)) {
+    const m = rawLine.trim().match(/^[-*\u2022]?\s*(\S+)(?:[ ]{2,}|\t)(.+)$/);
     if (m) models.push({ slug: m[1], name: m[2].trim() });
   }
   return models;
@@ -262,6 +277,8 @@ export async function listAgyModels(options: AgyCliOptions = {}): Promise<AgyMod
   const agyPath = options.agyPath ?? 'agy';
   const resolvedPath = await resolveAgyExecutable(agyPath);
   const timeoutMs = 30000;
+  const log = options.log ?? (() => {});
+  log(`[agy models] spawn ${JSON.stringify(resolvedPath)} models (platform=${process.platform})`);
   return new Promise((resolve, reject) => {
     let child;
     try {
@@ -284,11 +301,22 @@ export async function listAgyModels(options: AgyCliOptions = {}): Promise<AgyMod
     });
     child.on('close', (code) => {
       clearTimeout(timer);
+      log(`[agy models] exit code=${code} stdout=${stdout.length}B stderr=${stderr.length}B`);
+      if (stdout) log(`[agy models] stdout head: ${JSON.stringify(stdout.slice(0, 400))}`);
+      if (stderr) log(`[agy models] stderr head: ${JSON.stringify(stderr.slice(0, 400))}`);
       if (code !== 0) {
         reject(new Error(`agy models exited with code ${code}: ${stderr.trim().slice(0, 300)}`));
         return;
       }
-      resolve(parseAgyModelsOutput(stdout));
+      let models = parseAgyModelsOutput(stdout);
+      if (!models.length && stderr.trim()) {
+        // Some CLIs print their table on stderr when stdout is not a TTY.
+        models = parseAgyModelsOutput(stderr);
+        if (models.length) log(`[agy models] parsed ${models.length} model(s) from stderr`);
+      }
+      if (!models.length && (stdout.trim() || stderr.trim()))
+        log('[agy models] output was non-empty but no model lines parsed (see heads above)');
+      resolve(models);
     });
   });
 }
