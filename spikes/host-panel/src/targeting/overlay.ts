@@ -196,7 +196,14 @@ export function installOverlay() {
       selected = candidate;
     }
     updateBadges();
-    void win.__scrublineSelect?.(candidate, selections);
+    const reported = win.__scrublineSelect?.(candidate, selections);
+    void reported?.catch((err: unknown) => {
+      const indicator = document.getElementById('scrubline-target-indicator');
+      if (indicator) {
+        indicator.textContent = `Pick failed: ${err instanceof Error ? err.message : String(err)}`;
+        indicator.style.background = 'rgb(160, 30, 30)';
+      }
+    });
     move(event);
   };
   const key = (e: KeyboardEvent) => {

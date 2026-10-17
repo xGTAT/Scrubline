@@ -2,12 +2,19 @@ import { DualVerificationEngine } from './verification/engine';
 import { diffPerf } from './preview/perf';
 import { replaceActivation } from './lifecycle';
 import { ChatbotController } from './chatbot/controller';
-import { DesignAdvisorService, DeterministicAdvisorProvider } from './chatbot/advisor';
-import { AgyCliAdvisorProvider } from './advisor/agy-cli';
+import { DesignAdvisorService } from './chatbot/advisor';
+import { AgyCliAdvisorProvider, listAgyModels } from './advisor/agy-cli';
 import { AntigravityLmAdvisorProvider, ChainedAdvisorProvider } from './advisor/lm';
 import { LockRegistry } from './locks/registry';
 import { ElementPicker } from './branches/picker';
-import { elementCandidate } from './branches/element';
+import {
+  composeLockedDocument,
+  elementCandidate,
+  extractAncestorContext,
+  extractElementBySelector,
+  extractElementOuterHtml,
+  extractStylesheetHrefs
+} from './branches/element';
 import {
   frameworkElementCandidate as staticElementCandidate,
   isFrameworkDocument
@@ -37,6 +44,8 @@ import { identifyBrowser } from './preview/spec';
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import * as path from 'node:path';
+import * as http from 'node:http';
+import * as os from 'node:os';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import { RenderCache, renderKey, prepareHistory } from './preview/cache';
@@ -166,7 +175,211 @@ export async function activate(context: vscode.ExtensionContext) {
   let rollback: TimelineState['rollback'];
   let selectiveTarget: import('./bridge/timeline').Checkpoint | undefined;
   let verificationReport: TimelineState['verificationReport'];
-  let selectiveMeta: { targetSelector?: string; documentPath?: string } | undefined;
+  let selectiveMeta:
+    | {
+        targetSelector?: string;
+        documentPath?: string;
+        indices?: number[];
+        sourceCheckpointId?: string;
+        sourceBranch?: string;
+      }
+    | undefined;
+
+  /** Re-renders the open Locked Elements Preview after lock changes. */
+  let locksPreviewRefresh: (() => void) | undefined;
+
+  /** Opens a separate preview page rendering each current document with its locked elements' pinned content applied. */
+  async function openLocksPreview(): Promise<void> {
+    if (!lockRegistry || !workspaceRoot) {
+      void vscode.window.showInformationMessage('Open a workspace with locked elements first.');
+      return;
+    }
+    const previewPanel = vscode.window.createWebviewPanel(
+      'scrubline.locksPreview',
+      'Locked Elements Preview',
+      vscode.ViewColumn.Beside,
+      { enableScripts: true, retainContextWhenHidden: true }
+    );
+    const contentType = (rel: string): string =>
+      rel.endsWith('.html')
+        ? 'text/html; charset=utf-8'
+        : rel.endsWith('.css')
+          ? 'text/css; charset=utf-8'
+          : rel.endsWith('.js')
+            ? 'text/javascript; charset=utf-8'
+            : rel.endsWith('.svg')
+              ? 'image/svg+xml'
+              : 'application/octet-stream';
+    const server = http.createServer((req, res) => {
+      void (async () => {
+        try {
+          const pathname = new URL(req.url ?? '/', 'http://locks.local').pathname;
+          const rel = decodeURIComponent(pathname.replace(/^\/+/, ''));
+          if (!rel || !safePath(rel)) {
+            res.statusCode = 400;
+            res.end();
+            return;
+          }
+          // Isolated locked-element card: the pinned element rendered with the
+          // document's own stylesheets and a highlight frame.
+          const card = rel.match(/^__lock__\/(\d+)$/);
+          if (card) {
+            const lock = lockRegistry!.list()[Number(card[1])];
+            if (!lock?.pinnedHtml) {
+              res.statusCode = 404;
+              res.end('no pinned content');
+              return;
+            }
+            let links = '';
+            let context = { bodyAttrs: [], open: [], close: [] } as ReturnType<
+              typeof extractAncestorContext
+            >;
+            try {
+              const docText = (
+                await fs.readFile(path.join(workspaceRoot!, lock.document))
+              ).toString('utf8');
+              links = extractStylesheetHrefs(docText)
+                .map(
+                  (h) =>
+                    `<link rel="stylesheet" href="/${lock.document.split('/').slice(0, -1).concat(h).join('/')}">`
+                )
+                .join('');
+              // Keep the element's ancestor context so contextual styles
+              // (colors, backgrounds) survive the isolated render.
+              context = extractAncestorContext(docText, lock.selector);
+            } catch {
+              links = '';
+            }
+            const bodyAttrs = context.bodyAttrs
+              .map((a) => ` ${a.name}="${a.value.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"`)
+              .join('');
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            res.end(
+              `<!doctype html><html><head><meta charset="utf-8">${links}<style>` +
+                `body{margin:0;padding:16px}` +
+                `.scrubline-lock-frame{outline:3px solid #e5a00d;outline-offset:2px;box-shadow:0 0 0 6px rgba(229,160,13,0.25);display:inline-block;max-width:100%}` +
+                `.scrubline-lock-badge{position:fixed;top:6px;right:8px;background:#e5a00d;color:#000;font:600 11px/1.6 sans-serif;padding:2px 8px;border-radius:3px;z-index:9999}` +
+                `</style></head><body${bodyAttrs}><span class="scrubline-lock-badge">LOCKED</span>${context.open.join('')}<div class="scrubline-lock-frame">${lock.pinnedHtml}</div>${context.close.join('')}</body></html>`
+            );
+            return;
+          }
+          let body: Buffer;
+          try {
+            body = await fs.readFile(path.join(workspaceRoot!, rel));
+          } catch {
+            res.statusCode = 404;
+            res.end('not found');
+            return;
+          }
+          if (rel.endsWith('.html')) {
+            const docLocks = lockRegistry!.list().filter((l) => l.document === rel && l.pinnedHtml);
+            if (docLocks.length) {
+              const composed = composeLockedDocument(body.toString('utf8'), docLocks, {
+                highlight: true
+              });
+              body = Buffer.from(composed.html, 'utf8');
+            }
+          }
+          res.setHeader('Content-Type', contentType(rel));
+          res.end(body);
+        } catch {
+          res.statusCode = 500;
+          res.end();
+        }
+      })();
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    previewPanel.onDidDispose(() => server.close());
+    const esc = (v: string): string =>
+      v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const renderHtml = (): string => {
+      const locks = lockRegistry!.list();
+      const docs = [...new Set(locks.map((l) => l.document))];
+      const cards = locks
+        .map(
+          (l, i) =>
+            `<section style="margin:0 0 20px;border:1px solid #555;border-radius:6px;padding:10px">` +
+            `<header style="margin-bottom:8px"><code>${esc(l.selector)}</code> in <code>${esc(l.document)}</code>` +
+            (l.sourceBranch ? ` (from <strong>${esc(l.sourceBranch)}</strong>)` : '') +
+            ` <button data-unlock data-s="${esc(l.selector)}" data-d="${esc(l.document)}">Unlock</button></header>` +
+            (l.pinnedHtml
+              ? `<iframe src="http://127.0.0.1:${port}/__lock__/${i}?v=${Date.now()}" style="width:100%;height:180px;border:1px solid #e5a00d;border-radius:4px;background:#fff"></iframe>`
+              : '<em>Advisory only - nothing pinned; pick the element again to pin its content.</em>') +
+            `</section>`
+        )
+        .join('');
+      const frames = docs
+        .map(
+          (d) =>
+            `<h3>${esc(d)}</h3><iframe src="http://127.0.0.1:${port}/${encodeURI(d)}?v=${Date.now()}" style="width:100%;height:420px;border:1px solid #555;background:#fff"></iframe>`
+        )
+        .join('');
+      return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src http://127.0.0.1:${port}; style-src 'unsafe-inline'; script-src 'unsafe-inline';"></head><body>
+<h2>Locked elements (${locks.length})</h2>
+<p>These elements must not change. Each one is shown below with its pinned content highlighted.</p>
+${cards || '<p>No locked elements yet. Pick an element and use Lock element.</p>'}
+<details style="margin-top:16px"><summary>Page context (current pages with locked elements outlined)</summary>
+${frames}
+</details>
+<script>const vscode = acquireVsCodeApi(); document.querySelectorAll('[data-unlock]').forEach((b) => b.addEventListener('click', () => vscode.postMessage({ type: 'unlock', selector: b.getAttribute('data-s'), document: b.getAttribute('data-d') })));</script>
+</body></html>`;
+    };
+    previewPanel.webview.html = renderHtml();
+    locksPreviewRefresh = () => {
+      previewPanel.webview.html = renderHtml();
+    };
+    previewPanel.onDidDispose(() => {
+      locksPreviewRefresh = undefined;
+    });
+    previewPanel.webview.onDidReceiveMessage(async (m) => {
+      if (m?.type === 'unlock' && lockRegistry) {
+        await lockRegistry.remove(m.selector, m.document);
+        publish(state);
+        previewPanel.webview.html = renderHtml();
+      }
+    });
+  }
+  // Tracks the element pick behind a pending selective review so a second,
+  // conflicting pick of the same element from a different alternative is
+  // refused instead of silently replacing the pending one. Keyed by the
+  // selectiveTarget checkpoint id, so any other review flow invalidates it.
+  let selectivePick:
+    | {
+        targetId: string;
+        branchId?: string;
+        branchName?: string;
+        document: string;
+        indices?: number[];
+        elementId?: string;
+      }
+    | undefined;
+  const isIndexPrefix = (a: number[], b: number[]) =>
+    a.length < b.length && a.every((v, i) => v === b[i]);
+  const reportConflictingPick = (
+    candidate: import('./bridge/timeline').Checkpoint,
+    document: string,
+    branchId: string | undefined,
+    branchName: string,
+    elementMatches: boolean
+  ): boolean => {
+    if (
+      !selectivePick ||
+      !selectiveTarget ||
+      selectivePick.targetId !== selectiveTarget.id ||
+      selectivePick.branchId === branchId ||
+      selectivePick.document !== document ||
+      !elementMatches
+    )
+      return false;
+    const pendingDoc = selectiveTarget.files.find((f) => f.path === document);
+    const newDoc = candidate.files.find((f) => f.path === document);
+    if (!pendingDoc || !newDoc || pendingDoc.hash === newDoc.hash) return false;
+    void vscode.window.showErrorMessage(
+      `Conflicting element picks: this element in ${document} was already picked from '${selectivePick.branchName ?? 'main'}' and the pick from '${branchName}' differs. Apply or undo the pending pick first.`
+    );
+    return true;
+  };
   let comparison: TimelineState['comparison'];
   const branchPreviews = new Map<
     string,
@@ -181,6 +394,39 @@ export async function activate(context: vscode.ExtensionContext) {
   const backendCache = new Map<string, TimelineState['backend']>();
   let mcpBridge: McpBridge | undefined;
   let lockRegistry: LockRegistry | undefined;
+  /**
+   * Element-level lock enforcement: when a checkpoint's touched files contain
+   * a locked element whose current markup no longer matches the pinned
+   * version, warn and offer to restore the locked markup in place.
+   */
+  const checkLockedElementDrift = async (paths: readonly string[]): Promise<void> => {
+    if (!lockRegistry || !paths.length || !workspaceRoot) return;
+    const touched = lockRegistry.list().filter((l) => l.pinnedHtml && paths.includes(l.document));
+    for (const lock of touched) {
+      try {
+        const file = path.join(workspaceRoot, lock.document);
+        const current = await fs.readFile(file, 'utf8');
+        const now = extractElementBySelector(current, lock.selector);
+        if (now === null || now === lock.pinnedHtml) continue;
+        diagnostics.appendLine(`locked element drift: ${lock.selector} in ${lock.document}`);
+        const pick = await vscode.window.showWarningMessage(
+          `Locked element "${lock.label || lock.selector}" in ${lock.document} was modified.`,
+          'Restore locked version'
+        );
+        if (pick !== 'Restore locked version') continue;
+        const next = composeLockedDocument(current, [lock]);
+        if (next.applied.length) {
+          await atomicWrite(file, Buffer.from(next.html));
+          void vscode.window.showInformationMessage(
+            `Restored the locked element in ${lock.document}.`
+          );
+        }
+      } catch (e) {
+        diagnostics.appendLine(`lock drift check failed for ${lock.selector}: ${e}`);
+      }
+    }
+  };
+
   let lockDrift: TimelineState['lockDrift'];
   let lastNewestRowId: string | undefined;
   let chatbotController: ChatbotController | undefined;
@@ -209,6 +455,7 @@ export async function activate(context: vscode.ExtensionContext) {
       lockDrift = touched.length
         ? touched.map((l) => ({ selector: l.selector, document: l.document, label: l.label }))
         : undefined;
+      void checkLockedElementDrift(newest.changedPaths);
     }
     const branchList = alternatives?.list();
     const branchRenderKey = runner ? specificationKey(runner.config) : undefined;
@@ -294,6 +541,7 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   };
   const folders = vscode.workspace.workspaceFolders ?? [];
+  let workspaceRoot: string | undefined;
   let config = vscode.workspace.getConfiguration('scrubline', folders[0]?.uri);
   let timeline: Timeline | undefined;
   let restore: Restore | undefined;
@@ -397,12 +645,13 @@ export async function activate(context: vscode.ExtensionContext) {
       return;
     }
     const root = folders[0].uri.fsPath;
+    workspaceRoot = root;
     diagnostics.appendLine(
       `Scrubline ${context.extension.packageJSON.version}: starting writer in PID ${process.pid}.`
     );
     const storeRoot = await scopedStore(
       context.storageUri?.fsPath ?? context.globalStorageUri.fsPath,
-      root
+      workspaceRoot
     );
     timeline = new Timeline(
       root,
@@ -446,7 +695,8 @@ export async function activate(context: vscode.ExtensionContext) {
         preview = { status: 'error', message };
         publish(state);
       },
-      (message) => diagnostics.appendLine(message)
+      (message) => diagnostics.appendLine(message),
+      workspaceRoot
     );
     Object.assign(runner.config, await identifyBrowser(runner.config));
     cache = new RenderCache(storeRoot, renderKey(runner.config));
@@ -541,14 +791,13 @@ export async function activate(context: vscode.ExtensionContext) {
     alternatives = new Alternatives(timeline.store, timeline.limits);
     lockRegistry = new LockRegistry(timeline.store.root);
     await lockRegistry.open();
+    // Share lock context with the Antigravity agent automatically.
+    void startMcpServer(false);
     lockDrift = undefined;
     lastNewestRowId = undefined;
     const advisorBackend = config.get<string>('advisorBackend') ?? 'auto';
-    const deterministicAdvisor = new DeterministicAdvisorProvider();
     let advisorService: DesignAdvisorService;
-    if (advisorBackend === 'deterministic') {
-      advisorService = new DesignAdvisorService(deterministicAdvisor);
-    } else {
+    {
       const cliAdvisor = new AgyCliAdvisorProvider({
         agyPath: config.get<string>('agyPath') || undefined,
         timeoutMs: config.get<number>('advisorTimeoutMs') || undefined,
@@ -567,11 +816,10 @@ export async function activate(context: vscode.ExtensionContext) {
           ? cliAdvisor
           : advisorBackend === 'ide'
             ? ideAdvisor
-            : new ChainedAdvisorProvider([ideAdvisor, cliAdvisor]);
-      advisorService =
-        advisorBackend === 'auto'
-          ? new DesignAdvisorService(primary, deterministicAdvisor)
-          : new DesignAdvisorService(primary);
+            : new ChainedAdvisorProvider([cliAdvisor, ideAdvisor]);
+      // No offline fallback: when every model backend fails, the real error is
+      // shown in the chat. Scrubline never answers from hardcoded content.
+      advisorService = new DesignAdvisorService(primary);
     }
     chatbotController = new ChatbotController(
       timeline.store,
@@ -620,7 +868,8 @@ export async function activate(context: vscode.ExtensionContext) {
       { ...runner!.config, port: runner!.config.port + 3 },
       timeline!.store,
       undefined,
-      (message) => diagnostics.appendLine(message)
+      (message) => diagnostics.appendLine(message),
+      workspaceRoot
     );
     renderJob = (async () => {
       try {
@@ -877,9 +1126,9 @@ export async function activate(context: vscode.ExtensionContext) {
             return;
           }
           if (!timeline?.store.checkpoints.length) {
-            void vscode.window.showWarningMessage(
-              'Capture a checkpoint before opening fullscreen.'
-            );
+            const hint = 'Capture a checkpoint before opening fullscreen.';
+            void vscode.window.showWarningMessage(hint);
+            publish({ ...state, message: hint });
             return;
           }
           try {
@@ -1121,7 +1370,8 @@ export async function activate(context: vscode.ExtensionContext) {
                     { ...config, width, guard: message.guard, port: config.port + 4 },
                     store,
                     undefined,
-                    (text) => diagnostics.appendLine(text)
+                    (text) => diagnostics.appendLine(text),
+                    workspaceRoot
                   );
                   try {
                     const result = await probe.historical(
@@ -1329,7 +1579,18 @@ export async function activate(context: vscode.ExtensionContext) {
           if (selected) await enqueuePreview(selected);
           return;
         }
-        if (!timeline || !restore || !vscode.workspace.isTrusted) return;
+        if (!timeline || !restore || !vscode.workspace.isTrusted) {
+          // In Restricted Mode every action below is inert; say so in the
+          // panel instead of letting buttons appear to do nothing.
+          if (!vscode.workspace.isTrusted) {
+            publish({
+              ...state,
+              message:
+                'This workspace is in Restricted Mode. Trust the workspace to enable Scrubline actions.'
+            });
+          }
+          return;
+        }
         const target =
           'id' in message ? timeline.store.checkpoints.find((c) => c.id === message.id) : undefined;
         if (message.type === 'cancel-render') {
@@ -1475,20 +1736,51 @@ export async function activate(context: vscode.ExtensionContext) {
           }
           const lockSelector = selectiveMeta.targetSelector;
           const lockDocument = selectiveMeta.documentPath;
-          await lockRegistry.add({
-            selector: lockSelector,
-            document: lockDocument,
-            label: message.label
-          });
+          // Pin the exact picked element HTML from the checkpoint it came
+          // from, so the locked-elements preview can render it into the
+          // current document and conflicts across alternatives are detectable.
+          let pinnedHtml: string | undefined;
+          if (selectiveTarget && timeline && selectiveMeta.indices?.length) {
+            try {
+              const picked = selectiveTarget.files.find((f) => f.path === lockDocument);
+              if (picked) {
+                const bytes = await timeline.store.readBlob(picked.hash);
+                pinnedHtml = extractElementOuterHtml(bytes.toString('utf8'), selectiveMeta.indices);
+              }
+            } catch {
+              pinnedHtml = undefined;
+            }
+          }
+          try {
+            await lockRegistry.add({
+              selector: lockSelector,
+              document: lockDocument,
+              label: message.label,
+              pinnedHtml,
+              sourceCheckpointId: selectiveMeta.sourceCheckpointId,
+              sourceBranch: selectiveMeta.sourceBranch
+            });
+          } catch (e) {
+            const detail = e instanceof Error ? e.message : String(e);
+            void vscode.window.showErrorMessage(`Lock failed: ${detail}`);
+            publish({ ...state, message: detail });
+            return;
+          }
           publish({
             ...state,
             message: `Locked ${lockSelector} in ${lockDocument}. It must not be changed.`
           });
+          locksPreviewRefresh?.();
+        }
+        if (message.type === 'open-locks-preview') {
+          await openLocksPreview();
+          return;
         }
         if (message.type === 'unlock-element') {
           if (!lockRegistry) return;
           await lockRegistry.remove(message.selector, message.document);
           publish({ ...state, message: `Unlocked ${message.selector} in ${message.document}.` });
+          locksPreviewRefresh?.();
         }
         if (message.type === 'set-selection') {
           const cap = Math.min(50, config.get<number>('multiSelectLimit') ?? 20);
@@ -1580,13 +1872,15 @@ export async function activate(context: vscode.ExtensionContext) {
             { ...runner.config, port: runner.config.port + 1 },
             timeline.store,
             undefined,
-            (message) => diagnostics.appendLine(message)
+            (message) => diagnostics.appendLine(message),
+            workspaceRoot
           );
           const b = new PreviewRunner(
             { ...runner.config, port: runner.config.port + 2 },
             timeline.store,
             undefined,
-            (message) => diagnostics.appendLine(message)
+            (message) => diagnostics.appendLine(message),
+            workspaceRoot
           );
           try {
             const x = await a.historical(left, true);
@@ -1619,7 +1913,10 @@ export async function activate(context: vscode.ExtensionContext) {
           const pickedSource = target;
           const pickedRunner = new PreviewRunner(
             { ...runner.config, port: runner.config.port + 7 },
-            timeline.store
+            timeline.store,
+            undefined,
+            undefined,
+            workspaceRoot
           );
           elementRunner = pickedRunner;
           const result = await pickedRunner.historical(target, true, 'element-picker');
@@ -1705,6 +2002,24 @@ export async function activate(context: vscode.ExtensionContext) {
                     throw htmlError ?? fiberError ?? staticError;
                   }
                 }
+                const pickBranchId = pickedSource.branch?.id;
+                const pickBranchName = pickedSource.branch?.name ?? 'main';
+                const sameElement =
+                  !!selectivePick?.indices &&
+                  ((selectivePick.indices.length === indices.length &&
+                    selectivePick.indices.every((v, i) => v === indices[i])) ||
+                    isIndexPrefix(selectivePick.indices, indices) ||
+                    isIndexPrefix(indices, selectivePick.indices));
+                if (
+                  reportConflictingPick(
+                    candidate,
+                    document,
+                    pickBranchId,
+                    pickBranchName,
+                    sameElement
+                  )
+                )
+                  return;
                 review = await timeline!.exclusive(() =>
                   restore!.review(candidate, current, state.unsaved)
                 );
@@ -1712,10 +2027,28 @@ export async function activate(context: vscode.ExtensionContext) {
                   'Element content, inline styles and paired exclusive CSS only. Shared styles and unmatched rules stay current; this may differ from the historical appearance.' +
                   (notes.length ? ' ' + notes.join(' ') : '');
                 selectiveTarget = candidate;
-                selectiveMeta = { targetSelector: '', documentPath: document };
+                const lockSelector = info.id
+                  ? `#${info.id}`
+                  : info.testId
+                    ? `[data-testid="${info.testId.replace(/"/g, '')}"]`
+                    : indices.reduce((sel, i) => `${sel} > :nth-child(${i + 1})`, 'body');
+                selectiveMeta = {
+                  targetSelector: lockSelector,
+                  documentPath: document,
+                  indices,
+                  sourceCheckpointId: pickedSource.id,
+                  sourceBranch: pickBranchName
+                };
                 multiConflicts = [];
                 multiAttribution = undefined;
                 selected = pickedSource.id;
+                selectivePick = {
+                  targetId: candidate.id,
+                  branchId: pickBranchId,
+                  branchName: pickBranchName,
+                  document,
+                  indices
+                };
                 try {
                   verificationReport = await DualVerificationEngine.verifyStaticDocuments({
                     store: timeline!.store,
@@ -1792,6 +2125,17 @@ export async function activate(context: vscode.ExtensionContext) {
           } else {
             candidate = await elementCandidate(timeline.store, target, current, document, element);
           }
+          const byIdMatches = !!selectivePick?.elementId && selectivePick.elementId === element;
+          if (
+            reportConflictingPick(
+              candidate,
+              document,
+              target.branch?.id,
+              target.branch?.name ?? 'main',
+              byIdMatches
+            )
+          )
+            return;
           review = await timeline.exclusive(() =>
             restore!.review(candidate, current, state.unsaved)
           );
@@ -1799,7 +2143,19 @@ export async function activate(context: vscode.ExtensionContext) {
             'Element content, inline styles and paired exclusive CSS only. Shared styles and unmatched rules stay current; this may differ from the historical appearance.' +
             (frameworkNotes.length ? ' ' + frameworkNotes.join(' ') : '');
           selectiveTarget = candidate;
-          selectiveMeta = { targetSelector: `#${element}`, documentPath: document };
+          selectiveMeta = {
+            targetSelector: `#${element}`,
+            documentPath: document,
+            sourceCheckpointId: target.id,
+            sourceBranch: target.branch?.name ?? 'main'
+          };
+          selectivePick = {
+            targetId: candidate.id,
+            branchId: target.branch?.id,
+            branchName: target.branch?.name ?? 'main',
+            document,
+            elementId: element
+          };
           multiConflicts = [];
           multiAttribution = undefined;
           selected = target.id;
@@ -2216,10 +2572,15 @@ export async function activate(context: vscode.ExtensionContext) {
           return;
         }
         previewQueue = Promise.resolve();
+        const failureMessage = e instanceof Error ? e.message : 'Action failed.';
+        if (['apply-reviewed', 'pick-element', 'pick-element-id'].includes(message.type))
+          void vscode.window.showErrorMessage(
+            `${message.type === 'apply-reviewed' ? 'Restore' : 'Element pick'} failed: ${failureMessage}`
+          );
         publish({
           ...state,
           status: 'error',
-          message: e instanceof Error ? e.message : 'Action failed.'
+          message: failureMessage
         });
       }
     });
@@ -2237,137 +2598,198 @@ export async function activate(context: vscode.ExtensionContext) {
       { webviewOptions: { retainContextWhenHidden: true } }
     )
   );
-  context.subscriptions.push(
-    vscode.commands.registerCommand('scrubline.startMcp', async () => {
-      if (!timeline || !restore || !vscode.workspace.isTrusted)
-        throw new Error('Open one trusted local workspace first.');
-      await mcpBridge?.stop();
-      mcpBridge = new McpBridge(timeline.store.root, {
-        listLocked: async () => {
-          if (!vscode.workspace.isTrusted) throw new Error('Workspace not trusted.');
-          return {
-            locks: (lockRegistry?.list() ?? []).map((l) => ({
-              selector: l.selector,
-              document: l.document,
-              label: l.label,
-              lockedAt: l.lockedAt
-            })),
-            message:
-              'These elements are locked by the user. Do not modify them, their owning documents, or their scoped styles. Advise instead.'
-          };
-        },
-        list: async () => {
-          if (!vscode.workspace.isTrusted) throw new Error('Workspace not trusted.');
-          const values = await secrets();
-          return {
-            checkpoints: state.rows.map((r) => ({
-              id: r.id,
-              createdAt: r.createdAt,
-              changedPaths: r.changedPaths.map((p) => redact(p, values))
-            }))
-          };
-        },
-        review: async (id) => {
-          if (!vscode.workspace.isTrusted) throw new Error('Workspace not trusted.');
-          const redactions = await secrets();
-          const target = timeline!.store.checkpoints.find((c) => c.id === id);
-          if (!target) throw new Error('Unknown checkpoint.');
-          const checked = await timeline!.exclusive(() =>
-            restore!.review(target, timeline!.store.checkpoints.at(-1)!, state.unsaved)
-          );
-          selected = id;
-          review = {
-            token: checked.token,
-            checkpoint: id,
-            paths: checked.paths,
-            conflicts: checked.conflicts
-          };
-          publish(state);
-          publishSelection(id);
-          await vscode.commands.executeCommand('scrubline.openPanel');
-          return {
-            status: 'pending_user_confirmation',
-            checkpoint: id,
-            changedPaths: checked.paths.map((p) => redact(p, redactions)),
-            conflicts: checked.conflicts.map((p) => redact(p, redactions)),
-            message: 'Review exact paths and confirm in the Scrubline panel. No files restored.'
-          };
-        },
-        reviewMulti: async (ids, mode, overrides) => {
-          if (!vscode.workspace.isTrusted) throw new Error('Workspace not trusted.');
-          const redactions = await secrets();
-          const cap = Math.min(50, config.get<number>('multiSelectLimit') ?? 20);
-          const current = timeline!.store.checkpoints.filter((c) => !c.branch).at(-1)!;
-          const composed = await composeCheckpoints(
-            timeline!.store.checkpoints,
-            current,
-            ids,
-            mode,
-            overrides ?? {},
-            cap,
-            timeline!.store
-          );
-          review = undefined;
-          selectiveTarget = undefined;
-          multiConflicts = [];
-          multiAttribution = undefined;
-          multiConflicts = composed.conflicts;
-          multiAttribution = { kind: 'composed', mode, sources: ids };
-          selection = { ids, mode };
-          selectiveTarget = composed.target;
-          const checked = await timeline!.exclusive(() =>
-            restore!.review(composed.target, current, state.unsaved)
-          );
-          checked.multi = {
-            mode,
-            sources: ids,
-            decisions: composed.decisions,
-            warnings: composed.warnings,
-            hints: composed.hints,
-            blocked: composed.conflicts,
-            overrides,
-            compositionId: composed.compositionId
-          };
-          review = checked;
-          publish(state);
-          await vscode.commands.executeCommand('scrubline.openPanel');
-          await renderCombinedPreview(composed.target, ids.length, mode);
-          publish(state);
-          return {
-            status: 'pending_user_confirmation',
-            mode,
-            sources: ids,
-            changedPaths: checked.paths.map((p) => redact(p, redactions)),
-            driftConflicts: checked.conflicts.map((p) => redact(p, redactions)),
-            compositionConflicts: composed.conflicts.map((p) => redact(p, redactions)),
-            decisions: composed.decisions.map((d) => ({
-              ...d,
-              path: redact(d.path, redactions)
-            })),
-            warnings: composed.warnings,
-            message: 'Review exact paths and confirm in the Scrubline panel. No files restored.'
-          };
-        }
-      });
-      const connection = await mcpBridge.start();
+  /**
+   * Starts (or restarts) the Scrubline MCP bridge and registers it into
+   * Antigravity's mcp_config.json so the IDE agent shares lock context.
+   * The command also shows the raw config for other MCP clients.
+   */
+  const startMcpServer = async (showDocument: boolean): Promise<string> => {
+    if (!timeline || !restore || !vscode.workspace.isTrusted)
+      throw new Error('Open one trusted local workspace first.');
+    await mcpBridge?.stop();
+    mcpBridge = new McpBridge(timeline.store.root, {
+      listLocked: async () => {
+        if (!vscode.workspace.isTrusted) throw new Error('Workspace not trusted.');
+        return {
+          locks: (lockRegistry?.list() ?? []).map((l) => ({
+            selector: l.selector,
+            document: l.document,
+            label: l.label,
+            lockedAt: l.lockedAt
+          })),
+          message:
+            'These elements are locked by the user. Do not modify them, their owning documents, or their scoped styles. Advise instead.'
+        };
+      },
+      list: async () => {
+        if (!vscode.workspace.isTrusted) throw new Error('Workspace not trusted.');
+        const values = await secrets();
+        return {
+          checkpoints: state.rows.map((r) => ({
+            id: r.id,
+            createdAt: r.createdAt,
+            changedPaths: r.changedPaths.map((p) => redact(p, values))
+          }))
+        };
+      },
+      review: async (id) => {
+        if (!vscode.workspace.isTrusted) throw new Error('Workspace not trusted.');
+        const redactions = await secrets();
+        const target = timeline!.store.checkpoints.find((c) => c.id === id);
+        if (!target) throw new Error('Unknown checkpoint.');
+        const checked = await timeline!.exclusive(() =>
+          restore!.review(target, timeline!.store.checkpoints.at(-1)!, state.unsaved)
+        );
+        selected = id;
+        review = {
+          token: checked.token,
+          checkpoint: id,
+          paths: checked.paths,
+          conflicts: checked.conflicts
+        };
+        publish(state);
+        publishSelection(id);
+        await vscode.commands.executeCommand('scrubline.openPanel');
+        return {
+          status: 'pending_user_confirmation',
+          checkpoint: id,
+          changedPaths: checked.paths.map((p) => redact(p, redactions)),
+          conflicts: checked.conflicts.map((p) => redact(p, redactions)),
+          message: 'Review exact paths and confirm in the Scrubline panel. No files restored.'
+        };
+      },
+      reviewMulti: async (ids, mode, overrides) => {
+        if (!vscode.workspace.isTrusted) throw new Error('Workspace not trusted.');
+        const redactions = await secrets();
+        const cap = Math.min(50, config.get<number>('multiSelectLimit') ?? 20);
+        const current = timeline!.store.checkpoints.filter((c) => !c.branch).at(-1)!;
+        const composed = await composeCheckpoints(
+          timeline!.store.checkpoints,
+          current,
+          ids,
+          mode,
+          overrides ?? {},
+          cap,
+          timeline!.store
+        );
+        review = undefined;
+        selectiveTarget = undefined;
+        multiConflicts = [];
+        multiAttribution = undefined;
+        multiConflicts = composed.conflicts;
+        multiAttribution = { kind: 'composed', mode, sources: ids };
+        selection = { ids, mode };
+        selectiveTarget = composed.target;
+        const checked = await timeline!.exclusive(() =>
+          restore!.review(composed.target, current, state.unsaved)
+        );
+        checked.multi = {
+          mode,
+          sources: ids,
+          decisions: composed.decisions,
+          warnings: composed.warnings,
+          hints: composed.hints,
+          blocked: composed.conflicts,
+          overrides,
+          compositionId: composed.compositionId
+        };
+        review = checked;
+        publish(state);
+        await vscode.commands.executeCommand('scrubline.openPanel');
+        await renderCombinedPreview(composed.target, ids.length, mode);
+        publish(state);
+        return {
+          status: 'pending_user_confirmation',
+          mode,
+          sources: ids,
+          changedPaths: checked.paths.map((p) => redact(p, redactions)),
+          driftConflicts: checked.conflicts.map((p) => redact(p, redactions)),
+          compositionConflicts: composed.conflicts.map((p) => redact(p, redactions)),
+          decisions: composed.decisions.map((d) => ({
+            ...d,
+            path: redact(d.path, redactions)
+          })),
+          warnings: composed.warnings,
+          message: 'Review exact paths and confirm in the Scrubline panel. No files restored.'
+        };
+      }
+    });
+    const connection = await mcpBridge.start();
+    const serverEntry = {
+      command: 'node',
+      args: [mcpRuntime, '--connection', connection]
+    };
+    // Register with Antigravity's agent MCP config so the IDE agent sees
+    // Scrubline's tools (locks, checkpoints, review) without a manual paste.
+    try {
+      const configPath = path.join(os.homedir(), '.gemini', 'antigravity', 'mcp_config.json');
+      let existing: { mcpServers?: Record<string, unknown> } = {};
+      try {
+        const raw = await fs.readFile(configPath, 'utf8');
+        if (raw.trim()) existing = JSON.parse(raw) as typeof existing;
+      } catch {
+        existing = {};
+      }
+      existing.mcpServers = { ...(existing.mcpServers ?? {}), scrubline: serverEntry };
+      await fs.mkdir(path.dirname(configPath), { recursive: true });
+      await atomicWrite(configPath, Buffer.from(JSON.stringify(existing, null, 2)));
+    } catch (e) {
+      diagnostics.appendLine(`MCP config registration failed: ${e}`);
+    }
+    if (showDocument) {
       const document = await vscode.workspace.openTextDocument({
         language: 'json',
-        content: JSON.stringify(
-          {
-            mcpServers: {
-              scrubline: {
-                command: 'node',
-                args: [mcpRuntime, '--connection', connection]
-              }
-            }
-          },
-          null,
-          2
-        )
+        content: JSON.stringify({ mcpServers: { scrubline: serverEntry } }, null, 2)
       });
       await vscode.window.showTextDocument(document);
-      return connection;
+    }
+    return connection;
+  };
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('scrubline.startMcp', () => startMcpServer(true)),
+    vscode.commands.registerCommand('scrubline.pickAdvisorModel', async () => {
+      const config = vscode.workspace.getConfiguration('scrubline');
+      let models;
+      try {
+        models = await listAgyModels({
+          agyPath: config.get<string>('agyPath') || undefined,
+          log: (line) => diagnostics.appendLine(line)
+        });
+      } catch (e) {
+        void vscode.window.showErrorMessage(
+          `Could not list agy CLI models: ${e instanceof Error ? e.message : String(e)}`
+        );
+        return;
+      }
+      if (!models.length) {
+        void vscode.window.showWarningMessage(
+          'The agy CLI returned no models. Run `agy models` in a terminal to check your sign-in. Diagnostics are in the Scrubline output channel.'
+        );
+        return;
+      }
+      const pick = await vscode.window.showQuickPick(
+        [
+          {
+            label: '$(sync) CLI default',
+            description: 'Let the agy CLI choose the model',
+            slug: ''
+          },
+          ...models.map((m) => ({ label: m.slug, description: m.name, slug: m.slug }))
+        ],
+        { placeHolder: 'Advisor model shared by the Scrubline chatbot and the agy CLI' }
+      );
+      if (!pick) return;
+      await config.update(
+        'advisorModel',
+        pick.slug || undefined,
+        vscode.ConfigurationTarget.Workspace
+      );
+      void vscode.window.showInformationMessage(
+        pick.slug ? `Advisor model set to ${pick.slug}.` : 'Advisor model reset to the CLI default.'
+      );
     }),
+
     vscode.commands.registerCommand('scrubline.compactHistory', async () => {
       if (!timeline) return;
       const bytes = await timeline.exclusive(() => timeline!.store.compact());
@@ -2456,7 +2878,8 @@ export async function activate(context: vscode.ExtensionContext) {
               preview = { status: 'error', message };
               publish(state);
             },
-            (message) => diagnostics.appendLine(message)
+            (message) => diagnostics.appendLine(message),
+            workspaceRoot
           );
           Object.assign(runner.config, await identifyBrowser(runner.config));
           await discoverPages(folders[0].uri.fsPath);

@@ -47,12 +47,14 @@ export class PreviewRunner {
   private temp?: string;
   private stopped = false;
   private live = false;
+  private origin?: string;
   private lastExit?: string;
   constructor(
     readonly config: PreviewConfig,
     readonly store: HistoryStore,
     readonly onExit?: (message: string) => void,
-    readonly diagnostic?: (message: string) => void
+    readonly diagnostic?: (message: string) => void,
+    readonly workspaceRoot?: string
   ) {}
   async start(workspace: string, trusted: boolean) {
     specification(this.config);
@@ -71,13 +73,17 @@ export class PreviewRunner {
       shell: true,
       detached: process.platform !== 'win32',
       windowsHide: true,
-      stdio: ['ignore', 'ignore', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, PORT: String(this.config.port) }
     });
     let exited = false;
     let stderr = '';
+    let lastProbeError = '';
     this.process.stderr?.on('data', (data: Buffer) => {
       stderr = (stderr + data.toString()).slice(-2048);
+    });
+    this.process.stdout?.on('data', (data: Buffer) => {
+      stderr = (stderr + '[out] ' + data.toString()).slice(-2048);
     });
     this.process.once('exit', (code, signal) => {
       exited = true;
@@ -91,24 +97,34 @@ export class PreviewRunner {
       this.diagnostic?.(`${this.lastExit} ${e.message}; cwd length ${workspace.length}`);
       exited = true;
     });
-    const url = `http://127.0.0.1:${this.config.port}`;
+    // Dev servers may bind only IPv6 (::1) or only IPv4 (127.0.0.1) for
+    // "localhost"; probe both stacks and keep the one that answers.
+    const candidates = [`http://127.0.0.1:${this.config.port}`, `http://[::1]:${this.config.port}`];
     const deadline = Date.now() + this.config.timeoutMs;
     try {
       while (Date.now() < deadline) {
         if (this.stopped || exited)
           throw new Error(this.lastExit ?? 'Preview process exited. Check command.');
-        try {
-          const response = await fetch(url, { signal: AbortSignal.timeout(500) });
-          if (response.ok) {
-            this.live = true;
-            return url;
+        for (const candidate of candidates) {
+          try {
+            const response = await fetch(candidate, { signal: AbortSignal.timeout(500) });
+            if (response.ok) {
+              this.live = true;
+              this.origin = candidate;
+              return candidate;
+            }
+          } catch (probeError) {
+            lastProbeError =
+              probeError instanceof Error
+                ? `${probeError.message} ${(probeError.cause as Error)?.message ?? ''}`.trim()
+                : String(probeError);
           }
-        } catch {
-          /* Startup not ready. */
         }
         await new Promise((r) => setTimeout(r, 100));
       }
-      throw new Error('Preview startup timed out. Check command.');
+      throw new Error(
+        `Preview startup timed out. Check command. Debug: ${stderr.trim().slice(-400)} | probe: ${lastProbeError}`
+      );
     } catch (e) {
       await this.stop();
       throw e;
@@ -131,6 +147,7 @@ export class PreviewRunner {
     const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'scrubline-preview-'));
     try {
       await this.store.materialize(c, temp);
+      await this.linkWorkspaceDeps(temp);
       const origin = await this.start(temp, trusted);
       const url = new URL(spec.route, origin).toString();
       this.temp = temp;
@@ -177,6 +194,33 @@ export class PreviewRunner {
         }
       }
       throw e;
+    }
+  }
+  /**
+   * Framework previews: a snapshot carries package.json but never node_modules
+   * (the scanner excludes it), so dev-server commands cannot run in it. Link the
+   * live workspace's node_modules into the snapshot when both exist. Static
+   * snapshots (no package.json) and missing workspace installs are skipped.
+   * Caveat: linked dependencies are the workspace's current install, not the
+   * checkpoint's lockfile; the preview is visually, not byte, faithful there.
+   */
+  private async linkWorkspaceDeps(temp: string) {
+    if (!this.workspaceRoot) return;
+    try {
+      await fs.access(path.join(temp, 'package.json'));
+    } catch {
+      return;
+    }
+    const source = path.join(this.workspaceRoot, 'node_modules');
+    const target = path.join(temp, 'node_modules');
+    try {
+      await fs.access(source);
+      await fs.symlink(source, target, process.platform === 'win32' ? 'junction' : 'dir');
+      this.diagnostic?.('Linked workspace dependencies into the snapshot.');
+    } catch (error) {
+      this.diagnostic?.(
+        `No workspace dependency link: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
   async screenshot(url: string, destination: string, checkpoint?: Checkpoint) {
@@ -329,7 +373,10 @@ export class PreviewRunner {
   async checkpointScreenshot(c: Checkpoint) {
     if (!this.live) return;
     await this.screenshot(
-      new URL(specification(this.config).route, `http://127.0.0.1:${this.config.port}`).toString(),
+      new URL(
+        specification(this.config).route,
+        this.origin ?? `http://127.0.0.1:${this.config.port}`
+      ).toString(),
       path.join(this.store.root, 'screenshots', specificationKey(this.config), `${c.id}.png`),
       c
     );

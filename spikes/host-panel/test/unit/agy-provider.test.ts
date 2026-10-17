@@ -1,9 +1,13 @@
-import { test, expect } from 'vitest';
+import { test, expect, describe, it } from 'vitest';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
-import { AgyCliAdvisorProvider } from '../../src/advisor/agy-cli';
-import { DesignAdvisorService, DeterministicAdvisorProvider } from '../../src/chatbot/advisor';
+import {
+  AgyCliAdvisorProvider,
+  buildPrompt,
+  parseAgyModelsOutput
+} from '../../src/advisor/agy-cli';
+import { DesignAdvisorService } from '../../src/chatbot/advisor';
 import type { DesignQueryContext } from '../../src/chatbot/types';
 import type { Checkpoint } from '../../src/bridge/timeline';
 
@@ -76,32 +80,56 @@ test('agy provider maps structured output into a full advice response', async ()
   expect(advice.disclaimers[0]).toContain('Antigravity model');
 });
 
-test('service falls back to heuristics when agy is not signed in, absent, garbled, empty or slow', async () => {
+test('service surfaces the real agy error: no offline or hardcoded fallback exists', async () => {
   const shim = await makeAgyShim();
-  const run = async (behavior: string, timeoutMs = 15000) => {
+  const run = async (behavior: string, pattern: RegExp, timeoutMs = 15000) => {
     process.env.AGY_DOUBLE_BEHAVIOR = behavior;
     const service = new DesignAdvisorService(
-      new AgyCliAdvisorProvider({ agyPath: shim, timeoutMs }),
-      new DeterministicAdvisorProvider()
+      new AgyCliAdvisorProvider({ agyPath: shim, timeoutMs })
     );
-    const advice = await service.ask(context());
-    expect(service.getLastUsedProviderName()).toBe('deterministic-heuristics');
-    expect(advice.disclaimers[0]).toContain('Model backend unavailable');
-    return advice;
+    await expect(service.ask(context())).rejects.toThrow(pattern);
+    expect(service.getLastUsedProviderName()).toBe('agy-cli');
   };
-  await run('auth');
-  await run('garbage');
-  await run('empty');
-  await run('slow', 300);
-  process.env.AGY_DOUBLE_BEHAVIOR = 'success';
-  const missing = new DesignAdvisorService(
-    new AgyCliAdvisorProvider({ agyPath: '/nonexistent/agy-binary', timeoutMs: 5000 }),
-    new DeterministicAdvisorProvider()
-  );
-  const advice = await missing.ask(context());
-  expect(missing.getLastUsedProviderName()).toBe('deterministic-heuristics');
-  expect(advice.disclaimers[0]).toContain('Model backend unavailable');
+  await run('auth', /not signed in/);
+  await run('garbage', /no result event/);
+  await run('empty', /empty answer/);
+  await run('slow', /timed out/, 300);
   delete process.env.AGY_DOUBLE_BEHAVIOR;
+  const missing = new DesignAdvisorService(
+    new AgyCliAdvisorProvider({ agyPath: '/nonexistent/agy-binary', timeoutMs: 5000 })
+  );
+  await expect(missing.ask(context())).rejects.toThrow(/failed to start/);
+});
+
+test('long prompts travel over stdin, never the command line (Windows argv limit regression)', async () => {
+  const shim = await makeAgyShim();
+  const big = 'x'.repeat(5000);
+  const ctx = context();
+  // Seven near-max files push the prompt past 24 KB, far beyond the ~8 KB
+  // cmd.exe limit that broke agy advice on Windows ("command line too long").
+  ctx.targetFiles = Array.from({ length: 7 }, (_, i) => ({
+    path: `file-${i}.css`,
+    content: big,
+    isHtml: false,
+    isCss: true
+  }));
+  const lenFile = path.join(os.tmpdir(), `agy-double-len-${process.pid}.json`);
+  process.env.AGY_DOUBLE_LEN_FILE = lenFile;
+  try {
+    const provider = new AgyCliAdvisorProvider({ agyPath: shim, timeoutMs: 15000 });
+    const advice = await provider.generateAdvice(ctx);
+    expect(advice.directAnswer).toContain('nav gap');
+    const recorded = JSON.parse(await fs.promises.readFile(lenFile, 'utf8')) as {
+      argvLen: number;
+      promptLen: number;
+    };
+    expect(recorded.promptLen).toBe(buildPrompt(ctx).length);
+    expect(recorded.promptLen).toBeGreaterThan(20000);
+    expect(recorded.argvLen).toBeLessThan(2000);
+  } finally {
+    delete process.env.AGY_DOUBLE_LEN_FILE;
+    await fs.promises.unlink(lenFile).catch(() => {});
+  }
 });
 
 test('strict agy mode surfaces the backend error instead of falling back', async () => {
@@ -112,4 +140,68 @@ test('strict agy mode surfaces the backend error instead of falling back', async
   );
   await expect(service.ask(context())).rejects.toThrow(/not signed in/);
   delete process.env.AGY_DOUBLE_BEHAVIOR;
+});
+
+describe('parseAgyModelsOutput', () => {
+  it('parses the real agy 1.2.16 models table (slugs + display names with parentheses)', () => {
+    const sample = [
+      'gemini-3.8-flash-high     Gemini 3.8 Flash (High)',
+      'gemini-3.8-flash-medium   Gemini 3.8 Flash (Medium)',
+      'gemini-3.8-flash-low      Gemini 3.8 Flash (Low)',
+      'claude-sonnet-4-6         Claude Sonnet 4.6 (Thinking)',
+      'claude-opus-4-6-thinking  Claude Opus 4.6 (Thinking)',
+      'gpt-oss-120b-medium       GPT-OSS 120B (Medium)'
+    ].join('\n');
+    expect(parseAgyModelsOutput(sample)).toEqual([
+      { slug: 'gemini-3.8-flash-high', name: 'Gemini 3.8 Flash (High)' },
+      { slug: 'gemini-3.8-flash-medium', name: 'Gemini 3.8 Flash (Medium)' },
+      { slug: 'gemini-3.8-flash-low', name: 'Gemini 3.8 Flash (Low)' },
+      { slug: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6 (Thinking)' },
+      { slug: 'claude-opus-4-6-thinking', name: 'Claude Opus 4.6 (Thinking)' },
+      { slug: 'gpt-oss-120b-medium', name: 'GPT-OSS 120B (Medium)' }
+    ]);
+  });
+
+  it('parses CRLF output from Windows pipes', () => {
+    const sample =
+      'gemini-3.8-flash-high     Gemini 3.8 Flash (High)\r\n' +
+      'claude-sonnet-4-6         Claude Sonnet 4.6 (Thinking)\r\n';
+    expect(parseAgyModelsOutput(sample)).toEqual([
+      { slug: 'gemini-3.8-flash-high', name: 'Gemini 3.8 Flash (High)' },
+      { slug: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6 (Thinking)' }
+    ]);
+  });
+
+  it('strips ANSI styling some Windows CLIs emit when piped', () => {
+    const sample =
+      '\u001b[32mgemini-3.8-flash-high\u001b[0m     \u001b[1mGemini 3.8 Flash (High)\u001b[0m\n' +
+      '\u001b[32mclaude-sonnet-4-6\u001b[0m         Claude Sonnet 4.6 (Thinking)\n';
+    expect(parseAgyModelsOutput(sample)).toEqual([
+      { slug: 'gemini-3.8-flash-high', name: 'Gemini 3.8 Flash (High)' },
+      { slug: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6 (Thinking)' }
+    ]);
+  });
+
+  it('parses tab-separated non-TTY output', () => {
+    const sample =
+      'gemini-3.8-flash-high\tGemini 3.8 Flash (High)\n' +
+      'claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n';
+    expect(parseAgyModelsOutput(sample)).toEqual([
+      { slug: 'gemini-3.8-flash-high', name: 'Gemini 3.8 Flash (High)' },
+      { slug: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6 (Thinking)' }
+    ]);
+  });
+
+  it('skips headers, blanks and single-space prose lines', () => {
+    const sample = [
+      'Available models:',
+      '',
+      'gemini-3.8-flash-high     Gemini 3.8 Flash (High)',
+      'single space is not a table row',
+      'tip: run agy models --json for scripting'
+    ].join('\n');
+    expect(parseAgyModelsOutput(sample)).toEqual([
+      { slug: 'gemini-3.8-flash-high', name: 'Gemini 3.8 Flash (High)' }
+    ]);
+  });
 });

@@ -43,7 +43,14 @@ const identities = new Map<string, { fingerprint: string; identity: string }>();
 export async function identifyBrowser(config: PreviewConfig) {
   specification(config);
   if (!config.browserPath) return config;
-  const info = await stat(config.browserPath);
+  let info;
+  try {
+    info = await stat(config.browserPath);
+  } catch {
+    // A stale or wrong-platform browser path must not take down startup;
+    // skip the fingerprint and let the preview report the launch failure.
+    return config;
+  }
   const fingerprint = `${info.size}:${info.mtimeMs}:${info.ctimeMs}:${info.ino}`;
   const cached = identities.get(config.browserPath);
   if (cached?.fingerprint === fingerprint) return { ...config, browserIdentity: cached.identity };

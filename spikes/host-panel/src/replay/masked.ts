@@ -2,7 +2,7 @@ import type { ReplayFrame } from './export';
 // Export geometry, never project pixels, markup, text, attributes or URLs.
 export async function maskedFrame(url: string, executablePath: string): Promise<ReplayFrame> {
   const parsed = new URL(url);
-  if (parsed.protocol !== 'http:' || parsed.hostname !== '127.0.0.1')
+  if (parsed.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(parsed.hostname))
     throw new Error('Replay requires a local preview.');
   const { chromium } = await import('playwright-core');
   const browser = await chromium.launch({

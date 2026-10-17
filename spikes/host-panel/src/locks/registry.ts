@@ -16,6 +16,20 @@ export interface LockedElement {
   label?: string;
   /** ISO timestamp of when the lock was created. */
   lockedAt: string;
+  /** Exact element HTML captured when the lock was set; renders the locked-elements preview. */
+  pinnedHtml?: string;
+  /** Checkpoint the pinned content came from. */
+  sourceCheckpointId?: string;
+  /** Branch the pinned content came from; 'main' when absent. */
+  sourceBranch?: string;
+}
+
+function selectorsOverlap(a: string, b: string): boolean {
+  if (a === b) return true;
+  // Positional selectors describe a containment path, so a prefix overlaps.
+  const pathLike = (s: string): boolean => s.startsWith('body');
+  if (pathLike(a) && pathLike(b)) return a.startsWith(b) || b.startsWith(a);
+  return false;
 }
 
 export class LockRegistry {
@@ -51,8 +65,29 @@ export class LockRegistry {
     return this.locks;
   }
 
-  /** Add a lock; replacing an existing lock on the same selector+document. */
+  /**
+   * Add a lock; replacing an existing lock on the same selector+document.
+   * Throws when the same element is already locked with different pinned
+   * content (e.g. locked from two different alternatives) - never silent.
+   */
   async add(entry: Omit<LockedElement, 'lockedAt'>): Promise<LockedElement> {
+    const conflicting = this.locks.find(
+      (l) =>
+        l.document === entry.document &&
+        selectorsOverlap(l.selector, entry.selector) &&
+        !!l.pinnedHtml &&
+        !!entry.pinnedHtml &&
+        l.pinnedHtml !== entry.pinnedHtml
+    );
+    if (conflicting) {
+      throw new Error(
+        `Conflicting locked elements: ${entry.selector} in ${entry.document} is already locked with different content` +
+          (conflicting.sourceBranch || entry.sourceBranch
+            ? ` (locked from '${conflicting.sourceBranch ?? 'main'}', new lock from '${entry.sourceBranch ?? 'main'}')`
+            : '') +
+          '. Unlock the existing one first.'
+      );
+    }
     const locked: LockedElement = { ...entry, lockedAt: new Date().toISOString() };
     this.locks = [
       ...this.locks.filter(

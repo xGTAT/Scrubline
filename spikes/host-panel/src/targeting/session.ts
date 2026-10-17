@@ -42,7 +42,10 @@ export class TargetSession {
     viewport = { width: 960, height: 600 }
   ) {
     const parsed = new URL(url);
-    if (parsed.protocol !== 'http:' || parsed.hostname !== '127.0.0.1')
+    if (
+      parsed.protocol !== 'http:' ||
+      !['127.0.0.1', 'localhost', '[::1]'].includes(parsed.hostname)
+    )
       throw new Error('Targeting requires a local preview.');
     await this.stop();
     this.activeOrigin = parsed.origin;
