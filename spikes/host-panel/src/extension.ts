@@ -262,13 +262,37 @@ export async function activate(context: vscode.ExtensionContext) {
             );
             return;
           }
+          const docLocksForSource = lockRegistry!.list().filter((l) => l.document === rel);
+          const sourceCpId = docLocksForSource.find(
+            (l) => l.sourceCheckpointId
+          )?.sourceCheckpointId;
           let body: Buffer;
-          try {
-            body = await fs.readFile(path.join(workspaceRoot!, rel));
-          } catch {
-            res.statusCode = 404;
-            res.end('not found');
-            return;
+          if (sourceCpId && timeline) {
+            // Locks were made from a specific checkpoint (e.g. an alternative
+            // fork). Serve the document as it was at that checkpoint so the
+            // page context matches where the locks came from, not the current
+            // workspace state which may have diverged.
+            const cp = timeline.store.checkpoints.find((c) => c.id === sourceCpId);
+            const tracked = cp?.files.find((f) => f.path === rel);
+            if (tracked) {
+              body = await timeline.store.readBlob(tracked.hash);
+            } else {
+              try {
+                body = await fs.readFile(path.join(workspaceRoot!, rel));
+              } catch {
+                res.statusCode = 404;
+                res.end('not found');
+                return;
+              }
+            }
+          } else {
+            try {
+              body = await fs.readFile(path.join(workspaceRoot!, rel));
+            } catch {
+              res.statusCode = 404;
+              res.end('not found');
+              return;
+            }
           }
           if (rel.endsWith('.html')) {
             const docLocks = lockRegistry!.list().filter((l) => l.document === rel && l.pinnedHtml);
@@ -318,7 +342,7 @@ export async function activate(context: vscode.ExtensionContext) {
 <h2>Locked elements (${locks.length})</h2>
 <p>These elements must not change. Each one is shown below with its pinned content highlighted.</p>
 ${cards || '<p>No locked elements yet. Pick an element and use Lock element.</p>'}
-<details style="margin-top:16px"><summary>Page context (current pages with locked elements outlined)</summary>
+<details style="margin-top:16px"><summary>Page context (locked elements outlined in their source page)</summary>
 ${frames}
 </details>
 <script>const vscode = acquireVsCodeApi(); document.querySelectorAll('[data-unlock]').forEach((b) => b.addEventListener('click', () => vscode.postMessage({ type: 'unlock', selector: b.getAttribute('data-s'), document: b.getAttribute('data-d') })));</script>
