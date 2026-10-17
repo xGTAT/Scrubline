@@ -829,7 +829,8 @@ ${frames}
       const cliAdvisor = new AgyCliAdvisorProvider({
         agyPath: config.get<string>('agyPath') || undefined,
         timeoutMs: config.get<number>('advisorTimeoutMs') || undefined,
-        model: config.get<string>('advisorModel') || undefined
+        model: config.get<string>('advisorModel') || undefined,
+        log: (text) => diagnostics.appendLine(text)
       });
       const ideAdvisor = new AntigravityLmAdvisorProvider(
         vscode.lm,
