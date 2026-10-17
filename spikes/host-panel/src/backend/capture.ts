@@ -85,7 +85,9 @@ export function createCapture(options: { filter?: string; maxEntries?: number })
     if (!parts) return;
     const timing = request.timing();
     if (Number.isNaN(firstStart) && timing.startTime > 0) firstStart = timing.startTime;
-    const response = failure ? null : await request.response().catch(() => null);
+    const response = await request.response().catch(() => null);
+    // Chromium reports 204 No Content as ERR_ABORTED; if we got a response, the request succeeded.
+    const effectiveFailure = response ? undefined : failure;
     if (entries.length >= max) {
       truncated = true;
       return;
@@ -108,7 +110,7 @@ export function createCapture(options: { filter?: string; maxEntries?: number })
           : null,
       sameOrigin: false,
       mutation: !MUTATION_SAFE.has(method),
-      ...(failure ? { failure } : {})
+      ...(effectiveFailure ? { failure: effectiveFailure } : {})
     });
   };
   return {

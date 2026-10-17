@@ -75,19 +75,41 @@ describe('createCapture', () => {
         timing: () => ({ startTime: 1150, responseEnd: 1300 })
       })
     );
-    page.emit('requestfailed', fakeRequest({ failure: () => ({ errorText: 'net::ERR_ABORTED' }) }));
+    page.emit(
+      'requestfailed',
+      fakeRequest({
+        url: () => 'http://localhost:4100/api/items/item_1',
+        method: () => 'DELETE',
+        failure: () => ({ errorText: 'net::ERR_ABORTED' }),
+        response: async () => ({ status: () => 204 })
+      })
+    );
+    page.emit(
+      'requestfailed',
+      fakeRequest({
+        url: () => 'http://localhost:4100/api/gone',
+        method: () => 'DELETE',
+        failure: () => ({ errorText: 'net::ERR_CONNECTION_REFUSED' }),
+        response: async () => null
+      })
+    );
     await c.finish();
     const capture = c.build('c'.repeat(64), 'spec', 'http://localhost:4100/');
-    expect(capture.entries).toHaveLength(3);
+    expect(capture.entries).toHaveLength(4);
     const read = capture.entries.find((e) => e.method === 'GET' && !e.failure)!;
     const write = capture.entries.find((e) => e.method === 'POST')!;
-    const failed = capture.entries.find((e) => e.failure)!;
+    // Aborted WITH response (204 No Content): Chromium fires ERR_ABORTED but the request succeeded.
+    const aborted204 = capture.entries.find((e) => e.method === 'DELETE' && e.status === 204)!;
+    // Genuine failure (no response): connection refused, status null, failure recorded.
+    const failed = capture.entries.find((e) => e.failure === 'failed')!;
     expect(read.queryKeys).toEqual(['key']);
     expect(read.durationMs).toBe(120);
     expect(read.mutation).toBe(false);
     expect(read.sameOrigin).toBe(true);
     expect(write.mutation).toBe(true);
-    expect(failed.failure).toBe('aborted');
+    expect(aborted204.mutation).toBe(true);
+    expect(aborted204.failure).toBeUndefined();
+    expect(failed.failure).toBe('failed');
     expect(failed.status).toBeNull();
     const serialized = JSON.stringify(capture);
     expect(serialized).not.toContain('abc123');

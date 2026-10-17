@@ -97,8 +97,8 @@ function TimeAxis({ end, width, labelW }: { end: number; width: number; labelW: 
 function WaterfallRow({
   entry,
   end,
-  labelW,
-  width,
+  labelW: _labelW,
+  width: _width,
   open,
   onToggle,
   match,
@@ -113,12 +113,11 @@ function WaterfallRow({
   match?: number;
   routes?: { method: string; path: string; file: string; line: number }[];
 }) {
-  const chartW = width - labelW - 70;
-  const x = entry.startedAt >= 0 ? (chartW * entry.startedAt) / end : 0;
+  const x = entry.startedAt >= 0 ? (entry.startedAt / end) * 100 : 0;
   const w =
     entry.durationMs != null && entry.startedAt >= 0
-      ? Math.max(3, (chartW * entry.durationMs) / end)
-      : 3;
+      ? Math.max(0.5, (entry.durationMs / end) * 100)
+      : 0.5;
   const sc = statusClass(entry);
   return (
     <>
@@ -135,7 +134,7 @@ function WaterfallRow({
         <span className="bv-bar-track">
           <span
             className={`bv-bar ${sc} ${entry.mutation ? 'mutation' : ''}`}
-            style={{ left: x, width: w }}
+            style={{ left: `${x}%`, width: `${w}%` }}
           />
         </span>
         <span className={`bv-status ${sc}`}>{statusLabel(entry)}</span>

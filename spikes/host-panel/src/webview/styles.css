@@ -1479,7 +1479,6 @@ html {
   font-family: var(--vscode-editor-font-family, monospace);
 }
 
-
 /* Narrow viewport: tighten rows, keep graph readable */
 @media (max-width: 480px) {
   .bv-row {
