@@ -184,11 +184,10 @@
           "enum": [
             "auto",
             "ide",
-            "agy",
-            "deterministic"
+            "agy"
           ],
           "default": "auto",
-          "description": "UI Advisor backend. auto: IDE language models if the IDE exposes any to extensions (Antigravity currently exposes none), then the agy CLI, then offline heuristics; ide: IDE models only; agy: agy CLI only; deterministic: offline heuristics only.",
+          "description": "UI Advisor backend. auto: IDE language models if the IDE exposes any to extensions (Antigravity currently exposes none), then the agy CLI; ide: IDE models only; agy: agy CLI only. When no backend works, the real error is shown in the chat; there are no offline or hardcoded answers.",
           "scope": "resource"
         },
         "scrubline.agyPath": {

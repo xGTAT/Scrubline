@@ -2,8 +2,12 @@ import { test, expect, describe, it } from 'vitest';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
-import { AgyCliAdvisorProvider, parseAgyModelsOutput } from '../../src/advisor/agy-cli';
-import { DesignAdvisorService, DeterministicAdvisorProvider } from '../../src/chatbot/advisor';
+import {
+  AgyCliAdvisorProvider,
+  buildPrompt,
+  parseAgyModelsOutput
+} from '../../src/advisor/agy-cli';
+import { DesignAdvisorService } from '../../src/chatbot/advisor';
 import type { DesignQueryContext } from '../../src/chatbot/types';
 import type { Checkpoint } from '../../src/bridge/timeline';
 
@@ -76,32 +80,56 @@ test('agy provider maps structured output into a full advice response', async ()
   expect(advice.disclaimers[0]).toContain('Antigravity model');
 });
 
-test('service falls back to heuristics when agy is not signed in, absent, garbled, empty or slow', async () => {
+test('service surfaces the real agy error: no offline or hardcoded fallback exists', async () => {
   const shim = await makeAgyShim();
-  const run = async (behavior: string, timeoutMs = 15000) => {
+  const run = async (behavior: string, pattern: RegExp, timeoutMs = 15000) => {
     process.env.AGY_DOUBLE_BEHAVIOR = behavior;
     const service = new DesignAdvisorService(
-      new AgyCliAdvisorProvider({ agyPath: shim, timeoutMs }),
-      new DeterministicAdvisorProvider()
+      new AgyCliAdvisorProvider({ agyPath: shim, timeoutMs })
     );
-    const advice = await service.ask(context());
-    expect(service.getLastUsedProviderName()).toBe('deterministic-heuristics');
-    expect(advice.disclaimers[0]).toContain('Model backend unavailable');
-    return advice;
+    await expect(service.ask(context())).rejects.toThrow(pattern);
+    expect(service.getLastUsedProviderName()).toBe('agy-cli');
   };
-  await run('auth');
-  await run('garbage');
-  await run('empty');
-  await run('slow', 300);
-  process.env.AGY_DOUBLE_BEHAVIOR = 'success';
-  const missing = new DesignAdvisorService(
-    new AgyCliAdvisorProvider({ agyPath: '/nonexistent/agy-binary', timeoutMs: 5000 }),
-    new DeterministicAdvisorProvider()
-  );
-  const advice = await missing.ask(context());
-  expect(missing.getLastUsedProviderName()).toBe('deterministic-heuristics');
-  expect(advice.disclaimers[0]).toContain('Model backend unavailable');
+  await run('auth', /not signed in/);
+  await run('garbage', /no result event/);
+  await run('empty', /empty answer/);
+  await run('slow', /timed out/, 300);
   delete process.env.AGY_DOUBLE_BEHAVIOR;
+  const missing = new DesignAdvisorService(
+    new AgyCliAdvisorProvider({ agyPath: '/nonexistent/agy-binary', timeoutMs: 5000 })
+  );
+  await expect(missing.ask(context())).rejects.toThrow(/failed to start/);
+});
+
+test('long prompts travel over stdin, never the command line (Windows argv limit regression)', async () => {
+  const shim = await makeAgyShim();
+  const big = 'x'.repeat(5000);
+  const ctx = context();
+  // Seven near-max files push the prompt past 24 KB, far beyond the ~8 KB
+  // cmd.exe limit that broke agy advice on Windows ("command line too long").
+  ctx.targetFiles = Array.from({ length: 7 }, (_, i) => ({
+    path: `file-${i}.css`,
+    content: big,
+    isHtml: false,
+    isCss: true
+  }));
+  const lenFile = path.join(os.tmpdir(), `agy-double-len-${process.pid}.json`);
+  process.env.AGY_DOUBLE_LEN_FILE = lenFile;
+  try {
+    const provider = new AgyCliAdvisorProvider({ agyPath: shim, timeoutMs: 15000 });
+    const advice = await provider.generateAdvice(ctx);
+    expect(advice.directAnswer).toContain('nav gap');
+    const recorded = JSON.parse(await fs.promises.readFile(lenFile, 'utf8')) as {
+      argvLen: number;
+      promptLen: number;
+    };
+    expect(recorded.promptLen).toBe(buildPrompt(ctx).length);
+    expect(recorded.promptLen).toBeGreaterThan(20000);
+    expect(recorded.argvLen).toBeLessThan(2000);
+  } finally {
+    delete process.env.AGY_DOUBLE_LEN_FILE;
+    await fs.promises.unlink(lenFile).catch(() => {});
+  }
 });
 
 test('strict agy mode surfaces the backend error instead of falling back', async () => {

@@ -1,18 +1,8 @@
 import type { DesignQueryContext, DesignAdviceResponse } from './types';
-import { DesignAnalyzer } from './analyzer';
 
 export interface DesignAdvisorProvider {
   readonly name: string;
   generateAdvice(context: DesignQueryContext): Promise<DesignAdviceResponse>;
-}
-
-export class DeterministicAdvisorProvider implements DesignAdvisorProvider {
-  readonly name = 'deterministic-heuristics';
-  private analyzer = new DesignAnalyzer();
-
-  async generateAdvice(context: DesignQueryContext): Promise<DesignAdviceResponse> {
-    return this.analyzer.analyze(context);
-  }
 }
 
 export class DesignAdvisorService {
@@ -20,8 +10,8 @@ export class DesignAdvisorService {
   private fallback?: DesignAdvisorProvider;
   private lastUsedProviderName: string;
 
-  constructor(provider?: DesignAdvisorProvider, fallback?: DesignAdvisorProvider) {
-    this.provider = provider ?? new DeterministicAdvisorProvider();
+  constructor(provider: DesignAdvisorProvider, fallback?: DesignAdvisorProvider) {
+    this.provider = provider;
     this.fallback = fallback;
     this.lastUsedProviderName = this.provider.name;
   }

@@ -11,17 +11,6 @@ interface ChatbotViewProps {
   send: (message: TimelineInbound) => void;
 }
 
-const PRESET_QUERIES = [
-  'Does this page look cluttered? What would you improve?',
-  'Which parts of this UI could have better spacing or visual hierarchy?',
-  'Would a sidebar or a top navigation bar work better here?',
-  'What changed in the layout between these two recorded versions?',
-  'Which previous version had a better layout, and why?',
-  'What UI improvements would make this page look more professional?',
-  'Does this component appear inconsistent with the rest of the interface?',
-  'Which changes should I prioritize for the greatest visual improvement?'
-];
-
 export const ChatbotView: React.FC<ChatbotViewProps> = ({
   state,
   rows,
@@ -53,10 +42,6 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
     });
 
     setInputQuery('');
-  };
-
-  const handlePresetClick = (preset: string) => {
-    setInputQuery(preset);
   };
 
   const handleCopy = (id: string, text: string) => {
@@ -103,22 +88,6 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
               </option>
             ))}
         </select>
-      </div>
-
-      <div className="chatbot-presets" aria-label="Suggested design questions">
-        <span className="chatbot-presets-label">Suggested questions:</span>
-        <div className="chatbot-preset-pills">
-          {PRESET_QUERIES.map((q, idx) => (
-            <button
-              key={idx}
-              type="button"
-              className="chatbot-preset-pill"
-              onClick={() => handlePresetClick(q)}
-            >
-              {q}
-            </button>
-          ))}
-        </div>
       </div>
 
       <div className="chatbot-message-list" role="log" aria-live="polite">

@@ -5,6 +5,27 @@ import * as os from 'node:os';
 import { createHash } from 'node:crypto';
 import { HistoryStore } from '../../src/store/store';
 import { ChatbotController } from '../../src/chatbot/controller';
+import { DesignAdvisorService } from '../../src/chatbot/advisor';
+
+const stubAdvisorService = () =>
+  new DesignAdvisorService({
+    name: 'test-stub',
+    async generateAdvice(context) {
+      return {
+        id: 'stub-1',
+        timestamp: new Date().toISOString(),
+        query: context.userQuery,
+        checkpointId: context.activeCheckpoint.id,
+        summary: 'stub summary',
+        directAnswer: 'stub answer',
+        findings: [],
+        recommendations: [],
+        visualEvidence: context.visual,
+        disclaimers: [],
+        suggestedSnippets: []
+      };
+    }
+  });
 
 function hashFile(bytes: Buffer): string {
   return createHash('sha256').update(bytes).digest('hex');
@@ -97,7 +118,8 @@ test('proof of read-only: chatbot requests leave workspace files 100% byte-ident
       store,
       () => undefined,
       async () => [],
-      () => {}
+      () => {},
+      stubAdvisorService()
     );
 
     // Run multiple potentially invasive-sounding queries

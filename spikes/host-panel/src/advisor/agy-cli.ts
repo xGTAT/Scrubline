@@ -1,16 +1,18 @@
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 // Windows command shims (agy.cmd / agy.bat) cannot be spawned directly: cmd.exe
 // must interpret them. Resolve a real executable when the given path has no
 // extension, and let Node/libuv compose the cmd.exe command line (shell: true)
 // instead of hand-quoting, which breaks on cmd's quote-stripping rules.
-function spawnAgy(agyPath: string, args: string[]) {
-  if (process.platform !== 'win32')
-    return spawn(agyPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+function spawnAgy(agyPath: string, args: string[], input = false) {
+  const stdio: ['pipe' | 'ignore', 'pipe', 'pipe'] = [input ? 'pipe' : 'ignore', 'pipe', 'pipe'];
+  if (process.platform !== 'win32') return spawn(agyPath, args, { stdio });
   const lower = agyPath.toLowerCase();
   const needsCmd = lower.endsWith('.cmd') || lower.endsWith('.bat') || !/\.exe$/.test(lower);
-  if (!needsCmd) return spawn(agyPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-  return spawn(agyPath, args, { shell: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  if (!needsCmd) return spawn(agyPath, args, { stdio });
+  return spawn(agyPath, args, { shell: true, stdio });
 }
 
 async function resolveAgyExecutable(agyPath: string): Promise<string> {
@@ -204,40 +206,60 @@ async function runAgy(
   const agyPath = options.agyPath ?? 'agy';
   const resolvedPath = await resolveAgyExecutable(agyPath);
   const timeoutMs = options.timeoutMs ?? 90000;
+  // The prompt can reach tens of KB, which overflows the Windows command-line
+  // limit (cmd.exe shims cap near 8 KB: "The command line is too long."). The
+  // headless contract streams prompts over stdin (`--input-format
+  // stream-json`, one {"event":"user","message":{"content":...}} line per turn)
+  // and `--json-schema` accepts a .json file path, so argv only carries short
+  // flags on every platform.
+  const schemaPath = path.join(
+    os.tmpdir(),
+    `scrubline-advice-schema-${process.pid}-${Date.now()}.json`
+  );
+  await fs.promises.writeFile(schemaPath, JSON.stringify(ADVICE_SCHEMA));
   const args = [
-    '-p',
-    prompt,
+    '--input-format',
+    'stream-json',
     '--output-format',
-    'json',
+    'stream-json',
     '--json-schema',
-    JSON.stringify(ADVICE_SCHEMA)
+    schemaPath
   ];
   if (options.model) args.push('--model', options.model);
-  return new Promise((resolve, reject) => {
-    let child;
-    try {
-      child = spawnAgy(resolvedPath, args);
-    } catch (err) {
-      reject(err instanceof Error ? err : new Error(String(err)));
-      return;
-    }
-    let stdout = '';
-    let stderr = '';
-    const timer = setTimeout(() => {
-      child.kill('SIGKILL');
-      reject(new Error(`agy CLI timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-    child.stdout.on('data', (d) => (stdout += d.toString()));
-    child.stderr.on('data', (d) => (stderr += d.toString()));
-    child.on('error', (err) => {
-      clearTimeout(timer);
-      reject(new Error(`agy CLI failed to start: ${err.message}`));
+  try {
+    return await new Promise((resolve, reject) => {
+      let child;
+      try {
+        child = spawnAgy(resolvedPath, args, true);
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error(String(err)));
+        return;
+      }
+      let stdout = '';
+      let stderr = '';
+      const timer = setTimeout(() => {
+        child.kill('SIGKILL');
+        reject(new Error(`agy CLI timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      child.stdout!.on('data', (d) => (stdout += d.toString()));
+      child.stderr!.on('data', (d) => (stderr += d.toString()));
+      child.on('error', (err) => {
+        clearTimeout(timer);
+        reject(new Error(`agy CLI failed to start: ${err.message}`));
+      });
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        resolve({ stdout, stderr, code });
+      });
+      // The CLI may exit before reading the prompt (auth failure); never let an
+      // early EPIPE crash the write.
+      child.stdin!.on('error', () => {});
+      child.stdin!.write(JSON.stringify({ event: 'user', message: { content: prompt } }) + '\n');
+      child.stdin!.end();
     });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      resolve({ stdout, stderr, code });
-    });
-  });
+  } finally {
+    await fs.promises.unlink(schemaPath).catch(() => {});
+  }
 }
 
 export interface AgyModel {
@@ -293,8 +315,8 @@ export async function listAgyModels(options: AgyCliOptions = {}): Promise<AgyMod
       child.kill('SIGKILL');
       reject(new Error('agy models timed out'));
     }, timeoutMs);
-    child.stdout.on('data', (d) => (stdout += d.toString()));
-    child.stderr.on('data', (d) => (stderr += d.toString()));
+    child.stdout!.on('data', (d) => (stdout += d.toString()));
+    child.stderr!.on('data', (d) => (stderr += d.toString()));
     child.on('error', (err) => {
       clearTimeout(timer);
       reject(new Error(`agy CLI failed to start: ${err.message}`));
@@ -343,12 +365,22 @@ export class AgyCliAdvisorProvider implements DesignAdvisorProvider {
       throw new Error(
         `agy CLI exited with code ${code}: ${stderr.trim().slice(0, 300) || 'no diagnostics'}`
       );
-    let envelope: AgyEnvelope;
-    try {
-      envelope = JSON.parse(stdout.trim()) as AgyEnvelope;
-    } catch {
-      throw new Error(`agy CLI returned unparseable output: ${stdout.trim().slice(0, 200)}`);
+    let envelope: AgyEnvelope | undefined;
+    for (const line of stdout.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const event = JSON.parse(trimmed) as { event?: string; result?: AgyEnvelope };
+        if (event.event === 'result' && event.result) envelope = event.result;
+      } catch {
+        // step_update lines are informational; non-JSON lines are ignored here
+        // and reported below when no result event ever arrives.
+      }
     }
+    if (!envelope)
+      throw new Error(
+        `agy CLI returned no result event: ${stdout.trim().slice(0, 200) || 'empty output'}`
+      );
     if (envelope.status !== 'SUCCESS')
       throw new Error(`agy CLI run failed: ${envelope.error ?? envelope.status ?? 'unknown'}`);
     let answer: AgyModelAnswer | undefined = envelope.structured_output as

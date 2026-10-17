@@ -15,14 +15,14 @@ export class ChatbotController {
     private readonly getCache: () => RenderCache | undefined,
     private readonly getSecrets: () => Promise<readonly string[]>,
     private readonly notifyState: (state: ChatbotState) => void,
-    advisorService?: DesignAdvisorService,
+    advisorService: DesignAdvisorService,
     private readonly getLocks?: () => readonly {
       selector: string;
       document: string;
       label?: string;
     }[]
   ) {
-    this.advisorService = advisorService ?? new DesignAdvisorService();
+    this.advisorService = advisorService;
   }
 
   getState(): ChatbotState {

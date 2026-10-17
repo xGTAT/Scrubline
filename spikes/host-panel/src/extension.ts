@@ -2,7 +2,7 @@ import { DualVerificationEngine } from './verification/engine';
 import { diffPerf } from './preview/perf';
 import { replaceActivation } from './lifecycle';
 import { ChatbotController } from './chatbot/controller';
-import { DesignAdvisorService, DeterministicAdvisorProvider } from './chatbot/advisor';
+import { DesignAdvisorService } from './chatbot/advisor';
 import { AgyCliAdvisorProvider, listAgyModels } from './advisor/agy-cli';
 import { AntigravityLmAdvisorProvider, ChainedAdvisorProvider } from './advisor/lm';
 import { LockRegistry } from './locks/registry';
@@ -754,11 +754,8 @@ ${frames}
     lockDrift = undefined;
     lastNewestRowId = undefined;
     const advisorBackend = config.get<string>('advisorBackend') ?? 'auto';
-    const deterministicAdvisor = new DeterministicAdvisorProvider();
     let advisorService: DesignAdvisorService;
-    if (advisorBackend === 'deterministic') {
-      advisorService = new DesignAdvisorService(deterministicAdvisor);
-    } else {
+    {
       const cliAdvisor = new AgyCliAdvisorProvider({
         agyPath: config.get<string>('agyPath') || undefined,
         timeoutMs: config.get<number>('advisorTimeoutMs') || undefined,
@@ -778,10 +775,9 @@ ${frames}
           : advisorBackend === 'ide'
             ? ideAdvisor
             : new ChainedAdvisorProvider([cliAdvisor, ideAdvisor]);
-      advisorService =
-        advisorBackend === 'auto'
-          ? new DesignAdvisorService(primary, deterministicAdvisor)
-          : new DesignAdvisorService(primary);
+      // No offline fallback: when every model backend fails, the real error is
+      // shown in the chat. Scrubline never answers from hardcoded content.
+      advisorService = new DesignAdvisorService(primary);
     }
     chatbotController = new ChatbotController(
       timeline.store,
