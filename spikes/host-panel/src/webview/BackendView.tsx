@@ -25,6 +25,12 @@ function methodColor(m: string) {
 }
 
 function statusClass(e: BackendRequestEntry) {
+  if (e.failure === 'aborted' && e.status != null) {
+    // Chromium reports 204 No Content as ERR_ABORTED; the request succeeded.
+    if (e.status < 300) return 'status-ok';
+    if (e.status < 400) return 'status-redirect';
+    return 'status-error';
+  }
   if (e.failure) return 'status-failed';
   if (e.status == null) return 'status-failed';
   if (e.status < 300) return 'status-ok';
@@ -33,6 +39,7 @@ function statusClass(e: BackendRequestEntry) {
 }
 
 function statusLabel(e: BackendRequestEntry) {
+  if (e.failure === 'aborted' && e.status != null) return String(e.status);
   return e.failure ?? String(e.status ?? '---');
 }
 

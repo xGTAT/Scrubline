@@ -1390,6 +1390,7 @@ html {
   background: none;
   color: var(--vscode-foreground, #ccc);
   height: 22px;
+  min-height: 0;
   text-align: left;
 }
 .bv-row:hover {
