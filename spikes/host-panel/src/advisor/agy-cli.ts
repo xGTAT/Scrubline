@@ -205,6 +205,17 @@ async function runAgy(
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
   const agyPath = options.agyPath ?? 'agy';
   const resolvedPath = await resolveAgyExecutable(agyPath);
+  // On Windows, shell:true spawns cmd.exe successfully even when the target
+  // binary is missing, so the process 'error' event never fires and the
+  // failure surfaces as an opaque exit code instead of "failed to start".
+  // Pre-check explicit paths so the error is consistent across platforms.
+  if (agyPath.includes('/') || agyPath.includes('\\')) {
+    try {
+      await fs.promises.access(resolvedPath);
+    } catch {
+      throw new Error(`agy CLI failed to start: ${resolvedPath} not found`);
+    }
+  }
   const timeoutMs = options.timeoutMs ?? 90000;
   // The prompt can reach tens of KB, which overflows the Windows command-line
   // limit (cmd.exe shims cap near 8 KB: "The command line is too long."). The
