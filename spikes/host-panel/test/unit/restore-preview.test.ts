@@ -122,6 +122,48 @@ test('startup exited, busy port, timeout and trust failures are actionable', asy
   runners.push(timeout);
   await expect(timeout.start(root, true)).rejects.toThrow('timed out');
 });
+test('port detection strips ANSI colour codes from Vite and Angular output', async () => {
+  const { store, root } = await setup();
+  const actualPort = await freePort();
+  const configuredPort = await freePort();
+  // Fake dev server: listens on actualPort but prints ANSI-coloured URLs like
+  // Vite and Angular CLI do. The extension probes configuredPort (which has
+  // nothing on it) and must fall back to the detected actualPort.
+  const server = `const http = require('http');
+http.createServer((q,r)=>r.end('<h1>ansi test</h1>')).listen(${actualPort},'127.0.0.1',()=>{
+  // Vite-style: \x1b[36mhttp://localhost:\x1b[1m${actualPort}\x1b[22m/
+  console.log('\x1b[32m\u279c\x1b[39m  \x1b[1mLocal\x1b[22m:   \x1b[36mhttp://localhost:\x1b[1m${actualPort}\x1b[22m/\x1b[39m');
+});`;
+  await fs.writeFile(path.join(root, 'vite-server.cjs'), server);
+  const runner = new PreviewRunner(
+    { command: 'node vite-server.cjs', port: configuredPort, timeoutMs: 8000 },
+    store
+  );
+  runners.push(runner);
+  const origin = await runner.start(root, true);
+  expect(origin).toContain(String(actualPort));
+  const body = await fetch(origin).then((r) => r.text());
+  expect(body).toContain('ansi test');
+  await runner.stop();
+
+  // Angular-style with ANSI: ng serve outputs "Local: http://localhost:PORT/"
+  // with colour codes around the URL.
+  const ngPort = await freePort();
+  const ngServer = `const http = require('http');
+http.createServer((q,r)=>r.end('<h1>ng test</h1>')).listen(${ngPort},'127.0.0.1',()=>{
+  console.log('\x1b[32m\u279c\x1b[39m \x1b[1mLocal\x1b[22m: \x1b[36mhttp://localhost:\x1b[1m${ngPort}\x1b[22m/\x1b[39m');
+});`;
+  await fs.writeFile(path.join(root, 'ng-server.cjs'), ngServer);
+  const ngRunner = new PreviewRunner(
+    { command: 'node ng-server.cjs', port: configuredPort, timeoutMs: 8000 },
+    store
+  );
+  runners.push(ngRunner);
+  const ngOrigin = await ngRunner.start(root, true);
+  expect(ngOrigin).toContain(String(ngPort));
+  const ngBody = await fetch(ngOrigin).then((r) => r.text());
+  expect(ngBody).toContain('ng test');
+}, 15000);
 test('isolated historical states render differently and never mutate workspace; thumbnails bound to ids', async () => {
   const { store, root } = await setup();
   await fs.cp(path.resolve('../../fixtures/sample-web'), root, { recursive: true });

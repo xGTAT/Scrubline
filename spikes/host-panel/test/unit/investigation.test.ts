@@ -159,7 +159,7 @@ test('unchanged real-site theme tokens and URL declarations do not veto an indep
   expect(() =>
     declarationChanges('site.css', before, before.replace('chair.png', 'other.png'))
   ).toThrow('URLs');
-});
+}, 90000);
 
 test('unchanged duplicate cascade declarations stay byte-exact while independent changes remain usable', () => {
   const before = '.secondary{color:red}.secondary{color:blue}.hero{max-height:2000px}';

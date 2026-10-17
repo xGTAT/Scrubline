@@ -85,9 +85,14 @@ export class PreviewRunner {
     let detectedPort: number | undefined;
     const portPattern =
       /(?:Local|local|localhost|listening|Listening|running|Running|started|Started)\s*(?:at|on|At|On)?\s*[: ]*\s*https?:\/\/(?:localhost|127\.0\.0\.1|\[?::1\]?):(\d+)/;
+    // Dev servers (Vite, Angular CLI, Next.js) emit ANSI colour codes inside
+    // URLs, e.g. \x1b[36mhttp://localhost:\x1b[1m5180\x1b[22m/. Strip them
+    // before matching so the port regex sees the plain text.
+    // eslint-disable-next-line no-control-regex
+    const stripAnsi = (text: string) => text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
     const detectPort = (data: Buffer) => {
       if (detectedPort) return;
-      const match = data.toString().match(portPattern);
+      const match = stripAnsi(data.toString()).match(portPattern);
       if (match) {
         const p = parseInt(match[1], 10);
         if (p >= 1024 && p <= 65535) detectedPort = p;
@@ -131,21 +136,29 @@ export class PreviewRunner {
       while (Date.now() < deadline) {
         if (this.stopped || exited)
           throw new Error(this.lastExit ?? 'Preview process exited. Check command.');
-        for (const candidate of candidates()) {
-          try {
+        const urls = candidates();
+        const results = await Promise.allSettled(
+          urls.map(async (candidate) => {
             const response = await fetch(candidate, { signal: AbortSignal.timeout(500) });
-            if (response.ok) {
-              this.live = true;
-              this.origin = candidate;
-              return candidate;
-            }
-          } catch (probeError) {
-            lastProbeError =
-              probeError instanceof Error
-                ? `${probeError.message} ${(probeError.cause as Error)?.message ?? ''}`.trim()
-                : String(probeError);
+            if (response.ok) return candidate;
+            throw new Error(`${response.status}`);
+          })
+        );
+        for (const r of results) {
+          if (r.status === 'fulfilled') {
+            this.live = true;
+            this.origin = r.value;
+            return r.value;
           }
         }
+        const errors = results
+          .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+          .map((r) =>
+            r.reason instanceof Error
+              ? `${r.reason.message} ${(r.reason.cause as Error)?.message ?? ''}`.trim()
+              : String(r.reason)
+          );
+        if (errors.length) lastProbeError = errors[errors.length - 1];
         await new Promise((r) => setTimeout(r, 100));
       }
       throw new Error(
