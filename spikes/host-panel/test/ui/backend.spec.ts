@@ -149,30 +149,30 @@ async function openBackend(page: import('@playwright/test').Page) {
 
 test('backend panel renders waterfall, routes, graph and honest labels', async ({ page }) => {
   await openBackend(page);
-  await expect(page.getByText('GET /api/status').first()).toBeVisible();
-  await expect(page.getByText('POST /api/items', { exact: true }).first()).toBeVisible();
-  await expect(page.getByText(/write request/)).toBeVisible();
-  await expect(page.getByText(/never recorded/)).toBeVisible();
+  await expect(page.locator('.bv-path', { hasText: '/api/status' }).first()).toBeVisible();
+  await expect(page.locator('.bv-path', { hasText: '/api/items' }).first()).toBeVisible();
+  await expect(page.locator('.bv-mutation-note')).toBeVisible();
+  await expect(page.locator('.bv-note', { hasText: 'never recorded' })).toBeVisible();
   // Query key names render, values never do.
-  await expect(page.getByText(/\?verbose/)).toBeVisible();
+  await expect(page.locator('.bv-query', { hasText: 'verbose' })).toBeVisible();
   // Static-structure labels, no runtime-flow claims.
-  await page.locator('details.backend-endpoints summary').click();
-  await expect(page.getByText('server.js:12')).toBeVisible();
-  await expect(page.getByText(/Statically detected literal routes only/)).toBeVisible();
-  await page.locator('details.backend-modules summary').click();
-  await expect(page.getByText(/Static import structure/)).toBeVisible();
+  await page.locator('details.bv-section summary').first().click();
+  await expect(page.locator('.bv-endpoint-file-name', { hasText: 'server.js' })).toBeVisible();
+  await expect(page.locator('.bv-note', { hasText: 'Statically detected' })).toBeVisible();
+  await page.locator('details.bv-section summary').last().click();
+  await expect(page.locator('.bv-note', { hasText: 'Static import structure' })).toBeVisible();
   // Diff vs previous checkpoint.
-  await expect(page.getByText(/vs previous checkpoint/)).toBeVisible();
+  await expect(page.locator('.bv-diff-header')).toBeVisible();
   // Waterfall bars: mutation stroke on the POST bar.
-  await expect(page.locator('.waterfall-bar.mutation')).toHaveCount(1);
-  await expect(page.locator('.waterfall-bar')).toHaveCount(5);
+  await expect(page.locator('.bv-bar.mutation')).toHaveCount(1);
+  await expect(page.locator('.bv-bar')).toHaveCount(5);
 });
 
 test('backend panel evidence screenshots wide and narrow', async ({ page }) => {
   await page.setViewportSize({ width: 960, height: 900 });
   await openBackend(page);
-  await page.locator('details.backend-endpoints summary').click();
-  await page.locator('details.backend-modules summary').click();
+  await page.locator('details.bv-section summary').first().click();
+  await page.locator('details.bv-section summary').last().click();
   // Viewport screenshots: fullPage stitching misdraws the sticky scrub bar.
   await page.locator('details.backend-panel').scrollIntoViewIfNeeded();
   await page.screenshot({ path: `${evidenceDir}/backend_panel_wide.png`, fullPage: false });
