@@ -1135,6 +1135,9 @@ export const App: React.FC = () => {
             Locked elements must never be changed by restores or by the agent. The agent sees this
             list through the Scrubline MCP tools.
           </p>
+          <button onClick={() => bridge?.postMessage({ type: 'open-locks-preview' })}>
+            Open preview page (current page with locks applied)
+          </button>
           <ul className="paths">
             {state.locks.map((l) => (
               <li key={`${l.document}::${l.selector}`}>

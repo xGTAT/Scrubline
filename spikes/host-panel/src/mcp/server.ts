@@ -84,7 +84,7 @@ export async function run(connection: string) {
   const url = new URL(data.url);
   if (
     url.protocol !== 'http:' ||
-    url.hostname !== '127.0.0.1' ||
+    !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) ||
     url.pathname !== '/tool' ||
     typeof data.token !== 'string' ||
     !/^[a-f0-9]{64}$/.test(data.token)

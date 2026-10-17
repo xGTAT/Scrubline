@@ -238,6 +238,61 @@ async function runAgy(
   });
 }
 
+export interface AgyModel {
+  slug: string;
+  name: string;
+}
+
+/** Parses `agy models` output lines: "slug<2+ spaces>Display Name". */
+export function parseAgyModelsOutput(stdout: string): AgyModel[] {
+  const models: AgyModel[] = [];
+  for (const line of stdout.split('\n')) {
+    const m = line.trim().match(/^[-*\u2022]?\s*(\S+)\s{2,}(.+)$/);
+    if (m) models.push({ slug: m[1], name: m[2].trim() });
+  }
+  return models;
+}
+
+/**
+ * Lists the models available to the signed-in account via `agy models`
+ * (verified against the Antigravity CLI docs). Parses "slug  Display Name"
+ * lines; skips blank lines and headers.
+ */
+export async function listAgyModels(options: AgyCliOptions = {}): Promise<AgyModel[]> {
+  const agyPath = options.agyPath ?? 'agy';
+  const resolvedPath = await resolveAgyExecutable(agyPath);
+  const timeoutMs = 30000;
+  return new Promise((resolve, reject) => {
+    let child;
+    try {
+      child = spawnAgy(resolvedPath, ['models']);
+    } catch (err) {
+      reject(err instanceof Error ? err : new Error(String(err)));
+      return;
+    }
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error('agy models timed out'));
+    }, timeoutMs);
+    child.stdout.on('data', (d) => (stdout += d.toString()));
+    child.stderr.on('data', (d) => (stderr += d.toString()));
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(new Error(`agy CLI failed to start: ${err.message}`));
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(new Error(`agy models exited with code ${code}: ${stderr.trim().slice(0, 300)}`));
+        return;
+      }
+      resolve(parseAgyModelsOutput(stdout));
+    });
+  });
+}
+
 /**
  * Answers design questions through the Antigravity CLI headless mode
  * (`agy -p ... --output-format json --json-schema ...`), which runs on the

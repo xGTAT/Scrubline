@@ -122,6 +122,7 @@ export interface TimelineState {
 }
 export type TimelineInbound =
   | { type: 'lock-element'; label?: string }
+  | { type: 'open-locks-preview' }
   | { type: 'unlock-element'; selector: string; document: string }
   | { type: 'render-history' }
   | { type: 'fullscreen'; active: boolean }

@@ -1,8 +1,8 @@
-import { test, expect } from 'vitest';
+import { test, expect, describe, it } from 'vitest';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
-import { AgyCliAdvisorProvider } from '../../src/advisor/agy-cli';
+import { AgyCliAdvisorProvider, parseAgyModelsOutput } from '../../src/advisor/agy-cli';
 import { DesignAdvisorService, DeterministicAdvisorProvider } from '../../src/chatbot/advisor';
 import type { DesignQueryContext } from '../../src/chatbot/types';
 import type { Checkpoint } from '../../src/bridge/timeline';
@@ -112,4 +112,25 @@ test('strict agy mode surfaces the backend error instead of falling back', async
   );
   await expect(service.ask(context())).rejects.toThrow(/not signed in/);
   delete process.env.AGY_DOUBLE_BEHAVIOR;
+});
+
+describe('parseAgyModelsOutput', () => {
+  it('parses the real agy 1.2.16 models table (slugs + display names with parentheses)', () => {
+    const sample = [
+      'gemini-3.8-flash-high     Gemini 3.8 Flash (High)',
+      'gemini-3.8-flash-medium   Gemini 3.8 Flash (Medium)',
+      'gemini-3.8-flash-low      Gemini 3.8 Flash (Low)',
+      'claude-sonnet-4-6         Claude Sonnet 4.6 (Thinking)',
+      'claude-opus-4-6-thinking  Claude Opus 4.6 (Thinking)',
+      'gpt-oss-120b-medium       GPT-OSS 120B (Medium)'
+    ].join('\n');
+    expect(parseAgyModelsOutput(sample)).toEqual([
+      { slug: 'gemini-3.8-flash-high', name: 'Gemini 3.8 Flash (High)' },
+      { slug: 'gemini-3.8-flash-medium', name: 'Gemini 3.8 Flash (Medium)' },
+      { slug: 'gemini-3.8-flash-low', name: 'Gemini 3.8 Flash (Low)' },
+      { slug: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6 (Thinking)' },
+      { slug: 'claude-opus-4-6-thinking', name: 'Claude Opus 4.6 (Thinking)' },
+      { slug: 'gpt-oss-120b-medium', name: 'GPT-OSS 120B (Medium)' }
+    ]);
+  });
 });

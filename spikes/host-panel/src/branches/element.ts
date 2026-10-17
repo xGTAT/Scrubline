@@ -1,7 +1,7 @@
 import { adapter } from 'parse5-htmlparser2-tree-adapter';
 import { selectAll } from 'css-select';
 import * as fs from 'node:fs/promises';
-import { parse } from 'parse5';
+import { parse, parseFragment, serialize } from 'parse5';
 import postcss from 'postcss';
 import * as path from 'node:path';
 import { HistoryStore, hashBytes, atomicWrite, safePath } from '../store/store';
@@ -382,4 +382,183 @@ export async function elementCandidate(
   void _id;
   const candidate = { ...body, files };
   return { ...candidate, id: hashBytes(JSON.stringify(candidate)) };
+}
+
+const elementChildren = (n: HtmlNode): HtmlNode[] =>
+  (n.childNodes ?? []).filter((c) => !!c.tagName);
+
+function findBody(doc: HtmlNode): HtmlNode | null {
+  if (doc.tagName === 'body') return doc;
+  for (const c of elementChildren(doc)) {
+    const b = findBody(c);
+    if (b) return b;
+  }
+  return null;
+}
+
+/** Serializes the element at the picker child-index path (element children of <body>) as outer HTML. */
+export function extractElementOuterHtml(html: string, indices: readonly number[]): string {
+  const doc = parse(html, { sourceCodeLocationInfo: false }) as unknown as HtmlNode;
+  let node = findBody(doc);
+  if (!node) throw new Error('No <body> found in the document.');
+  for (const i of indices) {
+    const kids = elementChildren(node);
+    if (i < 0 || i >= kids.length)
+      throw new Error('The picked element path no longer matches the document.');
+    node = kids[i];
+  }
+  return serialize({ childNodes: [node] } as never);
+}
+
+/** Minimal matcher for the selector shapes the picker emits: #id, [data-testid="x"], body > :nth-child(n) > ... */
+function findBySelector(doc: HtmlNode, selector: string): HtmlNode | null {
+  const all: HtmlNode[] = [];
+  const visit = (n: HtmlNode): void => {
+    all.push(n);
+    for (const c of elementChildren(n)) visit(c);
+  };
+  visit(doc);
+  if (selector.startsWith('body > :nth-child')) {
+    const parts = selector.split('>').map((p) => p.trim());
+    let current: HtmlNode | undefined = all.find((n) => n.tagName === 'body');
+    for (const part of parts.slice(1)) {
+      const m = part.match(/^:nth-child\((\d+)\)$/);
+      if (!m || !current) return null;
+      current = elementChildren(current)[Number(m[1]) - 1];
+    }
+    return current ?? null;
+  }
+  const simple = (n: HtmlNode): boolean => {
+    if (selector.startsWith('#'))
+      return !!n.attrs?.some((a) => a.name === 'id' && a.value === selector.slice(1));
+    const m = selector.match(/^\[data-testid="(.*)"\]$/);
+    if (m) return !!n.attrs?.some((a) => a.name === 'data-testid' && a.value === m[1]);
+    return n.tagName === selector;
+  };
+  const found = all.filter((n) => n.tagName && simple(n));
+  return found.length === 1 ? found[0] : null;
+}
+
+function findParent(doc: HtmlNode, target: HtmlNode): HtmlNode | null {
+  for (const c of doc.childNodes ?? []) {
+    if (c === target) return doc;
+    const found = findParent(c, target);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * Renders a document with every locked element replaced by its pinned HTML.
+ * Elements whose selector no longer resolves are reported as failed; the rest
+ * of the document renders unchanged.
+ */
+export interface AncestorContext {
+  /** Attributes of the source document's <body>, to mirror on the card body. */
+  bodyAttrs: { name: string; value: string }[];
+  /** Serialized ancestor wrappers around the element, outermost first. */
+  open: string[];
+  close: string[];
+}
+
+/**
+ * Ancestor chain (below <body>) around the element matching a selector, so an
+ * isolated render keeps contextual styles like `.hero h1 { color: ... }`.
+ */
+export function extractAncestorContext(html: string, selector: string): AncestorContext {
+  const doc = parse(html, { sourceCodeLocationInfo: false }) as unknown as HtmlNode;
+  const empty: AncestorContext = { bodyAttrs: [], open: [], close: [] };
+  const target = findBySelector(doc, selector);
+  if (!target) return empty;
+  const body = findBySelector(doc, 'body');
+  const bodyAttrs = (body?.attrs ?? []).map((a) => ({ name: a.name, value: a.value }));
+  const chain: HtmlNode[] = [];
+  let node = findParent(doc, target);
+  while (node && node !== body && node.tagName) {
+    chain.unshift(node);
+    node = findParent(doc, node);
+  }
+  const esc = (v: string) => v.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  return {
+    bodyAttrs,
+    open: chain.map(
+      (n) => `<${n.tagName}${(n.attrs ?? []).map((a) => ` ${a.name}="${esc(a.value)}"`).join('')}>`
+    ),
+    close: chain.map((n) => `</${n.tagName}>`).reverse()
+  };
+}
+
+/** Serialize the current element matching a lock selector, or null when absent. */
+export function extractElementBySelector(html: string, selector: string): string | null {
+  const doc = parse(html, { sourceCodeLocationInfo: false }) as unknown as HtmlNode;
+  const target = findBySelector(doc, selector);
+  return target ? serialize({ childNodes: [target] } as never) : null;
+}
+
+export function composeLockedDocument(
+  html: string,
+  locks: readonly { selector: string; pinnedHtml?: string }[],
+  options?: { highlight?: boolean }
+): { html: string; applied: string[]; failed: string[] } {
+  const doc = parse(html, { sourceCodeLocationInfo: false }) as unknown as HtmlNode;
+  const applied: string[] = [];
+  const failed: string[] = [];
+  for (const lock of locks) {
+    if (!lock.pinnedHtml) {
+      failed.push(lock.selector);
+      continue;
+    }
+    const target = findBySelector(doc, lock.selector);
+    const parent = target ? findParent(doc, target) : null;
+    if (!target || !parent) {
+      failed.push(lock.selector);
+      continue;
+    }
+    const frag = parseFragment(lock.pinnedHtml, {
+      sourceCodeLocationInfo: false
+    }) as unknown as HtmlNode;
+    const idx = (parent.childNodes ?? []).indexOf(target);
+    if (idx < 0) {
+      failed.push(lock.selector);
+      continue;
+    }
+    const inserted = frag.childNodes ?? [];
+    if (options?.highlight)
+      for (const n of inserted)
+        if (n.tagName) n.attrs = [...(n.attrs ?? []), { name: 'data-scrubline-lock', value: '' }];
+    parent.childNodes!.splice(idx, 1, ...inserted);
+    applied.push(lock.selector);
+  }
+  if (options?.highlight && applied.length) {
+    const head = findBySelector(doc, 'head');
+    if (head) {
+      const styleNode = parseFragment(
+        `<style>[data-scrubline-lock]{outline:3px solid #e5a00d !important;outline-offset:2px !important;box-shadow:0 0 0 6px rgba(229,160,13,0.25) !important}</style>`,
+        { sourceCodeLocationInfo: false }
+      ) as unknown as HtmlNode;
+      head.childNodes = [...(head.childNodes ?? []), ...(styleNode.childNodes ?? [])];
+    }
+  }
+  return {
+    html: serialize(doc as never),
+    applied,
+    failed
+  };
+}
+/** Stylesheet hrefs linked by a document, for rendering an element in isolation. */
+export function extractStylesheetHrefs(html: string): string[] {
+  const doc = parse(html, { sourceCodeLocationInfo: false }) as unknown as HtmlNode;
+  const hrefs: string[] = [];
+  const visit = (n: HtmlNode): void => {
+    if (
+      n.tagName === 'link' &&
+      n.attrs?.some((a) => a.name === 'rel' && a.value === 'stylesheet')
+    ) {
+      const href = n.attrs?.find((a) => a.name === 'href')?.value;
+      if (href) hrefs.push(href);
+    }
+    for (const c of n.childNodes ?? []) visit(c);
+  };
+  visit(doc);
+  return hrefs;
 }
