@@ -360,8 +360,7 @@ test('sitewide element change applies to matching pages and skips the rest with 
       'about.html': '<nav id="nav"><b>V2-other</b></nav><footer>About footer</footer>',
       'contact.html': '<p>No navigation here</p>',
       'guide.html': '<nav id="nav">A</nav><nav id="nav">B</nav>',
-      'docs.html':
-        '<link rel="stylesheet" href="docs.css"><nav id="nav"><b>V2-docs</b></nav>',
+      'docs.html': '<link rel="stylesheet" href="docs.css"><nav id="nav"><b>V2-docs</b></nav>',
       'docs.css': '#nav{color:black}'
     });
     const { elementCandidateAcrossDocuments } = await import('../../src/branches/element');
