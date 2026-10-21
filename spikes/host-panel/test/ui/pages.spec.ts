@@ -12,7 +12,7 @@ test.beforeAll(() => {
 const readyWithPages = {
   status: 'ready',
   unsaved: false,
-  activePage: '/',
+  activePage: 'index.html',
   pages: [
     { route: '/', document: 'index.html' },
     { route: '/about.html', document: 'about.html' },
@@ -41,21 +41,46 @@ test('page dropdown lists discovered pages with the active page selected', async
     'docs/guide.html',
     'Add page route…'
   ]);
-  await expect(select).toHaveValue('/');
+  await expect(select).toHaveValue('index.html');
 });
 
-test('choosing a page posts set-page with the selected route', async ({ page }) => {
+test('choosing a page posts set-page with the selected document', async ({ page }) => {
   await page.goto('/');
   await page.evaluate((state) => {
     (window as unknown as { __sendTimeline: (value: unknown) => void }).__sendTimeline(state);
   }, readyWithPages);
-  await page.locator('#scrubline-page').selectOption('/about.html');
+  await page.locator('#scrubline-page').selectOption('about.html');
   const posted = await page.evaluate(
     () =>
-      (window as unknown as { __postedMessages: { type: string; route?: string }[] })
+      (window as unknown as { __postedMessages: { type: string; document?: string }[] })
         .__postedMessages
   );
-  expect(posted).toContainEqual({ type: 'set-page', route: '/about.html' });
+  expect(posted).toContainEqual({ type: 'set-page', document: 'about.html' });
+});
+
+test('framework module pages share the app route but select by document', async ({ page }) => {
+  const withModules = {
+    ...readyWithPages,
+    activePage: 'src/App.tsx',
+    pages: [
+      { route: '/', document: 'index.html' },
+      { route: '/', document: 'src/App.tsx' },
+      { route: '/', document: 'src/components/Card.tsx' }
+    ]
+  };
+  await page.goto('/');
+  await page.evaluate((state) => {
+    (window as unknown as { __sendTimeline: (value: unknown) => void }).__sendTimeline(state);
+  }, withModules);
+  const select = page.locator('#scrubline-page');
+  await expect(select).toHaveValue('src/App.tsx');
+  await select.selectOption('src/components/Card.tsx');
+  const posted = await page.evaluate(
+    () =>
+      (window as unknown as { __postedMessages: { type: string; document?: string }[] })
+        .__postedMessages
+  );
+  expect(posted).toContainEqual({ type: 'set-page', document: 'src/components/Card.tsx' });
 });
 
 test('the add-page option posts add-page instead of a route switch', async ({ page }) => {

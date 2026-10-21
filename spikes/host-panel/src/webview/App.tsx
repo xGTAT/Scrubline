@@ -332,11 +332,11 @@ export const App: React.FC = () => {
             value={state.activePage ?? ''}
             onChange={(e) => {
               if (e.target.value === '__add__') bridge?.postMessage({ type: 'add-page' });
-              else bridge?.postMessage({ type: 'set-page', route: e.target.value });
+              else bridge?.postMessage({ type: 'set-page', document: e.target.value });
             }}
           >
             {state.pages!.map((p) => (
-              <option key={p.route} value={p.route}>
+              <option key={p.document} value={p.document}>
                 {p.document}
               </option>
             ))}

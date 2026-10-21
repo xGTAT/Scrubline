@@ -201,3 +201,130 @@ test('navigation links between pages are not page dependencies (web-lab regressi
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+async function writeFiles(root: string, files: Record<string, string>) {
+  for (const [file, content] of Object.entries(files)) {
+    await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true });
+    await fs.writeFile(path.join(root, file), content);
+  }
+}
+
+test('listPages surfaces React component modules on the app route', async () => {
+  const root = await fixture(['index.html']);
+  await writeFiles(root, {
+    'src/App.tsx': 'export function App() { return null; }',
+    'src/components/Card.tsx': 'export function Card() { return null; }',
+    'src/App.test.tsx': 'test', // tests are not pages
+    'src/types.d.ts': 'export {}', // declarations are not pages
+    'src/__tests__/App.spec.tsx': 'test'
+  });
+  try {
+    const pages = await listPages(root);
+    expect(pages).toEqual([
+      { route: '/', document: 'index.html' },
+      { route: '/', document: 'src/App.tsx' },
+      { route: '/', document: 'src/components/Card.tsx' }
+    ]);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('listPages maps file-based framework routes', async () => {
+  const root = await fixture([]);
+  await writeFiles(root, {
+    'pages/index.tsx': 'export default function Home() {}',
+    'pages/about.tsx': 'export default function About() {}',
+    'pages/api/health.ts': 'export default function handler() {}', // api routes are not pages
+    'pages/_app.tsx': 'export default function App() {}', // next internals are not pages
+    'src/pages/index.astro': '<html></html>',
+    'src/pages/docs/guide.md': '# guide',
+    'app/dashboard/page.tsx': 'export default function Dashboard() {}',
+    'src/routes/settings/+page.svelte': '<h1>settings</h1>',
+    'app/routes/_index.tsx': 'export default function Index() {}',
+    'app/routes/tickets.$id.tsx': 'export default function Ticket() {}'
+  });
+  try {
+    const routes = new Map((await listPages(root)).map((p) => [p.document, p.route]));
+    expect(routes.get('pages/index.tsx')).toBe('/');
+    expect(routes.get('pages/about.tsx')).toBe('/about');
+    expect(routes.has('pages/api/health.ts')).toBe(false);
+    expect(routes.has('pages/_app.tsx')).toBe(false);
+    expect(routes.get('src/pages/index.astro')).toBe('/');
+    expect(routes.get('src/pages/docs/guide.md')).toBe('/docs/guide');
+    expect(routes.get('app/dashboard/page.tsx')).toBe('/dashboard');
+    expect(routes.get('src/routes/settings/+page.svelte')).toBe('/settings');
+    expect(routes.get('app/routes/_index.tsx')).toBe('/');
+    expect(routes.get('app/routes/tickets.$id.tsx')).toBe('/tickets/:id');
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('listPages keeps the html page when a framework route collides', async () => {
+  const root = await fixture(['index.html']);
+  await writeFiles(root, {
+    'pages/index.tsx': 'export default function Home() {}'
+  });
+  try {
+    const pages = await listPages(root);
+    expect(pages.filter((p) => p.route === '/')).toEqual([{ route: '/', document: 'index.html' }]);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('pageFiles follows local module imports, aliases and style imports', async () => {
+  const root = await fixture(['index.html']);
+  await writeFiles(root, {
+    'index.html': '<script type="module" src="/src/main.tsx"></script>',
+    'src/main.tsx': 'import { App } from "./App";\nimport "./styles/app.css";',
+    'src/App.tsx': 'import { Card } from "@/components/Card";\nimport React from "react";',
+    'src/components/Card.tsx': 'import { util } from "../lib/util";',
+    'src/lib/util.ts': 'export const util = 1;',
+    'src/styles/app.css': '@import "./reset.css";',
+    'src/styles/reset.css': 'html {}'
+  });
+  try {
+    const files = await pageFiles(root, 'index.html');
+    expect(files).toEqual(
+      new Set([
+        'index.html',
+        'src/main.tsx',
+        'src/App.tsx',
+        'src/components/Card.tsx',
+        'src/lib/util.ts',
+        'src/styles/app.css',
+        'src/styles/reset.css'
+      ])
+    );
+    // A checkpoint on a transitive dependency belongs on the page.
+    expect(rowRelevantToPage(['src/lib/util.ts'], files, files)).toBe(true);
+    // Bare package imports are never workspace files.
+    expect([...files].some((f) => f.includes('react'))).toBe(false);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('pageFiles scopes a component module page to its own import closure', async () => {
+  const root = await fixture([]);
+  await writeFiles(root, {
+    'src/App.tsx': 'import { Card } from "./components/Card";',
+    'src/components/Card.tsx': 'import { util } from "../lib/util";',
+    'src/lib/util.ts': 'export const util = 1;',
+    'src/unrelated.ts': 'export const other = 1;'
+  });
+  try {
+    const appFiles = await pageFiles(root, 'src/App.tsx');
+    const cardFiles = await pageFiles(root, 'src/components/Card.tsx');
+    const all = new Set([...appFiles, ...cardFiles]);
+    // Editing the Card shows on both pages; editing an unrelated file on neither
+    // page proves it belongs elsewhere only when some page maps it.
+    expect(rowRelevantToPage(['src/components/Card.tsx'], appFiles, all)).toBe(true);
+    expect(rowRelevantToPage(['src/unrelated.ts'], cardFiles, all)).toBe(true); // unmapped stays visible
+    expect(appFiles.has('src/unrelated.ts')).toBe(false);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

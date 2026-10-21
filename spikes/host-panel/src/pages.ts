@@ -51,6 +51,137 @@ export async function listPages(root: string): Promise<PageInfo[]> {
   pages.sort((a, b) =>
     a.route === '/' ? -1 : b.route === '/' ? 1 : a.document.localeCompare(b.document)
   );
+  return [...pages, ...(await listFrameworkPages(root, pages))];
+}
+
+const COMPONENT_EXTENSIONS = new Set(['.tsx', '.jsx', '.vue', '.svelte', '.astro']);
+const MODULE_EXTENSIONS = [
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  '.vue',
+  '.svelte',
+  '.astro',
+  '.css',
+  '.scss',
+  '.less',
+  '.json',
+  '.md',
+  '.mdx'
+];
+/** Test, story, declaration and mock modules are never user-facing pages. */
+const NON_PAGE_MODULE = /(?:\.d\.ts$|__tests__|__mocks__|\.(?:test|spec|stories|story)\.[jt]sx?$)/i;
+
+/** Route for a file-based routing module, or undefined when the file is not a route. */
+function fileBasedRoute(document: string): string | undefined {
+  const ext = path.posix.extname(document);
+  const base = document.slice(0, document.length - ext.length);
+  const segments = base.split('/');
+  const name = segments[segments.length - 1];
+  const routeOf = (parts: string[]) => {
+    const last = parts[parts.length - 1];
+    const trimmed =
+      last === 'index' || last === '_index' || last === '+page' || last === 'page'
+        ? parts.slice(0, -1)
+        : parts;
+    return '/' + trimmed.join('/');
+  };
+  // Next.js pages router / Nuxt: pages/** or src/pages/** (api and _-files excluded).
+  for (const prefix of ['pages/', 'src/pages/']) {
+    if (document.startsWith(prefix)) {
+      const rest = document.slice(prefix.length);
+      if (rest.startsWith('api/') || rest.split('/').some((s) => s.startsWith('_')))
+        return undefined;
+      if (['.js', '.jsx', '.ts', '.tsx', '.vue'].includes(ext))
+        return routeOf(rest.slice(0, rest.length - ext.length).split('/'));
+      if (['.astro', '.md', '.mdx'].includes(ext) && prefix === 'src/pages/')
+        return routeOf(rest.slice(0, rest.length - ext.length).split('/'));
+      return undefined;
+    }
+  }
+  // Next.js app router: app/**/page.* or src/app/**/page.*.
+  for (const prefix of ['app/', 'src/app/']) {
+    if (document.startsWith(prefix) && /^page\.[jt]sx?$/.test(name + ext)) {
+      if (!['.js', '.jsx', '.ts', '.tsx'].includes(ext)) return undefined;
+      return routeOf(base.slice(prefix.length).split('/'));
+    }
+  }
+  // SvelteKit: src/routes/**/+page.svelte.
+  if (document.startsWith('src/routes/') && name === '+page' && ext === '.svelte')
+    return routeOf(base.slice('src/routes/'.length).split('/'));
+  // Qwik City / SolidStart: src/routes/**/index.{jsx,tsx}.
+  if (document.startsWith('src/routes/') && name === 'index' && ['.jsx', '.tsx'].includes(ext))
+    return routeOf(base.slice('src/routes/'.length).split('/'));
+  // Remix flat routes: app/routes/** (dots nest, $param is dynamic).
+  if (document.startsWith('app/routes/') && ['.js', '.jsx', '.ts', '.tsx'].includes(ext)) {
+    const flat = base
+      .slice('app/routes/'.length)
+      .split('/')
+      .map((part) => part.replace(/\$/g, ':').replace(/\./g, '/'));
+    return routeOf(flat.join('/').split('/'));
+  }
+  return undefined;
+}
+
+/** True for authored component modules surfaced as scrubbable pages. */
+function isComponentModule(document: string): boolean {
+  if (NON_PAGE_MODULE.test(document)) return false;
+  if (document.endsWith('.component.ts')) return true;
+  return COMPONENT_EXTENSIONS.has(path.posix.extname(document));
+}
+
+/**
+ * Framework pages: file-based routes (Next.js, Nuxt, SvelteKit, Astro, Remix,
+ * Qwik City, SolidStart) get their own URL route. Component modules of
+ * client-rendered apps (React, Vue, Svelte, Solid, Preact, Angular) are
+ * surfaced with the app's root route so their changes scrub independently.
+ * Routes that exist only in code (React Router and similar) are still not
+ * detected; add them with Add page route….
+ */
+async function listFrameworkPages(root: string, existing: PageInfo[]): Promise<PageInfo[]> {
+  const pages: PageInfo[] = [];
+  const seenDocuments = new Set(existing.map((p) => p.document));
+  const seenRoutes = new Set(existing.map((p) => p.route));
+  const visit = async (directory: string, relative: string, depth: number): Promise<void> => {
+    if (pages.length + existing.length >= MAX_PAGES || depth > MAX_DEPTH) return;
+    let entries: import('node:fs').Dirent[];
+    try {
+      entries = await fs.readdir(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (pages.length + existing.length >= MAX_PAGES) return;
+      const childRelative = relative ? `${relative}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        if (EXCLUDED_DIRECTORIES.has(entry.name) || entry.name.startsWith('.')) continue;
+        await visit(path.join(directory, entry.name), childRelative, depth + 1);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const route = fileBasedRoute(childRelative);
+      if (route !== undefined) {
+        if (!seenDocuments.has(childRelative) && !seenRoutes.has(route)) {
+          seenDocuments.add(childRelative);
+          pages.push({ route, document: childRelative });
+        }
+        continue;
+      }
+      if (
+        childRelative.startsWith('src/') &&
+        isComponentModule(childRelative) &&
+        !seenDocuments.has(childRelative)
+      ) {
+        seenDocuments.add(childRelative);
+        pages.push({ route: '/', document: childRelative });
+      }
+    }
+  };
+  await visit(root, '', 0);
+  pages.sort((a, b) => a.document.localeCompare(b.document));
   return pages;
 }
 
@@ -107,6 +238,57 @@ function cssReferences(css: string) {
   return references;
 }
 
+const MODULE_REFERENCES =
+  /(?:import|export)\s[^'"]*?\sfrom\s*["']([^"']+)["']|(?:import|require)\s*\(\s*["']([^"']+)["']\s*\)|^\s*import\s+["']([^"']+)["']/gm;
+
+/** Bare package specifiers are not workspace files. */
+function isLocalModuleReference(reference: string) {
+  return (
+    reference.startsWith('./') ||
+    reference.startsWith('../') ||
+    reference.startsWith('/') ||
+    reference.startsWith('@/') ||
+    reference.startsWith('~/')
+  );
+}
+
+/**
+ * Local files a JS/TS-family module imports. Path aliases @/ and ~/ resolve
+ * against src/, matching the common Vite/Next/Angular tsconfig mapping.
+ */
+function moduleReferences(source: string) {
+  const references: string[] = [];
+  for (const match of source.matchAll(MODULE_REFERENCES)) {
+    const reference = match[1] ?? match[2] ?? match[3];
+    if (reference && isLocalModuleReference(reference)) references.push(reference);
+  }
+  return references;
+}
+
+/** Existing workspace file for an extensionless or aliased module specifier. */
+async function resolveModuleReference(root: string, fromFile: string, reference: string) {
+  let candidate: string | undefined;
+  if (reference.startsWith('@/') || reference.startsWith('~/'))
+    candidate = path.posix.normalize(`src/${reference.slice(2)}`);
+  else candidate = resolveReference(fromFile, reference);
+  if (!candidate) return undefined;
+  const exists = async (file: string) => {
+    try {
+      return (await fs.stat(path.join(root, file))).isFile();
+    } catch {
+      return false;
+    }
+  };
+  if (path.posix.extname(candidate)) return candidate;
+  for (const ext of MODULE_EXTENSIONS) {
+    if (await exists(candidate + ext)) return candidate + ext;
+  }
+  for (const ext of MODULE_EXTENSIONS) {
+    if (await exists(`${candidate}/index${ext}`)) return `${candidate}/index${ext}`;
+  }
+  return candidate;
+}
+
 /**
  * Local workspace files a page depends on: its HTML document plus every local
  * asset the document references (stylesheets, scripts, images, media), and
@@ -128,14 +310,22 @@ export async function pageFiles(root: string, document: string): Promise<Set<str
     } catch {
       return; // Missing or unreadable file; the path still identifies the dependency.
     }
-    const references = file.endsWith('.html')
-      ? htmlReferences(content)
-      : file.endsWith('.css')
-        ? cssReferences(content)
-        : [];
-    for (const reference of references) {
-      const resolved = resolveReference(file, reference);
-      if (resolved) pending.push(resolved);
+    const ext = path.posix.extname(file);
+    if (file.endsWith('.html')) {
+      for (const reference of htmlReferences(content)) {
+        const resolved = resolveReference(file, reference);
+        if (resolved) pending.push(resolved);
+      }
+    } else if (ext === '.css' || ext === '.scss' || ext === '.less') {
+      for (const reference of cssReferences(content)) {
+        const resolved = resolveReference(file, reference);
+        if (resolved) pending.push(resolved);
+      }
+    } else if (MODULE_EXTENSIONS.includes(ext)) {
+      for (const reference of moduleReferences(content)) {
+        const resolved = await resolveModuleReference(root, file, reference);
+        if (resolved) pending.push(resolved);
+      }
     }
   };
   await visit(document);

@@ -175,7 +175,7 @@ export type TimelineInbound =
   | { type: 'validate-target' }
   | { type: 'request-timeline' }
   | { type: 'request-backend'; id: string }
-  | { type: 'set-page'; route: string }
+  | { type: 'set-page'; document: string }
   | { type: 'add-page' }
   | { type: 'retry-capture' }
   | { type: 'select-checkpoint'; id: string }

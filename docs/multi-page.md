@@ -6,9 +6,27 @@ Introduced on the `feature/multi-page` branch (0.9.0).
 
 - The panel shows a **Page** dropdown listing previewable pages: static HTML
   files discovered in the workspace (root `index.html` is `/` and sorts
-  first), the configured `scrubline.previewRoute`, and any custom routes added
-  through **Add page route…**. `node_modules`, hidden directories and common
-  build outputs are skipped; discovery is capped at 200 pages and 8 levels.
+  first), framework pages (below), the configured `scrubline.previewRoute`,
+  and any custom routes added through **Add page route…**. `node_modules`,
+  hidden directories and common build outputs are skipped; discovery is
+  capped at 200 pages and 8 levels.
+- **Framework pages are discovered too.** File-based routes map to their URL:
+  Next.js `pages/`/`app/` (including `src/` variants), Nuxt `pages/`, Astro
+  `src/pages/`, SvelteKit `src/routes/**/+page.svelte`, Qwik City and
+  SolidStart `src/routes/**/index.*`, Remix `app/routes/`. Component modules
+  of client-rendered apps (`.tsx`, `.jsx`, `.vue`, `.svelte`, `.astro` under
+  `src/`, plus Angular `.component.ts`) appear as pages on the app's root
+  route, so a React suite shows `src/App.tsx` instead of only `index.html`.
+  Page identity is the document, so several pages can share one route; a
+  framework route colliding with a discovered HTML page keeps the HTML page.
+  Test, story, declaration and mock files are never pages.
+- **Page file sets follow module imports.** A page's files are its document
+  plus the local files it references: HTML asset tags and CSS `@import`/`url()`
+  as before, and for JS/TS-family modules the transitive local `import`,
+  `export ... from`, `import()` and `require()` closure (path aliases `@/` and
+  `~/` resolve to `src/`). Bare package imports are never workspace files.
+  Selecting a module page therefore filters the timeline to checkpoints that
+  touch that module or its local dependencies.
 - Selecting a page switches the active page. Scrubbing, Render history, Play,
   Open preview and Recheck all run against that page's route. Each page keeps
   its own render cache, because the cache key already binds the route;
@@ -76,9 +94,12 @@ Introduced on the `feature/multi-page` branch (0.9.0).
 
 ## Limits
 
-- Page discovery sees static `.html` files only. Framework routes that exist
-  purely in code (React Router and similar) are not detected; add them with
-  **Add page route…**.
+- URL routes that exist purely in code (React Router and similar) are not
+  detected; the suite's component modules are listed instead, and custom
+  routes can be added with **Add page route…**.
+- Module dependency closure is syntax-based (`import`/`require` patterns), not
+  bundler-resolved: unconventional aliasing, barrel files re-exported through
+  package specifiers and macro-generated imports are not followed.
 - Framework element picking is verified for React development builds only:
   React 18.3.1 (via `_debugSource`) end to end in a real browser, and
   React 19.3.1 (via `_debugStack`) at fiber, stack-parse and source-map

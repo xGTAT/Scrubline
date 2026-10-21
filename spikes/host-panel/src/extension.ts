@@ -598,7 +598,7 @@ ${frames}
       merged.push({ route: configuredRoute, document: routeToDocument(configuredRoute) });
     pages = merged;
     pageDeps = new Map();
-    for (const page of merged) pageDeps.set(page.route, await pageFiles(root, page.document));
+    for (const page of merged) pageDeps.set(page.document, await pageFiles(root, page.document));
     allPageFiles = new Set([...pageDeps.values()].flatMap((files) => [...files]));
   };
 
@@ -730,12 +730,16 @@ ${frames}
     cache = new RenderCache(storeRoot, renderKey(runner.config));
     await discoverPages(root);
     const rememberedPage = context.workspaceState.get<string>('scrubline.activePage');
-    if (rememberedPage && pages.some((p) => p.route === rememberedPage)) {
-      activePage = rememberedPage;
-      runner.config.route = rememberedPage;
+    const remembered =
+      pages.find((p) => p.document === rememberedPage) ??
+      pages.find((p) => p.route === rememberedPage);
+    if (remembered) {
+      activePage = remembered.document;
+      runner.config.route = remembered.route;
       cache = new RenderCache(storeRoot, renderKey(runner.config));
     } else {
-      activePage = runner.config.route ?? '/';
+      const configuredRoute = runner.config.route ?? '/';
+      activePage = pages.find((p) => p.route === configuredRoute)?.document ?? pages[0]?.document;
     }
     publish({ status: 'loading', rows: [], unsaved: false });
     const watcher = vscode.workspace.createFileSystemWatcher(
@@ -1526,9 +1530,9 @@ ${frames}
           return;
         }
         if (message.type === 'set-page' && timeline && runner && cache) {
-          const page = pages.find((p) => p.route === message.route);
+          const page = pages.find((p) => p.document === message.document);
           if (!page) throw new Error('Page not found in this workspace.');
-          if (page.route === activePage) return;
+          if (page.document === activePage) return;
           generation++;
           cancelRender = true;
           await previewQueue.catch(() => {});
@@ -1544,8 +1548,8 @@ ${frames}
           selectiveTarget = undefined;
           multiConflicts = [];
           multiAttribution = undefined;
-          activePage = page.route;
-          void context.workspaceState.update('scrubline.activePage', page.route);
+          activePage = page.document;
+          void context.workspaceState.update('scrubline.activePage', page.document);
           if (
             selected &&
             !rowRelevantToPage(
@@ -1593,8 +1597,8 @@ ${frames}
           selectiveTarget = undefined;
           multiConflicts = [];
           multiAttribution = undefined;
-          activePage = route;
-          void context.workspaceState.update('scrubline.activePage', route);
+          activePage = routeToDocument(route);
+          void context.workspaceState.update('scrubline.activePage', routeToDocument(route));
           if (
             selected &&
             !rowRelevantToPage(
@@ -2111,7 +2115,7 @@ ${frames}
         }
         if (message.type === 'review-element' && target) {
           const current = timeline.store.checkpoints.filter((c) => !c.branch).at(-1)!;
-          const activeDocument = pages.find((p) => p.route === activePage)?.document;
+          const activeDocument = activePage;
           if (
             !message.document &&
             !(activeDocument && target.files.some((f) => f.path === activeDocument)) &&
@@ -2912,9 +2916,13 @@ ${frames}
           );
           Object.assign(runner.config, await identifyBrowser(runner.config));
           await discoverPages(folders[0].uri.fsPath);
-          if (activePage && pages.some((p) => p.route === activePage))
-            runner.config.route = activePage;
-          else activePage = runner.config.route ?? '/';
+          const active = pages.find((p) => p.document === activePage);
+          if (active) runner.config.route = active.route;
+          else {
+            const configuredRoute = runner.config.route ?? '/';
+            activePage =
+              pages.find((p) => p.route === configuredRoute)?.document ?? pages[0]?.document;
+          }
           cache = new RenderCache(timeline.store.root, renderKey(runner.config));
           rendered = await cache.available(timeline.store.checkpoints);
           preview = undefined;
