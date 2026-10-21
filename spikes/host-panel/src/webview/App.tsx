@@ -911,6 +911,31 @@ export const App: React.FC = () => {
           }
         >
           {state.review.note && <p className="element-review-note">{state.review.note}</p>}
+          {state.review.scope && state.review.scope.documents > 1 && (
+            <fieldset className="scope-select">
+              <legend>Apply element change to</legend>
+              <label>
+                <input
+                  type="radio"
+                  name="scrubline-scope"
+                  checked={state.review.scope.selected === 'page'}
+                  onChange={() => bridge?.postMessage({ type: 'selective-scope', scope: 'page' })}
+                />
+                This page only
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="scrubline-scope"
+                  checked={state.review.scope.selected === 'sitewide'}
+                  onChange={() =>
+                    bridge?.postMessage({ type: 'selective-scope', scope: 'sitewide' })
+                  }
+                />
+                Sitewide (all {state.review.scope.documents} HTML pages)
+              </label>
+            </fieldset>
+          )}
           {dev && state.review.multi && (
             <section aria-label="Multi-checkpoint review">
               {state.review.multi.warnings.map((w) => (

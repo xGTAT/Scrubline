@@ -10,6 +10,7 @@ import { ElementPicker } from './branches/picker';
 import {
   composeLockedDocument,
   elementCandidate,
+  elementCandidateAcrossDocuments,
   extractAncestorContext,
   extractElementBySelector,
   extractElementOuterHtml,
@@ -181,6 +182,16 @@ export async function activate(context: vscode.ExtensionContext) {
         indices?: number[];
         sourceCheckpointId?: string;
         sourceBranch?: string;
+        sitewide?: { applied: string[]; skipped: { document: string; reason: string }[] };
+      }
+    | undefined;
+  /** Inputs of the pending HTML element pick, kept so its scope can switch. */
+  let selectiveScopeBase:
+    | {
+        source: import('./bridge/timeline').Checkpoint;
+        document: string;
+        id: string;
+        indices?: number[];
       }
     | undefined;
 
@@ -645,6 +656,7 @@ ${frames}
     const current = timeline.store.checkpoints.filter((c) => !c.branch).at(-1)!;
     review = undefined;
     selectiveTarget = undefined;
+    selectiveScopeBase = undefined;
     multiConflicts = [];
     multiAttribution = undefined;
     const merged = mergeFiles(base, current, target, picked);
@@ -1255,6 +1267,7 @@ ${frames}
           rollbackCandidate = undefined;
           review = undefined;
           selectiveTarget = undefined;
+          selectiveScopeBase = undefined;
           multiConflicts = [];
           multiAttribution = undefined;
           const active = timeline!;
@@ -1529,6 +1542,66 @@ ${frames}
           } else await start();
           return;
         }
+        if (message.type === 'selective-scope' && selectiveScopeBase && timeline && restore) {
+          const base = selectiveScopeBase;
+          const current = timeline.store.checkpoints.filter((c) => !c.branch).at(-1)!;
+          const documents = current.files
+            .filter((f) => f.path.endsWith('.html'))
+            .map((f) => f.path);
+          if (message.scope === 'sitewide') {
+            const result = await elementCandidateAcrossDocuments(
+              timeline.store,
+              base.source,
+              current,
+              base.document,
+              base.id,
+              base.indices,
+              documents
+            );
+            review = await timeline.exclusive(() =>
+              restore!.review(result.candidate, current, state.unsaved)
+            );
+            review.note =
+              `Sitewide element change across ${result.applied.length} page(s): ${result.applied.join(', ')}.` +
+              (result.skipped.length
+                ? ` Skipped ${result.skipped.length}: ` +
+                  result.skipped.map((s) => `${s.document} (${s.reason})`).join('; ') +
+                  '.'
+                : '') +
+              ' Element content, inline styles and paired exclusive CSS only; shared styles stay current.';
+            review.scope = { selected: 'sitewide', documents: documents.length };
+            selectiveTarget = result.candidate;
+            selectiveMeta = {
+              ...selectiveMeta,
+              sitewide: { applied: result.applied, skipped: result.skipped }
+            };
+          } else {
+            const candidate = await elementCandidate(
+              timeline.store,
+              base.source,
+              current,
+              base.document,
+              base.id,
+              base.indices
+            );
+            review = await timeline.exclusive(() =>
+              restore!.review(candidate, current, state.unsaved)
+            );
+            review.note =
+              'Element content, inline styles and paired exclusive CSS only. Shared styles and unmatched rules stay current; this may differ from the historical appearance.';
+            review.scope = { selected: 'page', documents: documents.length };
+            selectiveTarget = candidate;
+            if (selectiveMeta) {
+              const { sitewide: _dropped, ...rest } = selectiveMeta;
+              void _dropped;
+              selectiveMeta = rest;
+            }
+          }
+          multiConflicts = [];
+          multiAttribution = undefined;
+          publish(state);
+          return;
+        }
         if (message.type === 'set-page' && timeline && runner && cache) {
           const page = pages.find((p) => p.document === message.document);
           if (!page) throw new Error('Page not found in this workspace.');
@@ -1546,6 +1619,7 @@ ${frames}
           preview = undefined;
           review = undefined;
           selectiveTarget = undefined;
+          selectiveScopeBase = undefined;
           multiConflicts = [];
           multiAttribution = undefined;
           activePage = page.document;
@@ -1595,6 +1669,7 @@ ${frames}
           preview = undefined;
           review = undefined;
           selectiveTarget = undefined;
+          selectiveScopeBase = undefined;
           multiConflicts = [];
           multiAttribution = undefined;
           activePage = routeToDocument(route);
@@ -1751,6 +1826,7 @@ ${frames}
           selected = target.id;
           review = undefined;
           selectiveTarget = undefined;
+          selectiveScopeBase = undefined;
           selectiveMeta = undefined;
           verificationReport = undefined;
           multiConflicts = [];
@@ -1839,6 +1915,7 @@ ${frames}
           );
           review = undefined;
           selectiveTarget = undefined;
+          selectiveScopeBase = undefined;
           multiConflicts = [];
           multiAttribution = undefined;
           multiConflicts = composed.conflicts;
@@ -1970,6 +2047,7 @@ ${frames}
                 const notes: string[] = [];
                 let htmlError: unknown;
                 let fiberError: unknown;
+                selectiveScopeBase = undefined;
                 // 1. Static HTML documents use the exact parse5 path.
                 if (
                   isPickableDocument(document, pickedSource.files) &&
@@ -1984,6 +2062,7 @@ ${frames}
                       '',
                       indices
                     );
+                    selectiveScopeBase = { source: pickedSource, document, id: '', indices };
                   } catch (e) {
                     htmlError = e;
                   }
@@ -2059,6 +2138,9 @@ ${frames}
                 review.note =
                   'Element content, inline styles and paired exclusive CSS only. Shared styles and unmatched rules stay current; this may differ from the historical appearance.' +
                   (notes.length ? ' ' + notes.join(' ') : '');
+                const pickHtmlDocs = current.files.filter((f) => f.path.endsWith('.html')).length;
+                if (selectiveScopeBase && pickHtmlDocs > 1)
+                  review.scope = { selected: 'page', documents: pickHtmlDocs };
                 selectiveTarget = candidate;
                 const lockSelector = info.id
                   ? `#${info.id}`
@@ -2145,6 +2227,7 @@ ${frames}
           if (!element) return;
           let candidate;
           let frameworkNotes: string[] = [];
+          selectiveScopeBase = undefined;
           if (isFrameworkDocument(document)) {
             const result = await staticElementCandidate(
               timeline.store,
@@ -2157,6 +2240,7 @@ ${frames}
             frameworkNotes = result.notes;
           } else {
             candidate = await elementCandidate(timeline.store, target, current, document, element);
+            selectiveScopeBase = { source: target, document, id: element };
           }
           const byIdMatches = !!selectivePick?.elementId && selectivePick.elementId === element;
           if (
@@ -2175,6 +2259,9 @@ ${frames}
           review.note =
             'Element content, inline styles and paired exclusive CSS only. Shared styles and unmatched rules stay current; this may differ from the historical appearance.' +
             (frameworkNotes.length ? ' ' + frameworkNotes.join(' ') : '');
+          const idHtmlDocs = current.files.filter((f) => f.path.endsWith('.html')).length;
+          if (selectiveScopeBase && idHtmlDocs > 1)
+            review.scope = { selected: 'page', documents: idHtmlDocs };
           selectiveTarget = candidate;
           selectiveMeta = {
             targetSelector: `#${element}`,
@@ -2243,6 +2330,7 @@ ${frames}
           }
           review = undefined;
           selectiveTarget = undefined;
+          selectiveScopeBase = undefined;
           multiConflicts = [];
           multiAttribution = undefined;
           const merged = mergeFiles(alternatives.base(target), current, target, paths);
@@ -2390,6 +2478,7 @@ ${frames}
         if (message.type === 'review-checkpoint' && target) {
           selected = target.id;
           selectiveTarget = undefined;
+          selectiveScopeBase = undefined;
           selectiveMeta = undefined;
           verificationReport = undefined;
           multiConflicts = [];
@@ -2467,6 +2556,7 @@ ${frames}
                     current,
                     targetSelector: selectiveMeta?.targetSelector || '',
                     documentPath: selectiveMeta?.documentPath || 'index.html',
+                    documentPaths: selectiveMeta?.sitewide?.applied,
                     protectAllElements: Boolean(selectiveMeta?.targetSelector)
                   }
                 },
@@ -2476,6 +2566,7 @@ ${frames}
           });
           review = undefined;
           selectiveTarget = undefined;
+          selectiveScopeBase = undefined;
           selectiveMeta = undefined;
           verificationReport = undefined;
           multiConflicts = [];
@@ -2587,6 +2678,7 @@ ${frames}
           }
           review = undefined;
           selectiveTarget = undefined;
+          selectiveScopeBase = undefined;
           selectiveMeta = undefined;
           verificationReport = undefined;
           multiConflicts = [];
@@ -2707,6 +2799,7 @@ ${frames}
         );
         review = undefined;
         selectiveTarget = undefined;
+        selectiveScopeBase = undefined;
         multiConflicts = [];
         multiAttribution = undefined;
         multiConflicts = composed.conflicts;

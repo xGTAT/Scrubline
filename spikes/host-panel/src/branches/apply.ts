@@ -16,6 +16,8 @@ export interface SelectiveApplyOptions {
     current?: Checkpoint;
     targetSelector?: string;
     documentPath?: string;
+    /** Sitewide applies verify every applied document, not just the first. */
+    documentPaths?: string[];
     protectAllElements?: boolean;
     options?: VerificationOptions;
   };
@@ -35,41 +37,48 @@ export async function applySelective(
   let verificationReport: VerificationReport | undefined;
   if (options?.verify) {
     const { verify } = options;
-    if (
-      verify.previewConfig?.command &&
-      verify.previewConfig?.browserPath &&
-      verify.historical &&
-      verify.current
-    ) {
-      verificationReport = await DualVerificationEngine.verifyStagedCheckpoint({
-        store: restore.store,
-        previewConfig: verify.previewConfig,
-        historical: verify.historical,
-        current: verify.current,
-        candidate: target,
-        targetSelector: verify.targetSelector || '',
-        documentPath: verify.documentPath || 'index.html',
-        options: { ...verify.options, protectAllElements: verify.protectAllElements }
-      });
-    } else if (verify.current) {
-      verificationReport = await DualVerificationEngine.verifyStaticDocuments({
-        store: restore.store,
-        current: verify.current,
-        candidate: target,
-        targetSelector: verify.targetSelector || '',
-        documentPath: verify.documentPath || 'index.html',
-        options: { ...verify.options, protectAllElements: verify.protectAllElements }
-      });
-    }
-
-    if (verificationReport && verificationReport.status === 'failed') {
-      const err = Object.assign(
-        new Error(
-          verificationReport.failureReason || 'Verification failed: collateral mutations detected.'
-        ),
-        { verificationReport }
-      );
-      throw err;
+    const documentPaths = verify.documentPaths?.length
+      ? verify.documentPaths
+      : [verify.documentPath || 'index.html'];
+    for (const documentPath of documentPaths) {
+      let report: VerificationReport | undefined;
+      if (
+        verify.previewConfig?.command &&
+        verify.previewConfig?.browserPath &&
+        verify.historical &&
+        verify.current
+      ) {
+        report = await DualVerificationEngine.verifyStagedCheckpoint({
+          store: restore.store,
+          previewConfig: verify.previewConfig,
+          historical: verify.historical,
+          current: verify.current,
+          candidate: target,
+          targetSelector: verify.targetSelector || '',
+          documentPath,
+          options: { ...verify.options, protectAllElements: verify.protectAllElements }
+        });
+      } else if (verify.current) {
+        report = await DualVerificationEngine.verifyStaticDocuments({
+          store: restore.store,
+          current: verify.current,
+          candidate: target,
+          targetSelector: verify.targetSelector || '',
+          documentPath,
+          options: { ...verify.options, protectAllElements: verify.protectAllElements }
+        });
+      }
+      verificationReport = verificationReport ?? report;
+      if (report && report.status === 'failed') {
+        const err = Object.assign(
+          new Error(
+            (documentPaths.length > 1 ? `Verification failed on ${documentPath}: ` : '') +
+              (report.failureReason || 'Verification failed: collateral mutations detected.')
+          ),
+          { verificationReport: report }
+        );
+        throw err;
+      }
     }
   }
 

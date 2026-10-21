@@ -1356,3 +1356,23 @@ html {
   border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
   border-radius: 4px;
 }
+
+.scope-select {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid var(--vscode-widget-border, #3c3c3c);
+  border-radius: 4px;
+  margin: 8px 0;
+  padding: 8px 10px;
+}
+.scope-select legend {
+  padding: 0 4px;
+  opacity: 0.8;
+}
+.scope-select label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  cursor: pointer;
+}

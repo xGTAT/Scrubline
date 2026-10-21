@@ -335,3 +335,101 @@ test('element revert keeps elements added inside the target after the old checkp
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('sitewide element change applies to matching pages and skips the rest with reasons', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'scrubline-sitewide-'));
+  try {
+    const work = path.join(root, 'project');
+    await fs.mkdir(work);
+    const store = new HistoryStore(path.join(root, 'history'));
+    await store.open();
+    const capture = async (files: Record<string, string>) => {
+      for (const [name, content] of Object.entries(files))
+        await fs.writeFile(path.join(work, name), content);
+      const s = await scan(work, store.root);
+      return store.commit(s.files, s.contents, 'save', { kind: 'unattributed' });
+    };
+    // Source: the navbar as it should become (picked from this checkpoint).
+    const source = await capture({
+      'index.html': '<main><nav id="nav"><b>V1</b></nav><p>source</p></main>'
+    });
+    // Current: index drifts, about keeps its own footer, contact lacks the
+    // element, guide is ambiguous, docs uses a different stylesheet list.
+    const current = await capture({
+      'index.html': '<main><nav id="nav"><b>V2</b></nav><p>Keep current</p></main>',
+      'about.html': '<nav id="nav"><b>V2-other</b></nav><footer>About footer</footer>',
+      'contact.html': '<p>No navigation here</p>',
+      'guide.html': '<nav id="nav">A</nav><nav id="nav">B</nav>',
+      'docs.html':
+        '<link rel="stylesheet" href="docs.css"><nav id="nav"><b>V2-docs</b></nav>',
+      'docs.css': '#nav{color:black}'
+    });
+    const { elementCandidateAcrossDocuments } = await import('../../src/branches/element');
+    const result = await elementCandidateAcrossDocuments(
+      store,
+      source,
+      current,
+      'index.html',
+      'nav',
+      undefined,
+      ['index.html', 'about.html', 'contact.html', 'guide.html', 'docs.html']
+    );
+    expect(result.applied).toEqual(['index.html', 'about.html']);
+    const skippedByDoc = new Map(result.skipped.map((s) => [s.document, s.reason]));
+    expect(skippedByDoc.get('contact.html')).toMatch('found 0 matching elements');
+    expect(skippedByDoc.get('guide.html')).toMatch('found 2 matching elements');
+    expect(skippedByDoc.get('docs.html')).toMatch('Stylesheet list differs');
+    const read = async (p: string) =>
+      (await store.readBlob(result.candidate.files.find((f) => f.path === p)!.hash)).toString();
+    // The picked page restores the element and keeps unrelated current markup.
+    expect(await read('index.html')).toContain('<nav id="nav"><b>V1</b></nav>');
+    expect(await read('index.html')).toContain('<p>Keep current</p>');
+    // The matching page gets the same element; its own content survives.
+    expect(await read('about.html')).toContain('<nav id="nav"><b>V1</b></nav>');
+    expect(await read('about.html')).toContain('<footer>About footer</footer>');
+    // Skipped pages are byte-identical to current.
+    expect(await read('contact.html')).toBe('<p>No navigation here</p>');
+    expect(await read('guide.html')).toBe('<nav id="nav">A</nav><nav id="nav">B</nav>');
+    expect(await read('docs.html')).toContain('V2-docs');
+    // Workspace files were never touched.
+    expect(await fs.readFile(path.join(work, 'about.html'), 'utf8')).toContain('V2-other');
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('sitewide element change refuses scripted target pages instead of applying', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'scrubline-sitewide-safe-'));
+  try {
+    const work = path.join(root, 'project');
+    await fs.mkdir(work);
+    const store = new HistoryStore(path.join(root, 'history'));
+    await store.open();
+    const capture = async (files: Record<string, string>) => {
+      for (const [name, content] of Object.entries(files))
+        await fs.writeFile(path.join(work, name), content);
+      const s = await scan(work, store.root);
+      return store.commit(s.files, s.contents, 'save', { kind: 'unattributed' });
+    };
+    const source = await capture({ 'index.html': '<nav id="nav">V1</nav>' });
+    const current = await capture({
+      'index.html': '<nav id="nav">V2</nav>',
+      'app.html': '<script>doStuff()</script><nav id="nav">V2</nav>'
+    });
+    const { elementCandidateAcrossDocuments } = await import('../../src/branches/element');
+    const result = await elementCandidateAcrossDocuments(
+      store,
+      source,
+      current,
+      'index.html',
+      'nav',
+      undefined,
+      ['index.html', 'app.html']
+    );
+    expect(result.applied).toEqual(['index.html']);
+    expect(result.skipped[0].document).toBe('app.html');
+    expect(result.skipped[0].reason).toMatch('Scripted or active HTML');
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

@@ -118,3 +118,85 @@ test('page dropdown evidence screenshot', async ({ page }) => {
   await expect(page.locator('#scrubline-page')).toBeVisible();
   await page.screenshot({ path: `${evidenceDir}/panel_page_select.png`, fullPage: true });
 });
+
+test('element review offers page vs sitewide scope and posts the choice', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    (window as unknown as { __sendTimeline: (value: unknown) => void }).__sendTimeline({
+      status: 'ready',
+      unsaved: false,
+      activePage: 'index.html',
+      pages: [
+        { route: '/', document: 'index.html' },
+        { route: '/about.html', document: 'about.html' }
+      ],
+      rows: [
+        {
+          id: 'a'.repeat(64),
+          createdAt: '2026-10-05T15:00:00Z',
+          changedPaths: ['index.html'],
+          attribution: { kind: 'unattributed' }
+        }
+      ],
+      review: {
+        token: 'scope-token',
+        checkpoint: 'a'.repeat(64),
+        paths: ['index.html'],
+        conflicts: [],
+        scope: { selected: 'page', documents: 2 }
+      }
+    });
+  });
+  const scope = page.locator('.scope-select');
+  await expect(scope).toBeVisible();
+  await expect(scope).toContainText('This page only');
+  await expect(scope).toContainText('Sitewide (all 2 HTML pages)');
+  await scope.getByText('Sitewide (all 2 HTML pages)').click();
+  const posted = await page.evaluate(
+    () =>
+      (window as unknown as { __postedMessages: { type: string; scope?: string }[] })
+        .__postedMessages
+  );
+  expect(posted).toContainEqual({ type: 'selective-scope', scope: 'sitewide' });
+  // A review re-published with sitewide selected reflects the choice.
+  await page.evaluate(() => {
+    (window as unknown as { __sendTimeline: (value: unknown) => void }).__sendTimeline({
+      status: 'ready',
+      unsaved: false,
+      activePage: 'index.html',
+      pages: [{ route: '/', document: 'index.html' }],
+      rows: [],
+      review: {
+        token: 'scope-token-2',
+        checkpoint: 'a'.repeat(64),
+        paths: ['index.html', 'about.html'],
+        conflicts: [],
+        note: 'Sitewide element change across 2 page(s): index.html, about.html.',
+        scope: { selected: 'sitewide', documents: 2 }
+      }
+    });
+  });
+  await expect(page.locator('.element-review-note')).toContainText(
+    'Sitewide element change across 2 page(s)'
+  );
+  await expect(page.locator('.scope-select input:checked')).toHaveCount(1);
+});
+
+test('scope control stays hidden for single-page workspaces', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    (window as unknown as { __sendTimeline: (value: unknown) => void }).__sendTimeline({
+      status: 'ready',
+      unsaved: false,
+      rows: [],
+      review: {
+        token: 'scope-token',
+        checkpoint: 'a'.repeat(64),
+        paths: ['index.html'],
+        conflicts: [],
+        scope: { selected: 'page', documents: 1 }
+      }
+    });
+  });
+  await expect(page.locator('.scope-select')).toHaveCount(0);
+});

@@ -4,6 +4,19 @@ Fork a selected checkpoint and name the alternative. Scrubline opens its isolate
 
 **Compare** renders current-workspace checkpoint and the chosen alternative independently, using configured preview command and adjacent ports (base + 1 and + 2), then shows screenshot views side by side. These are captured renders, not two live interactive iframes. Processes stop after capture. Historical commands can depend on excluded packages/data or fail; missing screenshots are labelled. Preview cwd isolation is not an OS sandbox.
 
+## Sitewide element changes
+
+A picked static-HTML element can apply to **this page only** or **sitewide**.
+The review shows a scope choice whenever the workspace tracks more than one
+HTML page. Sitewide re-matches the picked element in every other tracked HTML
+document under the same identity rules, applies one reviewed candidate as a
+single guarded apply with one Undo, and verifies every applied document.
+Pages where the element is missing, ambiguous, scripted, or whose stylesheet
+list differs are skipped, and the review names each skipped page with its
+reason; nothing is ever guessed. Sitewide applies to static HTML only -
+framework sources keep per-page strict identity. Paired exclusive CSS changes
+apply once to the shared stylesheets, benefiting every page that links them.
+
 ## Choose files
 
 **Choose files** opens an exact-path multi-select from the alternative's base-to-head changes. Three-way whole-file merge compares base, current and selected hash/mode. Current-only edits remain; same-result edits are accepted; both-edited, delete/edit and rename/edit overlap is rejected. Renames are deletion plus addition, not guessed identity. Hunk/AST merging and conflict resolution are not implemented. File-level application is the first supported source operation.

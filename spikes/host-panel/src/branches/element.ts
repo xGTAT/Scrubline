@@ -123,7 +123,149 @@ export function mergePreservingAdditions(oldSlice: string, nowSlice: string): st
   );
 }
 
-export async function elementCandidate(
+function inspectHtml(
+  html: string,
+  id: string,
+  elementPath: number[] | undefined,
+  sourceIdentity?: string,
+  sourceSkeleton?: string
+) {
+  const root = parse(html, { sourceCodeLocationInfo: true });
+  const nodes: HtmlNode[] = [];
+  const visit = (n: HtmlNode) => {
+    nodes.push(n);
+    for (const c of n.childNodes ?? []) visit(c);
+  };
+  visit(root);
+  const parents = new Map<HtmlNode, HtmlNode>();
+  for (const n of nodes) for (const c of n.childNodes ?? []) parents.set(c, n);
+  const identity = (n: HtmlNode): string =>
+    JSON.stringify([
+      n.tagName,
+      n.attrs
+        ?.filter((a) =>
+          ['id', 'class', 'href', 'name', 'role', 'data-testid', 'aria-label'].includes(a.name)
+        )
+        .sort((a, b) => a.name.localeCompare(b.name)),
+      parents.get(n)?.tagName === 'body'
+        ? undefined
+        : parents.get(n)?.tagName
+          ? identity(parents.get(n)!)
+          : undefined
+    ]);
+  // Classes, href and ancestor styling are restore data, not immutable IDs.
+  // Positional fallback is safe only when the whole tag/ID skeleton agrees.
+  const skeleton = JSON.stringify(
+    nodes
+      .filter((n) => n.tagName)
+      .map((n) => [n.tagName, n.attrs?.find((a) => a.name === 'id')?.value ?? ''])
+  );
+  let matches = nodes.filter((n) => n.attrs?.some((a) => a.name === 'id' && a.value === id));
+  const atPath = (indices: number[]) => {
+    let target = nodes.find((n) => n.tagName === 'body');
+    for (const index of indices) target = target?.childNodes?.filter((n) => n.tagName)[index];
+    return target;
+  };
+  if (elementPath) {
+    const target = atPath(elementPath);
+    if (!sourceIdentity) matches = target ? [target] : [];
+    else {
+      const sourceNode = JSON.parse(sourceIdentity) as unknown[];
+      const attrs = sourceNode[1] as { name: string; value: string }[];
+      const uniqueId = attrs?.find((a) => a.name === 'id')?.value;
+      matches = uniqueId
+        ? nodes.filter((n) => n.attrs?.some((a) => a.name === 'id' && a.value === uniqueId))
+        : nodes.filter((n) => n.tagName && identity(n) === sourceIdentity);
+      if (matches.length !== 1 && !uniqueId) {
+        // Compare semantic anchors without CSS classes on the node or ancestors.
+        const semantic = (value: string): string => {
+          const [tag, attrs, parent] = JSON.parse(value) as [
+            string,
+            { name: string; value: string }[],
+            string?
+          ];
+          return JSON.stringify([
+            tag,
+            attrs?.filter((a) => a.name !== 'class'),
+            parent ? semantic(parent) : undefined
+          ]);
+        };
+        matches = nodes.filter(
+          (n) => n.tagName && semantic(identity(n)) === semantic(sourceIdentity)
+        );
+      }
+      if (
+        matches.length !== 1 &&
+        !uniqueId &&
+        target &&
+        target.tagName === sourceNode[0] &&
+        skeleton === sourceSkeleton
+      ) {
+        matches = [target];
+      }
+    }
+  }
+  if (matches.length !== 1)
+    throw new Error(
+      `Cannot map the selected <${elementPath ? (atPath(elementPath)?.tagName ?? 'missing') : '#' + id}> into current source: found ${matches.length} matching elements. The page structure or identifying attributes changed. Review the whole file instead.`
+    );
+  const node = matches[0],
+    loc = node.sourceCodeLocation;
+  if (
+    !loc?.startTag ||
+    (!loc.endTag &&
+      node.namespaceURI !== 'http://www.w3.org/2000/svg' &&
+      !['img', 'input', 'br', 'hr', 'area', 'source', 'wbr', 'embed', 'track', 'col'].includes(
+        node.tagName ?? ''
+      )) ||
+    ['html', 'head', 'body', 'script', 'style', 'iframe', 'link'].includes(node.tagName ?? '')
+  )
+    throw new Error('Choose an ordinary complete HTML element.');
+  const ids = nodes.flatMap(
+    (n) => n.attrs?.filter((a) => a.name === 'id').map((a) => a.value) ?? []
+  );
+  if (new Set(ids).size !== ids.length) throw new Error('Duplicate ids in document.');
+  const selected: HtmlNode[] = [];
+  const gather = (n: HtmlNode) => {
+    selected.push(n);
+    for (const c of n.childNodes ?? []) gather(c);
+  };
+  gather(node);
+  if (
+    nodes.some((n) => n.tagName === 'script') ||
+    selected.some(
+      (n) =>
+        ['script', 'style', 'iframe', 'link', 'object'].includes(n.tagName ?? '') ||
+        n.attrs?.some((a: { name: string; value: string }) => /^on/i.test(a.name))
+    )
+  )
+    throw new Error('Scripted or active HTML unsupported.');
+  const links = nodes
+    .filter(
+      (n) =>
+        n.tagName === 'link' &&
+        n.attrs?.some(
+          (a: { name: string; value: string }) => a.name === 'rel' && a.value === 'stylesheet'
+        )
+    )
+    .map((n) => n.attrs!.find((a: { name: string; value: string }) => a.name === 'href')?.value);
+  if (links.some((h) => typeof h !== 'string' || !safePath(h) || !h.endsWith('.css')))
+    throw new Error('Use local relative CSS files without query strings.');
+  if (nodes.some((n) => n.tagName === 'style'))
+    throw new Error('Embedded style sheets unsupported; use inline styles or local CSS.');
+  return {
+    start: loc.startOffset,
+    end: loc.endOffset,
+    links: links as string[],
+    node,
+    nodes,
+    selected,
+    skeleton,
+    identity: identity(node)
+  };
+}
+
+async function computeElementChanges(
   store: HistoryStore,
   source: Checkpoint,
   current: Checkpoint,
@@ -144,144 +286,14 @@ export async function elementCandidate(
   };
   const oldHtml = await read(source, document),
     nowHtml = await read(current, document);
-  function inspect(html: string, sourceIdentity?: string) {
-    const root = parse(html, { sourceCodeLocationInfo: true });
-    const nodes: HtmlNode[] = [];
-    const visit = (n: HtmlNode) => {
-      nodes.push(n);
-      for (const c of n.childNodes ?? []) visit(c);
-    };
-    visit(root);
-    const parents = new Map<HtmlNode, HtmlNode>();
-    for (const n of nodes) for (const c of n.childNodes ?? []) parents.set(c, n);
-    const identity = (n: HtmlNode): string =>
-      JSON.stringify([
-        n.tagName,
-        n.attrs
-          ?.filter((a) =>
-            ['id', 'class', 'href', 'name', 'role', 'data-testid', 'aria-label'].includes(a.name)
-          )
-          .sort((a, b) => a.name.localeCompare(b.name)),
-        parents.get(n)?.tagName === 'body'
-          ? undefined
-          : parents.get(n)?.tagName
-            ? identity(parents.get(n)!)
-            : undefined
-      ]);
-    // Classes, href and ancestor styling are restore data, not immutable IDs.
-    // Positional fallback is safe only when the whole tag/ID skeleton agrees.
-    const skeleton = JSON.stringify(
-      nodes
-        .filter((n) => n.tagName)
-        .map((n) => [n.tagName, n.attrs?.find((a) => a.name === 'id')?.value ?? ''])
-    );
-    let matches = nodes.filter((n) => n.attrs?.some((a) => a.name === 'id' && a.value === id));
-    const atPath = (indices: number[]) => {
-      let target = nodes.find((n) => n.tagName === 'body');
-      for (const index of indices) target = target?.childNodes?.filter((n) => n.tagName)[index];
-      return target;
-    };
-    if (elementPath) {
-      const target = atPath(elementPath);
-      if (!sourceIdentity) matches = target ? [target] : [];
-      else {
-        const sourceNode = JSON.parse(sourceIdentity) as unknown[];
-        const attrs = sourceNode[1] as { name: string; value: string }[];
-        const uniqueId = attrs?.find((a) => a.name === 'id')?.value;
-        matches = uniqueId
-          ? nodes.filter((n) => n.attrs?.some((a) => a.name === 'id' && a.value === uniqueId))
-          : nodes.filter((n) => n.tagName && identity(n) === sourceIdentity);
-        if (matches.length !== 1 && !uniqueId) {
-          // Compare semantic anchors without CSS classes on the node or ancestors.
-          const semantic = (value: string): string => {
-            const [tag, attrs, parent] = JSON.parse(value) as [
-              string,
-              { name: string; value: string }[],
-              string?
-            ];
-            return JSON.stringify([
-              tag,
-              attrs?.filter((a) => a.name !== 'class'),
-              parent ? semantic(parent) : undefined
-            ]);
-          };
-          matches = nodes.filter(
-            (n) => n.tagName && semantic(identity(n)) === semantic(sourceIdentity)
-          );
-        }
-        if (
-          matches.length !== 1 &&
-          !uniqueId &&
-          target &&
-          target.tagName === sourceNode[0] &&
-          skeleton === sourceSkeleton
-        ) {
-          matches = [target];
-        }
-      }
-    }
-    if (matches.length !== 1)
-      throw new Error(
-        `Cannot map the selected <${elementPath ? (atPath(elementPath)?.tagName ?? 'missing') : '#' + id}> into current source: found ${matches.length} matching elements. The page structure or identifying attributes changed. Review the whole file instead.`
-      );
-    const node = matches[0],
-      loc = node.sourceCodeLocation;
-    if (
-      !loc?.startTag ||
-      (!loc.endTag &&
-        node.namespaceURI !== 'http://www.w3.org/2000/svg' &&
-        !['img', 'input', 'br', 'hr', 'area', 'source', 'wbr', 'embed', 'track', 'col'].includes(
-          node.tagName ?? ''
-        )) ||
-      ['html', 'head', 'body', 'script', 'style', 'iframe', 'link'].includes(node.tagName ?? '')
-    )
-      throw new Error('Choose an ordinary complete HTML element.');
-    const ids = nodes.flatMap(
-      (n) => n.attrs?.filter((a) => a.name === 'id').map((a) => a.value) ?? []
-    );
-    if (new Set(ids).size !== ids.length) throw new Error('Duplicate ids in document.');
-    const selected: HtmlNode[] = [];
-    const gather = (n: HtmlNode) => {
-      selected.push(n);
-      for (const c of n.childNodes ?? []) gather(c);
-    };
-    gather(node);
-    if (
-      nodes.some((n) => n.tagName === 'script') ||
-      selected.some(
-        (n) =>
-          ['script', 'style', 'iframe', 'link', 'object'].includes(n.tagName ?? '') ||
-          n.attrs?.some((a: { name: string; value: string }) => /^on/i.test(a.name))
-      )
-    )
-      throw new Error('Scripted or active HTML unsupported.');
-    const links = nodes
-      .filter(
-        (n) =>
-          n.tagName === 'link' &&
-          n.attrs?.some(
-            (a: { name: string; value: string }) => a.name === 'rel' && a.value === 'stylesheet'
-          )
-      )
-      .map((n) => n.attrs!.find((a: { name: string; value: string }) => a.name === 'href')?.value);
-    if (links.some((h) => typeof h !== 'string' || !safePath(h) || !h.endsWith('.css')))
-      throw new Error('Use local relative CSS files without query strings.');
-    if (nodes.some((n) => n.tagName === 'style'))
-      throw new Error('Embedded style sheets unsupported; use inline styles or local CSS.');
-    return {
-      start: loc.startOffset,
-      end: loc.endOffset,
-      links: links as string[],
-      node,
-      nodes,
-      selected,
-      skeleton,
-      identity: identity(node)
-    };
-  }
-  const old = inspect(oldHtml);
-  const sourceSkeleton: string = old.skeleton;
-  const now = inspect(nowHtml, elementPath ? old.identity : undefined);
+  const old = inspectHtml(oldHtml, id, elementPath);
+  const now = inspectHtml(
+    nowHtml,
+    id,
+    elementPath,
+    elementPath ? old.identity : undefined,
+    old.skeleton
+  );
   if (JSON.stringify(old.links) !== JSON.stringify(now.links))
     throw new Error('Stylesheet list changed. Element ownership unresolved.');
   const changes = new Map<string, string>();
@@ -292,13 +304,19 @@ export async function elementCandidate(
   const spliced = nowHtml.slice(0, now.start) + restored + nowHtml.slice(now.end);
   assertSplicePreserves(nowHtml, now.start, now.end, spliced, restored.length);
   changes.set(document, spliced);
-  inspect(changes.get(document)!, elementPath ? old.identity : undefined); // Refuse ids introduced by the restored subtree colliding with current markup.
+  inspectHtml(
+    changes.get(document)!,
+    id,
+    elementPath,
+    elementPath ? old.identity : undefined,
+    old.skeleton
+  ); // Refuse ids introduced by the restored subtree colliding with current markup.
   for (const href of old.links) {
     const p = path.posix.join(path.posix.dirname(document), href);
     if (!safePath(p)) throw new Error('Unsafe stylesheet.');
     const before = postcss.parse(await read(source, p)),
       after = postcss.parse(await read(current, p));
-    function split(root: postcss.Root, info: ReturnType<typeof inspect>, html: string) {
+    function split(root: postcss.Root, info: ReturnType<typeof inspectHtml>, html: string) {
       const tree = parse(html, { treeAdapter: adapter, sourceCodeLocationInfo: true });
       const elements = selectAll('*', tree);
       const selected = new Set(
@@ -365,6 +383,21 @@ export async function elementCandidate(
     }
     changes.set(p, after.toString());
   }
+  return {
+    changes,
+    restored,
+    sourceIdentity: old.identity,
+    sourceSkeleton: old.skeleton,
+    nowLinks: now.links
+  };
+}
+
+/** Materialize changed file contents into blobs and a candidate checkpoint. */
+async function materializeCandidate(
+  store: HistoryStore,
+  current: Checkpoint,
+  changes: Map<string, string>
+) {
   const files = current.files.map((f) => ({ ...f }));
   for (const [p, text] of changes) {
     const f = files.find((f) => f.path === p)!;
@@ -382,6 +415,81 @@ export async function elementCandidate(
   void _id;
   const candidate = { ...body, files };
   return { ...candidate, id: hashBytes(JSON.stringify(candidate)) };
+}
+
+export async function elementCandidate(
+  store: HistoryStore,
+  source: Checkpoint,
+  current: Checkpoint,
+  document: string,
+  id: string,
+  elementPath?: number[]
+) {
+  const { changes } = await computeElementChanges(
+    store,
+    source,
+    current,
+    document,
+    id,
+    elementPath
+  );
+  return materializeCandidate(store, current, changes);
+}
+
+/** Bound sitewide applies so a huge multi-page site stays reviewable. */
+export const SITEWIDE_MAX_DOCUMENTS = 100;
+
+/**
+ * Apply one picked element change across every tracked HTML document that
+ * contains the same element. The picked document's change is computed exactly
+ * as a single-page restore; every other document is re-matched by the same
+ * identity rules, refused documents are skipped with their reason, and the
+ * shared stylesheet changes apply once. A document whose structure or
+ * stylesheet list diverges is never guessed at.
+ */
+export async function elementCandidateAcrossDocuments(
+  store: HistoryStore,
+  source: Checkpoint,
+  current: Checkpoint,
+  document: string,
+  id: string,
+  elementPath: number[] | undefined,
+  documents: string[]
+) {
+  const base = await computeElementChanges(store, source, current, document, id, elementPath);
+  const changes = new Map(base.changes);
+  const applied = [document];
+  const skipped: { document: string; reason: string }[] = [];
+  const targets = documents
+    .filter((d) => d !== document && d.endsWith('.html'))
+    .slice(0, SITEWIDE_MAX_DOCUMENTS);
+  for (const other of targets) {
+    try {
+      const f = current.files.find((f) => f.path === other);
+      if (!f) {
+        skipped.push({ document: other, reason: 'Not in the current checkpoint.' });
+        continue;
+      }
+      const nowHtml = (await store.readBlob(f.hash)).toString('utf8');
+      const now = inspectHtml(nowHtml, id, elementPath, base.sourceIdentity, base.sourceSkeleton);
+      if (JSON.stringify(now.links) !== JSON.stringify(base.nowLinks)) {
+        skipped.push({
+          document: other,
+          reason: 'Stylesheet list differs; element ownership unresolved.'
+        });
+        continue;
+      }
+      const spliced = nowHtml.slice(0, now.start) + base.restored + nowHtml.slice(now.end);
+      assertSplicePreserves(nowHtml, now.start, now.end, spliced, base.restored.length);
+      inspectHtml(spliced, id, elementPath, base.sourceIdentity, base.sourceSkeleton);
+      changes.set(other, spliced);
+      applied.push(other);
+    } catch (e) {
+      skipped.push({ document: other, reason: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  const candidate = await materializeCandidate(store, current, changes);
+  return { candidate, applied, skipped };
 }
 
 const elementChildren = (n: HtmlNode): HtmlNode[] =>

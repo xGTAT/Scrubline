@@ -68,6 +68,8 @@ Check any number of checkpoint cards to build a selection in the tray, order it,
 2. A local Chromium window opens the saved webpage at the configured preview route. Hover to see the target boundary and click the element to keep. Escape stops picking.
 3. Return to Scrubline, inspect **Files** and the exact diff, then **Confirm restore**. A configured build/test command must pass before and after selective apply. Undo restores the previous bytes.
 
+When the workspace tracks more than one HTML page, the review offers **This page only** or **Sitewide**: the same element change applies to every tracked page where the element matches under the same identity rules. Pages where it is missing, ambiguous, scripted or styled by a different stylesheet list are skipped and named with their reasons in the review. Sitewide applies once with a single Undo and verifies every applied document. Framework sources stay per-page.
+
 Static HTML source elements can be picked without IDs. The exact clicked source node is resolved first. Unique IDs or stable semantic anchors can map into current source even when ancestor CSS classes changed; repeated headings/cards use their source position only when the tag/ID skeleton is unchanged. Ambiguous structural drift is refused rather than silently selecting another card. Unrelated current markup stays current.
 
 Content and inline styles travel with the subtree. Complete SVGs and self-closing SVG shapes are supported. Paired, unambiguous local CSS rules travel only when each rule matches elements exclusively inside the selected subtree in both versions. This includes common selectors and scoped `@media`, `@supports`, `@container` and `@layer` rules; their positions and conditions stay intact.

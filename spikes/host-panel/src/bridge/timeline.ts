@@ -79,6 +79,8 @@ export interface TimelineState {
     conflicts: string[];
     note?: string;
     elements?: { selector?: string; paths: string[] }[];
+    /** Element picks that can apply to one page or every matching HTML page. */
+    scope?: { selected: 'page' | 'sitewide'; documents: number };
     /** Present when the review is a multi-checkpoint composition. */
     multi?: {
       mode: 'combine' | 'revert' | 'mosaic';
@@ -176,6 +178,7 @@ export type TimelineInbound =
   | { type: 'request-timeline' }
   | { type: 'request-backend'; id: string }
   | { type: 'set-page'; document: string }
+  | { type: 'selective-scope'; scope: 'page' | 'sitewide' }
   | { type: 'add-page' }
   | { type: 'retry-capture' }
   | { type: 'select-checkpoint'; id: string }
