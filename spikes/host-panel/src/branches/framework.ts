@@ -1,7 +1,6 @@
 import * as ts from 'typescript';
-import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { HistoryStore, hashBytes, atomicWrite } from '../store/store';
+import { HistoryStore, hashBytes } from '../store/store';
 import type { Checkpoint } from '../bridge/timeline';
 import type { FiberSourceFrame } from './fiber-source';
 
@@ -439,12 +438,7 @@ export function availableIdentifiers(
 async function writeBlob(store: HistoryStore, text: string) {
   const bytes = Buffer.from(text);
   const hash = hashBytes(bytes);
-  let used = 0;
-  for (const dir of ['blobs', 'manifests'])
-    for (const name of await fs.readdir(path.join(store.root, dir)))
-      used += (await fs.stat(path.join(store.root, dir, name))).size;
-  if (used + bytes.length > store.quotaBytes) throw new Error('Storage limit reached.');
-  await atomicWrite(path.join(store.root, 'blobs', hash), bytes);
+  await store.putBlob(hash, bytes);
   return { hash, size: bytes.length };
 }
 

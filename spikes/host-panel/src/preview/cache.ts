@@ -58,6 +58,7 @@ export class RenderCache {
     const directory = path.dirname(this.file(id));
     await fs.mkdir(directory, { recursive: true });
     let used = 0;
+    const groups = new Map<string, { size: number; mtime: number; files: string[] }>();
     const cacheRoot = path.join(this.root, 'render-cache');
     for (const config of await fs.readdir(cacheRoot)) {
       const dir = path.join(cacheRoot, config);
@@ -69,15 +70,31 @@ export class RenderCache {
           file !== `${this.file(id)}.json` &&
           file !== `${this.file(id)}.receipt.json` &&
           file !== `${this.file(id)}.layout.json`
-        )
-          used += (await fs.stat(file)).size;
+        ) {
+          const stat = await fs.stat(file);
+          used += stat.size;
+          const key = file.replace(/\.(receipt|layout)\.json$|\.json$/, '');
+          const group = groups.get(key) ?? { size: 0, mtime: 0, files: [] };
+          group.size += stat.size;
+          group.mtime = Math.max(group.mtime, stat.mtimeMs);
+          group.files.push(file);
+          groups.set(key, group);
+        }
       }
     }
     const metadata = await fs.readFile(`${source}.json`).catch(() => Buffer.alloc(0));
     const receipt = await fs.readFile(`${source}.receipt.json`).catch(() => Buffer.alloc(0));
     const layout = await fs.readFile(`${source}.layout.json`).catch(() => Buffer.alloc(0));
-    if (used + bytes.length + metadata.length + receipt.length + layout.length > this.maxBytes)
-      throw new Error('Render cache limit reached (200 MB).');
+    const incoming = bytes.length + metadata.length + receipt.length + layout.length;
+    if (used + incoming > this.maxBytes) {
+      // Evict the oldest cached renders first. Renders are regenerable; checkpoints are not touched.
+      for (const group of [...groups.values()].sort((a, b) => a.mtime - b.mtime)) {
+        if (used + incoming <= this.maxBytes) break;
+        for (const file of group.files) await fs.rm(file, { force: true });
+        used -= group.size;
+      }
+      if (used + incoming > this.maxBytes) throw new Error('Render cache limit reached (200 MB).');
+    }
     await atomicWrite(this.file(id), bytes);
     try {
       await atomicWrite(`${this.file(id)}.json`, await fs.readFile(`${source}.json`));

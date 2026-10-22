@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { HistoryStore, hashBytes, atomicWrite } from '../store/store';
+import { HistoryStore, hashBytes } from '../store/store';
 import type { Checkpoint } from '../bridge/timeline';
 import { declarationChanges, applyUnits, type CssUnit } from './change-units';
 import { validateGuard, type LayoutGuard } from '../layout/types';
@@ -105,12 +105,7 @@ export async function prepareRollback(
     declarationChanges(p, after, text); // Later structural edits are not silently rebased.
     const bytes = Buffer.from(inverseCss(text, chosen));
     now.hash = hashBytes(bytes);
-    let used = 0;
-    for (const dir of ['blobs', 'manifests'])
-      for (const name of await fs.readdir(path.join(store.root, dir)))
-        used += (await fs.stat(path.join(store.root, dir, name))).size;
-    if (used + bytes.length > store.quotaBytes) throw new Error('Storage limit reached.');
-    await atomicWrite(path.join(store.root, 'blobs', now.hash), bytes);
+    await store.putBlob(now.hash, bytes);
     now.size = bytes.length;
   }
   const { id: _id, ...body } = current;

@@ -438,6 +438,7 @@ export function mergeMultiElements(
       const targetBlob = path.join(store.root, 'blobs', mergedHash);
       if (!fs.existsSync(targetBlob)) {
         fs.writeFileSync(targetBlob, mergedBytes);
+        store.invalidateUsed();
       }
       files.set(docPath, {
         path: docPath,

@@ -76,9 +76,13 @@ test('cache prepares once, repeat selections require no render, config invalidat
     expect(await different.get(a.id)).toBeUndefined();
     await expect(new RenderCache(store.root, 'limit', 1).put(a.id, image)).rejects.toThrow('limit');
     const totalSize = (await fs.stat(image)).size * 2;
+    // At the shared cap the oldest cached renders are evicted instead of failing.
     await expect(
       new RenderCache(store.root, 'different-generation', totalSize).put(a.id, image)
-    ).rejects.toThrow('limit');
+    ).resolves.toContain('different-generation');
+    expect(
+      (await fs.readdir(path.join(store.root, 'render-cache', 'different-generation'))).length
+    ).toBeGreaterThan(0);
     await cache.clear();
     expect(await cache.get(a.id)).toBeUndefined();
   } finally {

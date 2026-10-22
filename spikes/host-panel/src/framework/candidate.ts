@@ -3,12 +3,11 @@
 // exclusive styles from imported stylesheets (.css/.scss/.less) or SFC
 // <style> blocks. Mirrors the safety posture of branches/element.ts:
 // unique match or refusal, shared styles stay current.
-import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import postcss from 'postcss';
 import postcssScss from 'postcss-scss';
 import postcssLess from 'postcss-less';
-import { HistoryStore, hashBytes, atomicWrite, safePath } from '../store/store';
+import { HistoryStore, hashBytes, safePath } from '../store/store';
 import type { Checkpoint } from '../bridge/timeline';
 import { indexJsx } from './jsx';
 import { indexSfc } from './sfc';
@@ -261,12 +260,7 @@ export async function frameworkElementCandidate(
     const bytes = Buffer.from(text);
     f.hash = hashBytes(bytes);
     f.size = bytes.length;
-    let used = 0;
-    for (const dir of ['blobs', 'manifests'])
-      for (const name of await fs.readdir(path.join(store.root, dir)))
-        used += (await fs.stat(path.join(store.root, dir, name))).size;
-    if (used + bytes.length > store.quotaBytes) throw new Error('Storage limit reached.');
-    await atomicWrite(path.join(store.root, 'blobs', f.hash), bytes);
+    await store.putBlob(f.hash, bytes);
   }
   const { id: _id, ...body } = current;
   void _id;

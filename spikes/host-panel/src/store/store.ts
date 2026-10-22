@@ -357,6 +357,37 @@ export class HistoryStore {
     return path.join(this.root, 'render-timings.json');
   }
 
+  private usedCache?: number;
+  /** Drop the cached used-bytes figure; the next quota check rescans once. */
+  invalidateUsed() {
+    this.usedCache = undefined;
+  }
+  /** Bytes in blobs/ and manifests/. Scanned once, then maintained on writes. */
+  async usedBytes(): Promise<number> {
+    if (this.usedCache === undefined) {
+      let used = 0;
+      for (const dir of ['blobs', 'manifests'])
+        for (const name of await fs.readdir(path.join(this.root, dir)))
+          used += (await fs.stat(path.join(this.root, dir, name))).size;
+      this.usedCache = used;
+    }
+    return this.usedCache;
+  }
+  private addUsed(bytes: number) {
+    if (this.usedCache !== undefined) this.usedCache += bytes;
+  }
+  /** Quota-checked blob write shared by every caller; a blob already stored costs nothing. */
+  async putBlob(hash: string, bytes: Uint8Array, message = 'Storage limit reached.') {
+    const file = path.join(this.root, 'blobs', hash);
+    const exists = await fs.stat(file).then(
+      () => true,
+      () => false
+    );
+    if (!exists && (await this.usedBytes()) + bytes.length > this.quotaBytes)
+      throw new Error(message);
+    await atomicWrite(file, bytes);
+    if (!exists) this.addUsed(bytes.length);
+  }
   async commit(
     files: TrackedFile[],
     contents: Map<string, Buffer>,
@@ -364,10 +395,7 @@ export class HistoryStore {
     attribution: Attribution,
     alternative?: { parentId: string; branch: { id: string; name: string } }
   ): Promise<Checkpoint> {
-    let used = 0;
-    for (const dir of ['blobs', 'manifests'])
-      for (const name of await fs.readdir(path.join(this.root, dir)))
-        used += (await fs.stat(path.join(this.root, dir, name))).size;
+    const used = await this.usedBytes();
     const additions = new Map<string, Buffer>();
     for (const f of files) {
       const bytes = contents.get(f.path);
@@ -400,9 +428,12 @@ export class HistoryStore {
       this.quotaBytes
     )
       throw new Error('Storage limit reached. Increase quota.');
-    for (const [hash, bytes] of additions)
+    for (const [hash, bytes] of additions) {
       await atomicWrite(path.join(this.root, 'blobs', hash), bytes);
+      this.addUsed(bytes.length);
+    }
     await atomicWrite(path.join(this.root, 'manifests', `${c.id}.json`), json);
+    this.addUsed(Buffer.byteLength(json));
     this.checkpoints.push(c);
     this.checkpoints.sort((a, b) => Number(!a.branch) - Number(!b.branch));
     await atomicWrite(
@@ -423,6 +454,7 @@ export class HistoryStore {
       removedBytes += stat.size;
       await fs.unlink(file);
     }
+    this.invalidateUsed();
     return removedBytes;
   }
   async materialize(c: Checkpoint, destination: string) {

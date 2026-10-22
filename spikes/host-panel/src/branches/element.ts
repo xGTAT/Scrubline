@@ -1,10 +1,9 @@
 import { adapter } from 'parse5-htmlparser2-tree-adapter';
 import { selectAll } from 'css-select';
-import * as fs from 'node:fs/promises';
 import { parse, parseFragment, serialize } from 'parse5';
 import postcss from 'postcss';
 import * as path from 'node:path';
-import { HistoryStore, hashBytes, atomicWrite, safePath } from '../store/store';
+import { HistoryStore, hashBytes, safePath } from '../store/store';
 import type { Checkpoint } from '../bridge/timeline';
 interface HtmlNode {
   tagName?: string;
@@ -404,12 +403,7 @@ async function materializeCandidate(
     const bytes = Buffer.from(text);
     f.hash = hashBytes(bytes);
     f.size = bytes.length;
-    let used = 0;
-    for (const dir of ['blobs', 'manifests'])
-      for (const name of await fs.readdir(path.join(store.root, dir)))
-        used += (await fs.stat(path.join(store.root, dir, name))).size;
-    if (used + bytes.length > store.quotaBytes) throw new Error('Storage limit reached.');
-    await atomicWrite(path.join(store.root, 'blobs', f.hash), bytes);
+    await store.putBlob(f.hash, bytes);
   }
   const { id: _id, ...body } = current;
   void _id;
