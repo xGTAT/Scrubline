@@ -84,27 +84,38 @@ export async function captureStructuralFingerprint(
           const roleSel = `[role="${role}"]`;
           if (document.querySelectorAll(roleSel).length === 1) return roleSel;
         }
-        // Build path relative to parent
-        const parent = el.parentElement;
-        if (!parent || parent === document.body) {
-          const siblings = parent ? Array.from(parent.children) : [];
-          const sameTag = siblings.filter((s) => s.tagName === el.tagName);
-          return sameTag.length === 1 ? tag : `${tag}:nth-of-type(${sameTag.indexOf(el) + 1})`;
+        // Full ancestor path from <body>, so same-shaped siblings in different containers never collide.
+        const parts: string[] = [];
+        let cur: Element | null = el;
+        while (cur && cur !== document.body && cur !== document.documentElement) {
+          const par: Element | null = cur.parentElement;
+          const name = cur.tagName.toLowerCase();
+          if (!par) {
+            parts.unshift(name);
+            break;
+          }
+          const same = Array.from(par.children).filter((c) => c.tagName === cur!.tagName);
+          parts.unshift(same.length === 1 ? name : `${name}:nth-of-type(${same.indexOf(cur) + 1})`);
+          cur = par;
         }
-        const siblings = Array.from(parent.children).filter((s) => s.tagName === el.tagName);
-        const index = siblings.indexOf(el) + 1;
-        return `${parent.tagName.toLowerCase()} > ${tag}:nth-of-type(${index})`;
+        return parts.join(' > ');
       };
 
       const nodes: StructuralNodeFingerprint[] = [];
       queryMatches.forEach((el) => {
         const tag = el.tagName.toLowerCase();
-        if (['script', 'style', 'link', 'meta', 'noscript'].includes(tag)) return;
+        if (
+          ['html', 'head', 'title', 'base', 'script', 'style', 'link', 'meta', 'noscript'].includes(
+            tag
+          )
+        )
+          return;
 
         const rect = el.getBoundingClientRect();
         const style = window.getComputedStyle(el);
         const isTarget = targetEl ? el === targetEl : false;
         const isSibling = targetSiblings.includes(el);
+        const containsTarget = targetEl ? el !== targetEl && el.contains(targetEl) : false;
 
         const box: BoundingBox = {
           x: Math.round(rect.x),
@@ -139,6 +150,7 @@ export async function captureStructuralFingerprint(
           className: el.className ? String(el.className) : undefined,
           isTarget,
           isSibling,
+          containsTarget,
           box,
           styles: computed,
           present: true,

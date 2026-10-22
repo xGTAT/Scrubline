@@ -26,6 +26,8 @@ export interface StructuralNodeFingerprint {
   className?: string;
   isTarget: boolean;
   isSibling: boolean;
+  /** True when this element contains the target, so its appearance legitimately changes with it. */
+  containsTarget?: boolean;
   box: BoundingBox;
   styles: ComputedStyles;
   present: boolean;

@@ -64,6 +64,7 @@ export class DualVerificationEngine {
       .filter(
         (n) =>
           !n.isTarget &&
+          !n.containsTarget &&
           (n.isSibling || ['header', 'nav', 'main', 'footer', 'aside'].includes(n.tag))
       )
       .map((n) => n.selector);

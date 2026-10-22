@@ -8,7 +8,10 @@ import { Restore } from '../../src/review/restore';
 import { elementCandidate } from '../../src/branches/element';
 import { applySelective } from '../../src/branches/apply';
 import { DualVerificationEngine } from '../../src/verification/engine';
-import { validateStructuralInvariants } from '../../src/verification/structural';
+import {
+  captureStructuralFingerprint,
+  validateStructuralInvariants
+} from '../../src/verification/structural';
 import { compareRgbaBuffers } from '../../src/verification/visual';
 import type { StructuralFingerprint } from '../../src/verification/types';
 
@@ -468,6 +471,84 @@ test('live targeted visual comparison detects mutated elements and generates dif
     expect(cleanReport.status).toBe('passed');
     expect(cleanReport.structuralViolations).toHaveLength(0);
     expect(cleanReport.visualDiffs.every((d) => d.passed)).toBe(true);
+  } finally {
+    await browser.close();
+  }
+}, 25000);
+
+test('live protect-all verification ignores non-rendered head, title and html nodes', async () => {
+  const { chromium } = await import('playwright-core');
+  const browser = await chromium.launch({ headless: true, args: ['--disable-gpu'] });
+  try {
+    const page = async (label: string) => {
+      const p = await browser.newPage({ viewport: { width: 800, height: 600 } });
+      await p.setContent(`<!DOCTYPE html>
+        <html><head><title>Site</title></head><body>
+          <nav><a id="nav-link" href="/b">${label}</a></nav>
+          <main><p>Body copy</p></main>
+        </body></html>`);
+      return p;
+    };
+    const baselinePage = await page('Reserve');
+    const candidatePage = await page('Book now');
+    const report = await DualVerificationEngine.verifyPages({
+      candidatePage,
+      baselinePage,
+      targetSelector: '#nav-link',
+      options: { protectAllElements: true, captureVisualDiffs: false }
+    });
+    const tags = report.structuralViolations.map((v) => v.tag);
+    expect(tags).not.toContain('head');
+    expect(tags).not.toContain('title');
+    expect(tags).not.toContain('html');
+    expect(report.status).toBe('passed');
+  } finally {
+    await browser.close();
+  }
+}, 25000);
+
+test('live fingerprint selectors are unique for same-shaped elements in different containers', async () => {
+  const { chromium } = await import('playwright-core');
+  const browser = await chromium.launch({ headless: true, args: ['--disable-gpu'] });
+  try {
+    const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
+    await page.setContent(`<!DOCTYPE html><html><body>
+      <div class="a"><section><a href="/1">One</a><a href="/2">Two</a></section></div>
+      <div class="b"><section><a href="/3">Three</a><a href="/4">Four</a></section></div>
+    </body></html>`);
+    const fp = await captureStructuralFingerprint(page, undefined, [], true);
+    const anchors = fp.nodes.filter((n) => n.tag === 'a');
+    expect(anchors).toHaveLength(4);
+    expect(new Set(anchors.map((n) => n.selector)).size).toBe(4);
+  } finally {
+    await browser.close();
+  }
+}, 25000);
+
+test('live visual verification does not flag a container that holds the changed target', async () => {
+  const { chromium } = await import('playwright-core');
+  const browser = await chromium.launch({ headless: true, args: ['--disable-gpu'] });
+  try {
+    const make = async (label: string) => {
+      const p = await browser.newPage({ viewport: { width: 800, height: 600 } });
+      await p.setContent(`<!DOCTYPE html><html><body>
+        <nav id="top-nav" style="padding:10px;background:#eee"><a id="t" href="/b" style="display:inline-block;width:120px">${label}</a></nav>
+        <main style="padding:10px"><p>Body copy</p></main>
+      </body></html>`);
+      return p;
+    };
+    const baselinePage = await make('Reserve');
+    const historicalPage = await make('Booking');
+    const candidatePage = await make('Booking');
+    const report = await DualVerificationEngine.verifyPages({
+      candidatePage,
+      historicalPage,
+      baselinePage,
+      targetSelector: '#t',
+      options: { protectAllElements: true }
+    });
+    expect(report.visualDiffs.some((d) => d.selector === '#top-nav')).toBe(false);
+    expect(report.status).toBe('passed');
   } finally {
     await browser.close();
   }
